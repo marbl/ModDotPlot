@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# ModDotPlot
-=======
 ## Mod.Plot
 
 Mod.Plot is still early in development. We welcome your feedback and look forward to introducing even faster static plots, as well as a Graphical User Interface!
@@ -44,4 +41,3 @@ RScript moddotplot/heatmap.R -b CP086569.bed -p CP086569
 ```
 
 For good performance, we recommend using a modimizer density d <= 1Mbp of sequence. We also recommend rounding to a scalable number for heirarchical adjustments. For example, plotting a human Y chromosome should use d = 64.
->>>>>>> bc777c7 (0.1.0 initial commit)
