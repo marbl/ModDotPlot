@@ -1,47 +1,114 @@
-#TODO: Replace screed with a faster fasta farser
-import screed 
-import mmh3
-import math
+from typing import Generator, List
+import pysam
 
-def hash_kmer(kmer):
-    # calculate the reverse complement
-    orientation = 1
-    rc_kmer = screed.rc(kmer)
+def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
+    """
+    Given a DNA sequence and a value k, generate all k-mers from the sequence.
 
-    # determine whether original k-mer or reverse complement is lesser
-    if kmer < rc_kmer:
-        canonical_kmer = kmer
+    Args:
+    - sequence (str): a DNA sequence
+    - k (int): the length of the k-mers to generate
+
+    Yields:
+    - int: the hash value of each k-mer and its reverse complement
+
+    """
+
+    # Calculate the length of the sequence
+    n = len(sequence)
+
+    # Calculate a mask to use for masking off any bits outside of the k-mer range
+    mask = (1 << (3*k)) - 1
+
+    # Initialize the first k-mer and its reverse complement
+    kmer = 0
+    rc_kmer = 0
+    for i in range(k):
+        # Add the next base to the k-mer and its reverse complement
+        kmer = (kmer << 3) | encode_base(sequence[i])
+        rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (3*(k-1))
+
+    # Yield the hash value of the first k-mer and its reverse complement
+    yield hash(rc_kmer) if hash(rc_kmer) < hash(kmer) else hash(kmer)
+
+    # Generate the remaining k-mers
+    for i in range(k, n):
+        # Update the k-mer and its reverse complement by adding the next base and dropping the leftmost base
+        kmer = ((kmer << 3) & mask) | encode_base(sequence[i])
+        rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (3*(k-1))
+
+        # Yield the hash value of the current k-mer and its reverse complement
+        yield hash(rc_kmer) if hash(rc_kmer) < hash(kmer) else hash(kmer)
+
+
+def encode_base(base: str, reverse_complement: bool = False) -> int:
+    """Encode a DNA base to a numeric representation.
+
+    If `reverse_complement` is True, return the complement of the base instead.
+    """
+    if not reverse_complement:
+        if base == 'A':
+            return 0b000
+        elif base == 'C':
+            return 0b001
+        elif base == 'G':
+            return 0b010
+        elif base == 'T':
+            return 0b011
+        elif base == 'N':
+            return 0b100
+        else:
+            raise ValueError(f'Invalid DNA base: {base}')
     else:
-        canonical_kmer = rc_kmer
-        orientation = 0
+        if base == 'T':
+            return 0b111
+        elif base == 'G':
+            return 0b110
+        elif base == 'C':
+            return 0b101
+        elif base == 'A':
+            return 0b100
+        elif base == 'N':
+            return 0b011
+        else:
+            raise ValueError(f'Invalid DNA base: {base}')
 
-    # calculate murmurhash using a hash seed of 42
-    hashy = hash(canonical_kmer)
-    if hashy < 0: hashy += 2**64
+def report_all_kmers(sequence: str, k: int) -> List[int]:
+    """
+    Given a DNA sequence and an integer k, returns a list of all k-mers found in the sequence.
+    """
+    all_mers = []
+    # Generate all k-mers of length k using a bitmask
+    kmers = generate_kmers(sequence, k)
 
-    # done
-    return [hashy, orientation]
+    # Iterate through the k-mers and append them to the list
+    for kmer in kmers:
+        all_mers.append(kmer)
 
-def build_kmers(sequence, ksize):
-    kmers = []
-    orientation = []
-    n_kmers = len(sequence) - ksize + 1
-
-    for i in range(n_kmers):
-        kmer_hash = hash_kmer(sequence[i:i + ksize])
-        kmers.append(kmer_hash[0])
-        orientation.append(kmer_hash[1])
-
-    return kmers
+    return all_mers
 
 
-def read_kmers_from_file(filename, ksize):
+def read_kmers_from_file(filename: str, ksize: int) -> List[List[int]]:
+    """
+    Given a filename and an integer k, returns a list of all k-mers found in the sequences in the file.
+    """
     all_kmers = []
-    for record in screed.open(filename):
-        sequence = record.sequence
+    seq = pysam.FastaFile(filename)
 
-        kmers = build_kmers(sequence, ksize)
-        all_kmers += kmers
-
-    #print(all_kmers[1][0:10])
+    if len(seq.references) > 1:
+        #TODO: Add -x override
+        print(f"Multiple sequences detected, a bed file will be created for each. This behavior can be overriden with the -x command")
+    for seq_id in seq.references:
+        print(f"Retrieving k-mers from {seq_id}.... ")
+        all_kmers.append(report_all_kmers(seq.fetch(seq_id), ksize))
+        print(f"{seq_id} k-mers retrieved! ")
+    
     return all_kmers
+
+def get_input_headers(filename: str) -> List[str]:
+    header_list = []
+    seq = pysam.FastaFile(filename)
+    for seq_id in seq.references:
+        header_list.append(seq_id)
+
+    return header_list

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-from moddotplot.parse_fasta import read_kmers_from_file
-from estimate_identity import binomial_distance, containment, get_mods, partition_windows
+from moddotplot.parse_fasta import read_kmers_from_file, get_input_headers
+from moddotplot.estimate_identity import binomial_distance, containment, get_mods, partition_windows
+#from ...const import ASCII_ART
 import sys
 import argparse
 import logging
@@ -9,7 +10,10 @@ import pandas as pd
 import os
 import glob
 
-def paired_bed_file(window_partitions, input_name):
+def paired_bed_file(window_partitions, input_name, id_threshold):
+
+    assert id_threshold > 50 and id_threshold < 100
+
     cols = [
         '#query_name', 
         'query_start',
@@ -31,7 +35,7 @@ def paired_bed_file(window_partitions, input_name):
         reference_start = w[1].split("-")[0]
         reference_end = w[1].split("-")[1]
         perID = binomial_distance(containment(set(window_partitions[w[0]]), set(window_partitions[w[1]])),21)
-        if (perID*100 >= 80): 
+        if (perID*100 >= id_threshold): 
             # TODO: Incorporate strand data into bedfile
             bed.append([query_name, query_start, query_end, query_name, reference_start, reference_end, perID*100, '+'])
     df = pd.DataFrame(bed, columns=cols)
@@ -44,84 +48,99 @@ def get_args_parse():
 
     """
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter, description=__doc__,
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter, description="Mod.Plot, A Rapid and Interactive Visualization of Tandem Repeats.",
     )
-    mod_params = parser.add_argument_group(
-        "Specific Patient / library highlight commands"
-    )
-    mod_params.add_argument(
-        "-k", 
-        default=21,
-        help="Kmer size to use. Default: 21"
+
+    parser.add_argument(
+        "Input",
+        help="Path to input fasta file"
         )
 
-    mod_params.add_argument(
-        "-p",
-        "--prefix",
-        default=None,
-        help="Prefix for input sequence. Defaults to name in the index file.",
+    mod_params = parser.add_argument_group(
+        "Mod.Plot commands"
     )
 
     mod_params.add_argument(
-        "-o",
-        "--output-folder",
-        default=None,
-        help="Folder for output tables and plots. Defaults to modplot_output.bed",
+        "-k",
+        "--kmer",
+        default=21,
+        help="k-mer length"
     )
 
     mod_params.add_argument(
         "-d",
         '--density',
-        default=None,
-        help="Mod value. Default is to take d as close to 1Mbp. Eg: d=64 for the Y chromosome.",
+        help="Modimizer density value (default: d = 2/Mbp)",
+        default=argparse.SUPPRESS,
         type=int
     )
+
+    mod_params.add_argument(
+        "-r",
+        "--resolution",
+        default=1000,
+        type=int,
+        help="Dotplot resolution. Recommended > 500 for high quality dot plots"
+    )
+
+    mod_params.add_argument(
+        "-id",
+        "--identity",
+        default=80,
+        type=int,
+        help="Identity cutoff threshold"
+    )
+
+    mod_params.add_argument(
+        "-o",
+        "--dir",
+        default=argparse.SUPPRESS,
+        help="Folder for output tables and plots. Defaults to current directory",
+    )
+
     mod_params.add_argument(
         "-nc",
         '--non-canonical',
         default=False,
-        help="Only consider forward strand when computing kmers. Default = False"
+        help="Only consider forward strand when computing k-mers"
     )
 
     mod_params.add_argument(
         "-i",
-        "--input",
-        required=True,
-        help="Input sequence. Must be indexed with samtools faidx!"
+        "--interactive",
+        default=False,
+        help="Launch a interactive Dash application on localhost."
     )
 
     mod_params.add_argument(
-        "--index",
-        default=None,
-        help="Input sequence index. Default: input.fai"
-    )
-
-    mod_params.add_argument(
-        "-w",
-        "--window-size",
-        default=1000,
+        "--port",
+        default="8050",
         type=int,
-        help="Window size to use. Default = 1000"
+        help="Port number for launching interactive mode on localhost. Only used in interactive mode"
     )
+
     args = parser.parse_args()
 
     return args
 
 def main():
     args = get_args_parse()
-    #TODO: Check fasta index file
+    # Validate input sequence, display warning if multiple fasta files are shown:
     print("Parsing k-mers...")
-    kmer_list = read_kmers_from_file(args.input, args.k)
+    headers = get_input_headers(args.Input)
+    kmer_list = read_kmers_from_file(args.Input, args.kmer)
     print("K-mers parsed!")
-    logging.info("Computing modimizers...")
-    mod_list = get_mods(kmer_list, args.density)
-    print("Modimizers done!")
-    print("Creating coordinates...")
-    windows = partition_windows(mod_list)
-    print("Coordinates done!")
-    print("Computing identity...")
-    paired_bed_file(windows, args.prefix)
-    print("Bed file created!")
+    for seq in range(len(headers)):
+        print(f" Computing modimizers for {headers[seq]}...")
+        #TODO: Function to auto-determine density
+        mod_list = get_mods(kmer_list[seq], args.density)
+        print("Modimizers done!")
+        print("Creating coordinates...")
+        windows = partition_windows(mod_list, args.resolution)
+        print("Coordinates done!")
+        print("Computing identity...")
+        paired_bed_file(windows, headers[seq], args.identity)
+        print("Bed file created!")
 
 if __name__ == "__main__":
     main()

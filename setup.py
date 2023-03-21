@@ -13,7 +13,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         "pysam",
-        "numpy",
+        "pandas",
     ],
     python_requires=">=3.7",
     author_email="asweeten@cs.jhu.edu",
