@@ -14,6 +14,11 @@ setup(
     install_requires=[
         "pysam",
         "pandas",
+        "plotly",
+        "matplotlib",
+        "dash",
+        "plotnine",
+        "patchworklib"
     ],
     python_requires=">=3.7",
     author_email="asweeten@cs.jhu.edu",
