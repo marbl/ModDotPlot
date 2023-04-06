@@ -1,7 +1,7 @@
 import os
 from setuptools import setup, find_packages
 
-from const import VERSION
+from moddotplot.const import VERSION
 
 SCRIPT = "./moddotplot/__main__.py"
 print("Setup of version " + VERSION + " of: " + os.path.abspath(SCRIPT))
