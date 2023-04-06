@@ -12,6 +12,14 @@ View our [Biological Data Science poster](https://docs.google.com/presentation/d
 
 `cd ModDotPlot`
 
+Although optional, it's recommended to setup a virtual environment before using Mod.Plot:
+
+`python -m venv venv`
+
+`source venv/bin/activate`
+
+Once activated, you can install the reuqired dependencies:
+
 `python setup.py install`
 
 ## Usage
