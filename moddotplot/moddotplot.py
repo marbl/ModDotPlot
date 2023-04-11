@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 from moddotplot.parse_fasta import read_kmers_from_file, get_input_headers
-from moddotplot.estimate_identity import binomial_distance, containment, get_mods, partition_windows
+from moddotplot.estimate_identity import get_mods, partition_windows
 from moddotplot.interactive import run_dash
-from moddotplot.interactive import get_custom_mods, create_custom_coordinates, get_matrix, run_dash 
 from moddotplot.const import ASCII_ART
 import argparse
-import logging
-import itertools
 import pandas as pd
-import os
 import math
-import glob
 from moddotplot.static_plots import paired_bed_file
+
 
 def get_args_parse():
     """
@@ -19,12 +15,11 @@ def get_args_parse():
 
     """
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter, description="Mod.Plot, A Rapid and Interactive Visualization of Tandem Repeats.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Mod.Plot, A Rapid and Interactive Visualization of Tandem Repeats.",
     )
 
-    req_params = parser.add_argument_group(
-        "Required input"
-    )
+    req_params = parser.add_argument_group("Required input")
 
     req_params.add_argument(
         "-i",
@@ -33,117 +28,90 @@ def get_args_parse():
         default=argparse.SUPPRESS,
         help="Path to input fasta file(s)",
         nargs="+",
-        )
+    )
 
-    dist_params = parser.add_argument_group(
-        "Mod.Plot distance matrix commands"
+    dist_params = parser.add_argument_group("Mod.Plot distance matrix commands")
+
+    dist_params.add_argument(
+        "-k", "--kmer", default=21, help="k-mer length. Must be < 32"
     )
 
     dist_params.add_argument(
-        "-k",
-        "--kmer",
-        default=21,
-        help="k-mer length. Must be < 32"
-    )
-
-    dist_params.add_argument(
-        "-d",
-        '--density',
-        help="Modimizer density value",
+        "-s",
+        "--sparsity",
+        help="Modimizer sparsity value. Higher value will reduce the number of modimizers, but will increase performance. Default set to 2 per Mbp of sequence, rounded up to nearest even integer)",
         default=None,
-        type=int
+        type=int,
     )
 
     dist_params.add_argument(
-        "-r",
-        "--resolution",
-        default=1000,
-        type=int,
-        help="Dotplot resolution"
+        "-r", "--resolution", default=1000, type=int, help="Dotplot resolution."
     )
 
     dist_params.add_argument(
-        "-id",
-        "--identity",
-        default=80,
-        type=int,
-        help="Identity cutoff threshold"
+        "-id", "--identity", default=80, type=int, help="Identity cutoff threshold."
     )
 
     dist_params.add_argument(
         "-o",
         "--output",
         default=argparse.SUPPRESS,
-        help="Name for bed file and plots. Defaults to input fasta name",
+        help="Name for bed file and plots. Defaults to input fasta name.",
     )
 
     dist_params.add_argument(
         "-nc",
-        '--non-canonical',
+        "--non-canonical",
         default=False,
-        help="Only consider forward strand when computing k-mers"
+        help="Only consider forward strand when computing k-mers.",
     )
 
-    plot_params = parser.add_argument_group(
-        "Static plotting commands"
+    plot_params = parser.add_argument_group("Static plotting commands")
+
+    plot_params.add_argument(
+        "--no-bed", action="store_true", help="Don't output bed file."
     )
 
     plot_params.add_argument(
-        "--no-bed",
-        action='store_true',
-        help="Don't output bed file"
-    )
-
-    plot_params.add_argument(
-        "--no-diag",
-        action='store_true',
-        help="Don't output diagonal plot"
-    )
-
-    plot_params.add_argument(
-        "--no-pairwise",
-        action='store_true',
-        help="Don't output pairwise plot"
+        "--no-plot", action="store_true", help="Don't output image plots."
     )
 
     plot_params.add_argument(
         "--num-colors",
         default=11,
         type=int,
-        help="Number of colors to map. Must be < 15"
+        help="Number of colors to map. Must be < 15.",
     )
 
-    interactive_params = parser.add_argument_group(
-        "Interactive plotting commands"
-    )
+    interactive_params = parser.add_argument_group("Interactive plotting commands")
 
     interactive_params.add_argument(
         "--interactive",
-        action='store_true',
-        help="Launch a interactive Dash application on localhost."
+        action="store_true",
+        help="Launch a interactive Dash application on localhost.",
     )
 
     interactive_params.add_argument(
         "--port",
         default="8050",
         type=int,
-        help="Port number for launching interactive mode on localhost. Only used in interactive mode"
+        help="Port number for launching interactive mode on localhost. Only used in interactive mode.",
     )
 
-    logging_params = parser.add_argument_group(
-        "Logging options"
+    logging_params = parser.add_argument_group("Logging options")
+
+    logging_params.add_argument(
+        "-q", "--quiet", action="store_true", help="Supress help text when running."
     )
 
     logging_params.add_argument(
-        "-q",
-        "--quiet",
-        action='store_true',
-        help="Supress "
+        "-v", "--verbose", action="store_true", help="Add additional ."
     )
 
     args = parser.parse_args()
 
     return args
+
 
 def main():
     print(ASCII_ART)
@@ -154,22 +122,35 @@ def main():
         kmer_list = read_kmers_from_file(i, args.kmer)
 
         for seq in range(len(headers)):
+            if not args.sparsity:
+                # Get input sequence length
+                args.sparsity = math.ceil(len(kmer_list[seq]) / 500000)
+                print(f"Density not provided. Using d = {args.sparsity}. \n")
             if args.interactive:
-                run_dash(kmer_list[seq], args.resolution)
+                # Modimizers computed at runtime using Dash
+                # TODO: Add Jaccard coefficient as argument
+                run_dash(
+                    kmer_list[seq],
+                    args.resolution,
+                    args.sparsity,
+                    args.kmer,
+                    args.identity,
+                    args.port,
+                    False,
+                )
             else:
                 print(f"Computing modimizers for {headers[seq]}... \n")
-                if not args.density:
-                    # Get input sequence length
-                    args.density = math.ceil(len(kmer_list[seq])/500000)
-                    print(f"Density not provided. Using d = {args.density}. \n")
-                mod_list = get_mods(kmer_list[seq], args.density)
+                mod_list = get_mods(kmer_list[seq], args.sparsity)
                 print("Modimizers done! \n")
                 print("Creating coordinates...\n")
                 windows = partition_windows(mod_list, args.resolution)
                 print("Coordinates done! \n")
                 print("Computing identity... \n")
-                paired_bed_file(windows, headers[seq], args.identity, args.density, None)
+                paired_bed_file(
+                    windows, headers[seq], args.identity, args.sparsity, None
+                )
                 print("Bed file created!")
+
 
 if __name__ == "__main__":
     main()
