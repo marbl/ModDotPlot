@@ -4,7 +4,6 @@ from moddotplot.estimate_identity import get_mods, partition_windows
 from moddotplot.interactive import run_dash
 from moddotplot.const import ASCII_ART
 import argparse
-import pandas as pd
 import math
 from moddotplot.static_plots import paired_bed_file
 
