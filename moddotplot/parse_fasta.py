@@ -58,7 +58,7 @@ def encode_base(base: str, reverse_complement: bool = False) -> int:
         elif base == 'N':
             return 0b100
         else:
-            raise ValueError(f'Invalid DNA base: {base}')
+            return 0b100
     else:
         if base == 'T':
             return 0b111
@@ -71,7 +71,7 @@ def encode_base(base: str, reverse_complement: bool = False) -> int:
         elif base == 'N':
             return 0b011
         else:
-            raise ValueError(f'Invalid DNA base: {base}')
+            return 0b100
 
 def report_all_kmers(sequence: str, k: int) -> List[int]:
     """
@@ -97,11 +97,11 @@ def read_kmers_from_file(filename: str, ksize: int) -> List[List[int]]:
 
     if len(seq.references) > 1:
         #TODO: Add -x override
-        print(f"Multiple sequences detected, a bed file will be created for each. This behavior can be overriden with the -x command")
+        print(f"Multiple sequences detected! \n")
     for seq_id in seq.references:
-        print(f"Retrieving k-mers from {seq_id}.... ")
+        print(f"Retrieving k-mers from {seq_id}.... \n")
         all_kmers.append(report_all_kmers(seq.fetch(seq_id), ksize))
-        print(f"{seq_id} k-mers retrieved! ")
+        print(f"{seq_id} k-mers retrieved! \n")
     
     return all_kmers
 
