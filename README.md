@@ -61,7 +61,7 @@ This is the value used selecting modimizers using `0 mod s`, an inverse of the s
 
 `-o / --output <string>`
 
-Name of output bed file & plots. Default is `INPUT_FASTA_FILE`_`SEQUENCE_HEADER`.
+Name of output bed file & plots. Default is `<INPUT_FASTA_FILE>_<SEQUENCE_HEADER>`.
 
 `--identity <int>`
 
@@ -93,6 +93,14 @@ By default, histograms are evenly spaced based on the number of colors and the i
 
 Set the number of colors used in the plot. Default: 11. 
 
+Although deprecated, there is an R script you can use to plot directly from a bed file. ggplot2 and cowplot are required. You can call this Rscript through the following: 
+
+```
+Rscript moddotplot/plot.r -b <BED_FILE> -p <OUTPUT_FOLDER>
+```
+
+With `--bin-freq` being an optional argument to specify histogram binning by frequency, as noted above.
+
 --- 
 
 ### Interactive Mode
@@ -105,7 +113,7 @@ moddotplot -i INPUT_FASTA_FILE(S) --interactive
 
 This will launch a Dash application on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot. The default port number used by Dash is `8050`, but this can be customized using the `--port` command.
 
-Running interactive mode on an HPC environment can be accomplished through the use of port forwarding. On your HPC environment, run Mod.Plot as normal:
+Running interactive mode on an HPC environment can be accomplished through the use of port forwarding. On your remote server, run Mod.Plot as normal:
 
 ```
 moddotplot -i INPUT_FASTA_FILE(S) --interactive --port HPC_PORT_NUMBER
@@ -117,7 +125,7 @@ Then on your local machine, set up port forwarding run:
 ssh -N -f -L LOCAL_PORT_NUMBER:127.0.0.1:HPC_PORT_NUMBER HPC@LOGIN.CREDENTIALS
 ```
 
-You should now be able to view interactive mode using `http://127.0.0.1:<LOCAL_PORT_NUMBER>`. Note that your own HPC environemnt may have specific instructions and/or restrictions for setting up port forwarding.
+You should now be able to view interactive mode using `http://127.0.0.1:<LOCAL_PORT_NUMBER>`. Note that your own HPC environment may have specific instructions and/or restrictions for setting up port forwarding.
 
 --- 
 
@@ -160,6 +168,8 @@ Plots saved!
 ```
 ![](images/Chr1_cen.png)
 
+
+
 --- 
 
 ### Sample run - interactive mode
@@ -188,7 +198,7 @@ Dash is running on http://127.0.0.1:8050/
 
 ![](images/plotly_icons.png)
 
-The plotly plot can be navigated using the zoom (magnifying glass) and pan (hand) icons. The current plot can be downloaded as an image with the camera icon. Depending on sparsity value, plots may need some time to refresh. Set he lock resolution button to prevent
+The plotly plot can be navigated using the zoom (magnifying glass) and pan (hand) icons. The current plot can be downloaded as an image with the camera icon. Depending on sparsity value, plots may need some time to refresh. The plot can be reset by double-clicking or selecting the home button. Set the lock resolution button to prevent auto-scaling using modimizers.
 
 --- 
 
