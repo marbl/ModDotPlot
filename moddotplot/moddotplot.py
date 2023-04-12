@@ -5,7 +5,7 @@ from moddotplot.interactive import run_dash
 from moddotplot.const import ASCII_ART
 import argparse
 import math
-from moddotplot.static_plots import paired_bed_file
+from moddotplot.static_plots import create_plots, paired_bed_file
 
 
 def get_args_parse():
@@ -82,6 +82,12 @@ def get_args_parse():
         help="Number of colors to map. Must be < 15.",
     )
 
+    plot_params.add_argument(
+        "--bin-freq",
+        action="store_true",
+        help="By default, histograms are evenly spaced based on the number of colors and the identity threshold. Select this argument to bin based on the frequency of observed identity values."
+    )
+
     interactive_params = parser.add_argument_group("Interactive plotting commands")
 
     interactive_params.add_argument(
@@ -145,10 +151,10 @@ def main():
                 windows = partition_windows(mod_list, args.resolution)
                 print("Coordinates done! \n")
                 print("Computing identity... \n")
+                #TODO: Get output from args
                 paired_bed_file(
-                    windows, headers[seq], args.identity, args.sparsity, None
+                    windows, headers[seq], args.identity, args.sparsity, None, len(kmer_list[0]), args.no_plot 
                 )
-                print("Bed file created!")
 
 
 if __name__ == "__main__":

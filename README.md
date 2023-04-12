@@ -143,14 +143,11 @@ $ moddotplot -i test/Chr1_cen.fa
 | )   ( || (___) || (__/  )   _   | )      | (____/\| (___) |   | |   
 |/     \|(_______)(______/   (_)  |/       (_______/(_______)   )_(   
 
+Retrieving k-mers from Chr1_cen.... 
 
-Retrieving k-mers from Chr1:14000000-18000000.... 
+Chr1_cen k-mers retrieved! 
 
-Chr1:14000000-18000000 k-mers retrieved! 
-
-Computing modimizers for Chr1:14000000-18000000... 
-
-- Density not provided. Genome size ~ 4Mbp. Using d = 8. 
+Computing modimizers for Chr1_cen... 
 
 Modimizers done! 
 
@@ -160,15 +157,17 @@ Coordinates done!
 
 Computing identity... 
 
-Identity matrix complete! Bed file output
+Identity computed! Saved to Chr1_cen.bed 
 
-Saving plots...
+Creating plots... 
 
-Plots saved!
+Plots created! 
+
+Saving plots to Chr1_cen.pdf... 
+
+Chr1_cen.pdf saved sucessfully. Thanks for using Mod.Plot!
 ```
 ![](images/Chr1_cen.png)
-
-
 
 --- 
 
