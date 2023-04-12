@@ -198,13 +198,13 @@ def diamond(row):
 
 
 def make_tri(df_d, title_name, seq_length):
-    output_list = [i * round(seq_length / 1000000, 1) / 5 for i in range(6)]
+    #output_list = [i * round(seq_length / 1000000, 1) / 5 for i in range(5)]
     p_tri = (
         ggplot(df_d)
         + aes(x="w_new", y="z_new", group="group", fill="discrete")
         + geom_polygon()
         + scale_color_discrete(guide=False)
-        + scale_x_continuous(labels=output_list)
+        #+ scale_x_continuous(labels=output_list)
         + scale_fill_gradientn(  # TODO: Replace this with built in color palettes.
             colors=[
                 "#5E4FA2",
