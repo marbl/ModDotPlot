@@ -20,6 +20,17 @@ def partition_windows(kmer_list, resolution):
         thousand_dict[name] = kmer_list[start_size:end_size]
     return thousand_dict
 
+def create_coordinates(kmer_list, resolution):
+    zoomed_limit = math.floor(len(kmer_list)/resolution)
+    print(zoomed_limit)
+    tmp = []
+    for k in range(resolution):
+        tmp.append(set())
+        for j in range(zoomed_limit):
+            tmp[k].add(kmer_list[(k*zoomed_limit)+j])
+
+    return tmp
+
 def binomial_distance(containment_value,kmer_value):
     return math.pow(containment_value, (1/kmer_value))
 
@@ -29,3 +40,13 @@ def containment(set1,set2):
         return float(len(intersection)/len(set1))
     except:
         return 0
+
+def jaccard(set1,set2):
+    intersection = set1.intersection(set2)
+    try:
+        return float(len(intersection)/(len(set1) + len(set2) - len(intersection)))
+    except:
+        return 0
+
+def poisson_distance(jaccard_value,kmer_value):
+    return (-1/kmer_value)*math.log((2*jaccard_value/(1+jaccard_value)))
