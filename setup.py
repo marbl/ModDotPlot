@@ -17,6 +17,7 @@ setup(
         "plotly",
         "matplotlib",
         "dash",
+        "dash_daq",
         "plotnine",
         "patchworklib"
     ],
