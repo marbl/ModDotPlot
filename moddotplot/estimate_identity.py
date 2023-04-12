@@ -22,7 +22,6 @@ def partition_windows(kmer_list, resolution):
 
 def create_coordinates(kmer_list, resolution):
     zoomed_limit = math.floor(len(kmer_list)/resolution)
-    print(zoomed_limit)
     tmp = []
     for k in range(resolution):
         tmp.append(set())
