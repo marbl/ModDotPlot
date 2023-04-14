@@ -110,7 +110,7 @@ def get_args_parse():
     )
 
     logging_params.add_argument(
-        "-v", "--verbose", action="store_true", help="Add additional ."
+        "-v", "--verbose", action="store_true", help="Add additional logging info when running."
     )
 
     args = parser.parse_args()
@@ -148,7 +148,7 @@ def main():
                 mod_list = get_mods(kmer_list[seq], args.sparsity)
                 print("Modimizers done! \n")
                 print("Creating coordinates...\n")
-                windows = partition_windows(mod_list, args.resolution)
+                windows = partition_windows(mod_list, len(kmer_list[seq]), args.resolution)
                 print("Coordinates done! \n")
                 print("Computing identity... \n")
                 paired_bed_file(
