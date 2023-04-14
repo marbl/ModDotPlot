@@ -1,4 +1,4 @@
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 COLS = [
     "#query_name",
     "query_start",
