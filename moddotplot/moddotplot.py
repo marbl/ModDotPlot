@@ -54,8 +54,8 @@ def get_args_parse():
     dist_params.add_argument(
         "-o",
         "--output",
-        default=argparse.SUPPRESS,
-        help="Name for bed file and plots. Defaults to input fasta name.",
+        default=None,
+        help="Name for bed file and plots. Will be set to input fasta file name if not provided.",
     )
 
     dist_params.add_argument(
@@ -151,13 +151,12 @@ def main():
                 windows = partition_windows(mod_list, args.resolution)
                 print("Coordinates done! \n")
                 print("Computing identity... \n")
-                # TODO: Get output from args
                 paired_bed_file(
                     windows,
                     headers[seq],
                     args.identity,
                     args.sparsity,
-                    None,
+                    args.output,
                     len(kmer_list[0]),
                     args.no_plot,
                 )

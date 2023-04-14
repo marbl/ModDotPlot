@@ -91,7 +91,7 @@ def paired_bed_file(
             print(f"Thanks for using Mod.Plot!")
         else:
             print(f"Creating plots... \n")
-            create_plots([df], input_name, seq_length)
+            create_plots([df], None, input_name, seq_length)
     else:
         bedfile_output = output + ".bed"
         df.to_csv(bedfile_output, sep="\t")
@@ -100,7 +100,7 @@ def paired_bed_file(
             print(f"Thanks for using Mod.Plot!")
         else:
             print(f"Creating plots... \n")
-            create_plots([df], output, seq_length)
+            create_plots([df], output, input_name, seq_length)
 
 
 def get_colors(sdf, ncolors, is_freq):
@@ -277,7 +277,7 @@ def make_hist(sdf):
     return p
 
 
-def create_plots(sdf, output, seq_length):
+def create_plots(sdf, output, input_sequence, seq_length):
 
     df = read_df(sdf)
     Qs = np.unique(df["q"])
@@ -299,7 +299,7 @@ def create_plots(sdf, output, seq_length):
     df_d["w_new"] = df_d["w"] * tri_scale
     df_d["z_new"] = df_d["z"] * window * 2 / 3
 
-    tri = make_tri(df_d, output, seq_length)
+    tri = make_tri(df_d, input_sequence, seq_length)
 
     plot_filename = f"{output}.png"
     print("Plots created! \n")
