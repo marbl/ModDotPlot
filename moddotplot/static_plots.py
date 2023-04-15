@@ -91,7 +91,7 @@ def paired_bed_file(
             print(f"Thanks for using Mod.Plot!")
         else:
             print(f"Creating plots... \n")
-            create_plots([df], None, input_name, seq_length)
+            create_plots([df], input_name, input_name, seq_length)
     else:
         bedfile_output = output + ".bed"
         df.to_csv(bedfile_output, sep="\t")
@@ -104,6 +104,7 @@ def paired_bed_file(
 
 
 def get_colors(sdf, ncolors, is_freq):
+    assert ncolors > 2 and ncolors < 12
     bot = math.floor(min(sdf["perID_by_events"]))
     top = 100
     # TODO: Sort by frequency if arg is selected.
@@ -301,6 +302,7 @@ def create_plots(sdf, output, input_sequence, seq_length):
 
     tri = make_tri(df_d, input_sequence, seq_length)
 
+    #
     plot_filename = f"{output}.png"
     print("Plots created! \n")
 
