@@ -41,6 +41,7 @@ def paired_bed_file(
     output: str,
     seq_length: int,
     no_plot: bool,
+    k: int
 ) -> None:
     """
     Given a dictionary of window partitions, creates a BED file containing pairs of
@@ -56,6 +57,7 @@ def paired_bed_file(
     """
     assert id_threshold > 50 and id_threshold < 100
 
+
     cols: List[str] = COLS
     bed: List[List[str]] = []
     for w in itertools.combinations_with_replacement(window_partitions, 2):
@@ -65,20 +67,20 @@ def paired_bed_file(
             query_name = "input_sequence"
         query_start, query_end = w[0].split("-")
         reference_start, reference_end = w[1].split("-")
-        # TODO: Update wiht Jaccard when available
+        # TODO: Update with Jaccard when available
         perID = binomial_distance(
-            containment(set(window_partitions[w[0]]), set(window_partitions[w[1]])), 21
+            containment(set(window_partitions[w[0]]), set(window_partitions[w[1]])), k
         )
         if perID * 100 >= id_threshold:
             # TODO: Add strand orientation into bed file
             bed.append(
                 [
                     query_name,
-                    int(query_start) * density,
-                    int(query_end) * density,
+                    int(query_start),
+                    int(query_end),
                     query_name,
-                    int(reference_start) * density,
-                    int(reference_end) * density,
+                    int(reference_start),
+                    int(reference_end),
                     perID * 100,
                 ]
             )
@@ -198,14 +200,12 @@ def diamond(row):
     return df
 
 
-def make_tri(df_d, title_name, seq_length):
-    #output_list = [i * round(seq_length / 1000000, 1) / 5 for i in range(5)]
+def make_tri(df_d, title_name):
     p_tri = (
         ggplot(df_d)
         + aes(x="w_new", y="z_new", group="group", fill="discrete")
         + geom_polygon()
         + scale_color_discrete(guide=False)
-        #+ scale_x_continuous(labels=output_list)
         + scale_fill_gradientn(  # TODO: Replace this with built in color palettes.
             colors=[
                 "#5E4FA2",
@@ -232,7 +232,6 @@ def make_tri(df_d, title_name, seq_length):
             panel_grid_minor=element_blank(),
             plot_background=element_blank(),
             panel_background=element_blank()
-            # plot_background = element_rect(fill='transparent', color=NA),
         )
         + xlab("Genomic Position (Mbp)")
         + ggtitle(title_name)
@@ -281,10 +280,6 @@ def make_hist(sdf):
 def create_plots(sdf, output, input_sequence, seq_length):
 
     df = read_df(sdf)
-    Qs = np.unique(df["q"])
-    N = len(Qs)
-    columns = math.ceil(np.sqrt(N + 1))
-    rows = math.ceil((N + 1) / columns)
     sdf = df
 
     sdf["w"] = sdf["first_pos"] + sdf["second_pos"]
@@ -300,9 +295,8 @@ def create_plots(sdf, output, input_sequence, seq_length):
     df_d["w_new"] = df_d["w"] * tri_scale
     df_d["z_new"] = df_d["z"] * window * 2 / 3
 
-    tri = make_tri(df_d, input_sequence, seq_length)
+    tri = make_tri(df_d, input_sequence)
 
-    #
     plot_filename = f"{output}.png"
     print("Plots created! \n")
 
