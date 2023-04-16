@@ -75,7 +75,7 @@ When counting k-mers, both forward and reverse complement are considered, with t
 
 ### Static plots
 
-By default, Mod.Plot will output a paired end bed file, along with plots for each sequence in each FASTA file as a vector (.pdf) and rasterized (.png) image. 
+By default, Mod.Plot will output a paired end bed file, along with plots for each sequence in each FASTA file as an image file (.png). 
 
 `--no-bed`
 
@@ -83,7 +83,7 @@ Skip output of bed file.
 
 `--no-plot`
 
-Skip output of pdf and png image files.
+Skip output of image files.
 
 `--bin-freq`
 

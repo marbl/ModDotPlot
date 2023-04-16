@@ -277,7 +277,7 @@ def make_hist(sdf):
     return p
 
 
-def create_plots(sdf, output, input_sequence, seq_length):
+def create_plots(sdf, output, input_sequence):
 
     df = read_df(sdf)
     sdf = df
@@ -292,9 +292,9 @@ def create_plots(sdf, output, input_sequence, seq_length):
     sdf["z_new"] = sdf["z"] * window
     df_d = pd.concat([diamond(row) for _, row in sdf.iterrows()], ignore_index=True)
 
-    df_d["w_new"] = df_d["w"] * tri_scale
-    df_d["z_new"] = df_d["z"] * window * 2 / 3
-
+    # TODO: Scale based on size of the input genome, cant always assume Mbp is appropriate
+    df_d["w_new"] = df_d["w"] * tri_scale / 1000000
+    df_d["z_new"] = df_d["z"] * window * 2 / 3 / 1000000
     tri = make_tri(df_d, input_sequence)
 
     plot_filename = f"{output}.png"

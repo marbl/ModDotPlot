@@ -11,7 +11,7 @@ def get_mods(kmer_list, d):
     return mod_list
 
 def partition_windows(kmer_list, seq_length, resolution):
-    table_size = math.floor(len(kmer_list)/resolution)
+    table_size = round(len(kmer_list)/resolution)
     thousand_dict = {}
     for i in range(resolution):
         start_size = i*table_size
