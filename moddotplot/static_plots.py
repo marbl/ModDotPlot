@@ -102,7 +102,7 @@ def paired_bed_file(
             print(f"Thanks for using Mod.Plot!")
         else:
             print(f"Creating plots... \n")
-            create_plots([df], output, input_name, seq_length)
+            create_plots([df], output, input_name)
 
 
 def get_colors(sdf, ncolors, is_freq):
