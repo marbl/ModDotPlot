@@ -32,7 +32,7 @@ def get_args_parse():
     dist_params = parser.add_argument_group("Mod.Plot distance matrix commands")
 
     dist_params.add_argument(
-        "-k", "--kmer", default=21, help="k-mer length. Must be < 32"
+        "-k", "--kmer", default=21, type=int, help="k-mer length. Must be < 32"
     )
 
     dist_params.add_argument(

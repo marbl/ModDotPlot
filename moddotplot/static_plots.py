@@ -93,7 +93,7 @@ def paired_bed_file(
             print(f"Thanks for using Mod.Plot!")
         else:
             print(f"Creating plots... \n")
-            create_plots([df], input_name, input_name, seq_length)
+            create_plots([df], input_name, input_name)
     else:
         bedfile_output = output + ".bed"
         df.to_csv(bedfile_output, sep="\t")
