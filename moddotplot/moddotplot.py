@@ -148,7 +148,7 @@ def main():
                 mod_list = get_mods(kmer_list[seq], args.sparsity)
                 print("Modimizers done! \n")
                 print("Creating coordinates...\n")
-                windows = partition_windows(mod_list, len(kmer_list[seq]), args.resolution)
+                windows = partition_windows(mod_list, len(kmer_list[seq]) + args.kmer - 1, args.resolution)
                 print("Coordinates done! \n")
                 print("Computing identity... \n")
                 paired_bed_file(
@@ -157,8 +157,9 @@ def main():
                     args.identity,
                     args.sparsity,
                     args.output,
-                    len(kmer_list[0]),
+                    len(kmer_list[seq]) + args.kmer - 1,
                     args.no_plot,
+                    args.kmer
                 )
 
 
