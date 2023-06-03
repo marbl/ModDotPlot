@@ -19,7 +19,6 @@ setup(
         "dash",
         "dash_daq",
         "plotnine",
-        "patchworklib"
     ],
     python_requires=">=3.7",
     author_email="asweeten@cs.jhu.edu",
