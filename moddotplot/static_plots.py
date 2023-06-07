@@ -15,6 +15,7 @@ from plotnine import (
     coord_cartesian,
     ylab,
     scale_x_continuous,
+    xlim,
 )
 import pandas as pd
 import numpy as np
@@ -57,7 +58,6 @@ def paired_bed_file(
     """
     assert id_threshold > 50 and id_threshold < 100
 
-
     cols: List[str] = COLS
     bed: List[List[str]] = []
     for w in itertools.combinations_with_replacement(window_partitions, 2):
@@ -88,22 +88,54 @@ def paired_bed_file(
     if not output:
         bedfile_output = input_name + ".bed"
         df.to_csv(bedfile_output, sep="\t")
-        print(f"Identity computed! Saved to {bedfile_output} \n")
-        if no_plot:
-            print(f"Thanks for using Mod.Plot!")
-        else:
+        print(f"Self identity matrix complete! Saved to {bedfile_output} \n")
+        if not no_plot:
             print(f"Creating plots... \n")
             create_plots([df], input_name, input_name)
     else:
         bedfile_output = output + ".bed"
         df.to_csv(bedfile_output, sep="\t")
         print(f"Identity computed! Saved to {bedfile_output} \n")
-        if no_plot:
-            print(f"Thanks for using Mod.Plot!")
-        else:
+        if not no_plot:
             print(f"Creating plots... \n")
             create_plots([df], output, input_name)
 
+def paired_bed_file_a_vs_b(
+    window_partitions_a: dict,
+    window_partitions_b: dict,
+    a_name: str,
+    b_name: str,
+    resolution: int,
+    id_threshold: int,
+    k: int,
+) -> None:
+
+    cols: List[str] = COLS
+    bed: List[List[str]] = []
+    assert id_threshold > 50 and id_threshold < 100
+    for i in window_partitions_a:
+        for j in window_partitions_b:
+            reference_start, reference_end = i.split("-")
+            query_start, query_end = j.split("-")
+            perID = binomial_distance(
+                containment(set(window_partitions_a[i]), set(window_partitions_b[j])), k
+            )
+            if perID * 100 >= id_threshold:
+            # TODO: Add strand orientation into bed file
+                bed.append(
+                    [
+                        a_name,
+                        int(reference_start),
+                        int(reference_end),
+                        b_name,
+                        int(query_start),
+                        int(query_end),
+                        perID * 100,
+                    ]
+                )
+    df = pd.DataFrame(bed, columns=cols)
+    bedfile_output = a_name + "_" + b_name + ".bed"
+    df.to_csv(bedfile_output, sep="\t")
 
 def get_colors(sdf, ncolors, is_freq):
     assert ncolors > 2 and ncolors < 12
@@ -158,7 +190,7 @@ def read_bedpe(all_files):
 def read_df(pj):
     df = pd.concat(pj)
     # TODO: Make this cmd line arg
-    ncolors = 11
+    ncolors = 8
 
     # Get colors for each row based on the values in the dataframe
     df["discrete"] = get_colors(df, ncolors, False)
@@ -199,6 +231,24 @@ def diamond(row):
     df["group"] = int(row["group"])
     return df
 
+def make_dot(sdf, rname=""):
+    max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
+    window = max(sdf["query_end"] - sdf["query_start"])
+    
+    p = (
+        ggplot(sdf) +
+        geom_tile(aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)) +
+        theme_cowplot() +
+        scale_fill_brewer(palette="Spectral", direction=-1) +
+        theme(legend_position="none") +
+        scale_x_continuous(labels=make_scale, limits=[0, max_val]) +
+        scale_y_continuous(labels=make_scale, limits=[0, max_val]) +
+        coord_fixed(ratio=1) +
+        facet_grid("r ~ q") +
+        labs(x="Genomic position (Mbp)", y="", title=rname)
+    )
+    
+    return p
 
 def make_tri(df_d, title_name):
     p_tri = (
@@ -301,5 +351,6 @@ def create_plots(sdf, output, input_sequence):
     print("Plots created! \n")
 
     print(f"Saving plots to {plot_filename}... \n")
-    ggsave(tri, width=9, height=5, dpi=600, filename=plot_filename, verbose=False)
-    print(f"{plot_filename} saved sucessfully. Thanks for using Mod.Plot!")
+    ggsave(tri, width=13, height=5, dpi=600, filename=plot_filename, verbose=False)
+    print(f"{plot_filename} saved sucessfully.")
+
