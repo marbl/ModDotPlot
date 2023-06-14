@@ -2,25 +2,17 @@
 from moddotplot.parse_fasta import (
     read_kmers_from_file,
     get_input_headers,
-    get_input_seq_length,
 )
 from moddotplot.estimate_identity import (
     get_mods,
-    partition_windows,
-    partition_windows_limit,
     partition_evenly_spaced_modimizers,
 )
 from moddotplot.interactive import run_dash, run_dash_pairwise
-from moddotplot.const import (
-    ASCII_ART,
-    SEQUENTIAL_PALETTES,
-    DIVERGING_PALETTES,
-    QUALITATIVE_PALETTES,
-)
+from moddotplot.const import ASCII_ART
+
 import argparse
 import math
 from moddotplot.static_plots import (
-    create_plots,
     paired_bed_file,
     paired_bed_file_a_vs_b,
 )
@@ -113,8 +105,7 @@ def get_args_parse():
     plot_params.add_argument(
         "--palette",
         default="Spectral_11",
-        choices=SEQUENTIAL_PALETTES + QUALITATIVE_PALETTES + DIVERGING_PALETTES,
-        help="Select color palette. See RColorBrewer for list of accepted palettes.",
+        help="Select color palette. See RColorBrewer for list of accepted palettes. Will default to Spectral_11 if not used.",
         type=str,
     )
 
