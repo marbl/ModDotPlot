@@ -226,8 +226,10 @@ The plotly plot can be navigated using the zoom (magnifying glass) and pan (hand
 
 ### Sample run - comparing two sequences
 
+ModDotPlot can produce an a vs. b style dotplot for each pairwise combination of input sequences. Use the `--compare` command liene argument to include these plots. If you want to skip the creation of self-identity plots, you can use `--compare-only`:
+
 ```
-moddotplot -i test/chr14_segment.fa test/chr21_segment.fa -id 88
+moddotplot -i test/chr14_segment.fa test/chr21_segment.fa -id 88 --compare-only
 
  _______  _______  ______                        _______  _        _______ _________
 (       )(  ___  )(  __  \                      (  ____ )( \      (  ___  )\__   __/
@@ -248,30 +250,6 @@ Retrieving k-mers from chr21:2000000-5000000....
 chr21:2000000-5000000 k-mers retrieved! 
 
 Using s = 6. 
-
-Computing self identity matrix for chr14:2000000-5000000... 
-
-Self identity matrix complete! Saved to chr14:2000000-5000000.bed 
-
-Creating plots... 
-
-Plots created! 
-
-Saving plots to chr14:2000000-5000000.png... 
-
-chr14:2000000-5000000.png_TRI.png, chr14:2000000-5000000.png_TRI.svg, chr14:2000000-5000000.png_HIST.png and chr14:2000000-5000000.png_HIST.svg, saved sucessfully. 
-
-Computing self identity matrix for chr21:2000000-5000000... 
-
-Self identity matrix complete! Saved to chr21:2000000-5000000.bed 
-
-Creating plots... 
-
-Plots created! 
-
-Saving plots to chr21:2000000-5000000.png... 
-
-chr21:2000000-5000000.png_TRI.png, chr21:2000000-5000000.png_TRI.svg, chr21:2000000-5000000.png_HIST.png and chr21:2000000-5000000.png_HIST.svg, saved sucessfully. 
 
 Computing chr14:2000000-5000000 vs. chr21:2000000-5000000... 
 
