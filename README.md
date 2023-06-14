@@ -97,7 +97,7 @@ Produce an a vs. b style dotplot. Can only be used when 2+ sequences are include
 
 `--compare-only`
 
-Produce an a vs. b style dotplot wihtout any individual dotplots.
+Produce an a vs. b style dotplot without any individual dotplots.
 
 `--width`
 
@@ -113,13 +113,11 @@ Image resolution in dots per inch (not to be confiused with dotplot resolution).
 
 `--palette`
 
-Default is spectral `<PALETTE>_<COLORNUMBER>`. Default is `Spectral_11`
-
-See 
+List of accepted palettes can be found [here](https://jiffyclub.github.io/palettable/colorbrewer/). The syntax is to have the name of the palette, followed by an underscore with the number of colors, eg. `OrRd_8`. Default is `Spectral_11`.
 
 `--palette-orientation`
 
-Flip sequential order of color palette. Set to `-` for divergent palettes. 
+Flip sequential order of color palette. Set to `-` by default for divergent palettes. 
 
 `--bin-freq`
 
@@ -203,14 +201,14 @@ Chr1:14000000-18000000.png_TRI.png, Chr1:14000000-18000000.png_TRI.svg, Chr1:140
 ```
 $ moddotplot -i test/Chr1_cen.fa -s 32 --identity 85 --interactive   
 
- _______  _______  ______          _______  _        _______ _________
-(       )(  ___  )(  __  \        (  ____ )( \      (  ___  )\__   __/
-| () () || (   ) || (  \  )       | (    )|| (      | (   ) |   ) (   
-| || || || |   | || |   ) |       | (____)|| |      | |   | |   | |   
-| |(_)| || |   | || |   | |       |  _____)| |      | |   | |   | |   
-| |   | || |   | || |   ) |       | (      | |      | |   | |   | |   
-| )   ( || (___) || (__/  )   _   | )      | (____/\| (___) |   | |   
-|/     \|(_______)(______/   (_)  |/       (_______/(_______)   )_(   
+ _______  _______  ______                        _______  _        _______ _________
+(       )(  ___  )(  __  \                      (  ____ )( \      (  ___  )\__   __/
+| () () || (   ) || (  \  )                     | (    )|| (      | (   ) |   ) (   
+| || || || |   | || |   ) |                     | (____)|| |      | |   | |   | |   
+| |(_)| || |   | || |   | |   ___   ___ _____   |  _____)| |      | |   | |   | |   
+| |   | || |   | || |   ) |  |   \ / _ \_   _|  | (      | |      | |   | |   | |   
+| )   ( || (___) || (__/  )  | |) | (_) || |    | )      | (____/\| (___) |   | |   
+|/     \|(_______)(______/   |___/ \___/ |_|    |/       (_______/(_______)   )_(     
 
 
 Retrieving k-mers from Chr1:14000000-18000000.... 
