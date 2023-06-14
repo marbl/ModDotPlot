@@ -6,7 +6,9 @@
   - [Interactive Mode](#interactive-mode)
   - [Sample run - static plots](#sample-run---static-plots)
   - [Sample run - interactive mode](#sample-run---interactive-mode)
+  - [Sample run - comparing two sequences](#sample-run---comparing-two-sequences)
 - [Questions](#questions)
+- [Known Issues](#known-issues)
 - [Cite](#cite)
 
 ## About
@@ -83,15 +85,45 @@ Skip output of bed file.
 
 `--no-plot`
 
-Skip output of image files.
+Skip output of svg and png image files.
+
+`--no-hist`
+
+Skip output of histogram legend.
+
+`--compare`
+
+Produce an a vs. b style dotplot. Can only be used when 2+ sequences are included. 
+
+`--compare-only`
+
+Produce an a vs. b style dotplot wihtout any individual dotplots.
+
+`--width`
+
+Adjust width of self dot plots. Default is 9 inches.
+
+`--height`
+
+Adjust height of self dot plots. Default is 5 inches for self-plots, 9 inches for a vs. b plots.
+
+`--dpi`
+
+Image resolution in dots per inch (not to be confiused with dotplot resolution). Default is 300.
+
+`--palette`
+
+Default is spectral `<PALETTE>_<COLORNUMBER>`. Default is `Spectral_11`
+
+See 
+
+`--palette-orientation`
+
+Flip sequential order of color palette. Set to `-` for divergent palettes. 
 
 `--bin-freq`
 
 By default, histograms are evenly spaced based on the number of colors and the identity threshold. Select this argument to bin based on the frequency of observed identity values.
-
-`--num_colors <int>`
-
-Set the number of colors used in the plot. Default: 11. 
 
 Although deprecated, there is an R script you can use to plot directly from a bed file. ggplot2 and cowplot are required. You can call this Rscript through the following: 
 
@@ -134,38 +166,33 @@ You should now be able to view interactive mode using `http://127.0.0.1:<LOCAL_P
 ```
 $ moddotplot -i test/Chr1_cen.fa     
 
- _______  _______  ______          _______  _        _______ _________
-(       )(  ___  )(  __  \        (  ____ )( \      (  ___  )\__   __/
-| () () || (   ) || (  \  )       | (    )|| (      | (   ) |   ) (   
-| || || || |   | || |   ) |       | (____)|| |      | |   | |   | |   
-| |(_)| || |   | || |   | |       |  _____)| |      | |   | |   | |   
-| |   | || |   | || |   ) |       | (      | |      | |   | |   | |   
-| )   ( || (___) || (__/  )   _   | )      | (____/\| (___) |   | |   
-|/     \|(_______)(______/   (_)  |/       (_______/(_______)   )_(   
+ _______  _______  ______                        _______  _        _______ _________
+(       )(  ___  )(  __  \                      (  ____ )( \      (  ___  )\__   __/
+| () () || (   ) || (  \  )                     | (    )|| (      | (   ) |   ) (   
+| || || || |   | || |   ) |                     | (____)|| |      | |   | |   | |   
+| |(_)| || |   | || |   | |   ___   ___ _____   |  _____)| |      | |   | |   | |   
+| |   | || |   | || |   ) |  |   \ / _ \_   _|  | (      | |      | |   | |   | |   
+| )   ( || (___) || (__/  )  | |) | (_) || |    | )      | (____/\| (___) |   | |   
+|/     \|(_______)(______/   |___/ \___/ |_|    |/       (_______/(_______)   )_(   
 
-Retrieving k-mers from Chr1_cen.... 
 
-Chr1_cen k-mers retrieved! 
+Retrieving k-mers from Chr1:14000000-18000000.... 
 
-Computing modimizers for Chr1_cen... 
+Chr1:14000000-18000000 k-mers retrieved! 
 
-Modimizers done! 
+Using s = 8. 
 
-Creating coordinates...
+Computing self identity matrix for Chr1:14000000-18000000... 
 
-Coordinates done! 
-
-Computing identity... 
-
-Identity computed! Saved to Chr1_cen.bed 
+Self identity matrix complete! Saved to Chr1:14000000-18000000.bed 
 
 Creating plots... 
 
 Plots created! 
 
-Saving plots to Chr1_cen.pdf... 
+Saving plots to Chr1:14000000-18000000.png... 
 
-Chr1_cen.pdf saved sucessfully. Thanks for using Mod.Plot!
+Chr1:14000000-18000000.png_TRI.png, Chr1:14000000-18000000.png_TRI.svg, Chr1:14000000-18000000.png_HIST.png and Chr1:14000000-18000000.png_HIST.svg, saved sucessfully. 
 ```
 ![](images/Chr1_cen.png)
 
@@ -174,7 +201,7 @@ Chr1_cen.pdf saved sucessfully. Thanks for using Mod.Plot!
 ### Sample run - interactive mode
 
 ```
-$ moddotplot -i test/Chr1_cen.fa -s 32 --id 85 --interactive   
+$ moddotplot -i test/Chr1_cen.fa -s 32 --identity 85 --interactive   
 
  _______  _______  ______          _______  _        _______ _________
 (       )(  ___  )(  __  \        (  ____ )( \      (  ___  )\__   __/
@@ -199,13 +226,86 @@ Dash is running on http://127.0.0.1:8050/
 
 The plotly plot can be navigated using the zoom (magnifying glass) and pan (hand) icons. The current plot can be downloaded as an image with the camera icon. Depending on sparsity value, plots may need some time to refresh. The plot can be reset by double-clicking or selecting the home button. Set the lock resolution button to prevent auto-scaling using modimizers.
 
+### Sample run - comparing two sequences
+
+```
+moddotplot -i test/chr14_segment.fa test/chr21_segment.fa -id 88
+
+ _______  _______  ______                        _______  _        _______ _________
+(       )(  ___  )(  __  \                      (  ____ )( \      (  ___  )\__   __/
+| () () || (   ) || (  \  )                     | (    )|| (      | (   ) |   ) (   
+| || || || |   | || |   ) |                     | (____)|| |      | |   | |   | |   
+| |(_)| || |   | || |   | |   ___   ___ _____   |  _____)| |      | |   | |   | |   
+| |   | || |   | || |   ) |  |   \ / _ \_   _|  | (      | |      | |   | |   | |   
+| )   ( || (___) || (__/  )  | |) | (_) || |    | )      | (____/\| (___) |   | |   
+|/     \|(_______)(______/   |___/ \___/ |_|    |/       (_______/(_______)   )_(   
+
+
+Retrieving k-mers from chr14:2000000-5000000.... 
+
+chr14:2000000-5000000 k-mers retrieved! 
+
+Retrieving k-mers from chr21:2000000-5000000.... 
+
+chr21:2000000-5000000 k-mers retrieved! 
+
+Using s = 6. 
+
+Computing self identity matrix for chr14:2000000-5000000... 
+
+Self identity matrix complete! Saved to chr14:2000000-5000000.bed 
+
+Creating plots... 
+
+Plots created! 
+
+Saving plots to chr14:2000000-5000000.png... 
+
+chr14:2000000-5000000.png_TRI.png, chr14:2000000-5000000.png_TRI.svg, chr14:2000000-5000000.png_HIST.png and chr14:2000000-5000000.png_HIST.svg, saved sucessfully. 
+
+Computing self identity matrix for chr21:2000000-5000000... 
+
+Self identity matrix complete! Saved to chr21:2000000-5000000.bed 
+
+Creating plots... 
+
+Plots created! 
+
+Saving plots to chr21:2000000-5000000.png... 
+
+chr21:2000000-5000000.png_TRI.png, chr21:2000000-5000000.png_TRI.svg, chr21:2000000-5000000.png_HIST.png and chr21:2000000-5000000.png_HIST.svg, saved sucessfully. 
+
+Computing chr14:2000000-5000000 vs. chr21:2000000-5000000... 
+
+Success! Bed file output to chr14:2000000-5000000_chr21:2000000-5000000.bed 
+
+Creating plots... 
+
+chr14:2000000-5000000_chr21:2000000-5000000.png and chr14:2000000-5000000_chr21:2000000-5000000.svg saved sucessfully. 
+```
+
+![](images/chr14:2000000-5000000_chr21:2000000-5000000.png)
+
 --- 
 
 ## Questions
 
-For bug reports or general usage questions, please raise a GitHub issue, or email asweeten ~at~ nih ~dot~ gov
+For bug reports or general usage questions, please raise a GitHub issue, or email asweete1 ~at~ jhu ~dot~ edu
 
 --- 
+
+## Known Issues
+
+Mac users might encounter the following unexpected command line output:
+
+`/bin/sh: lscpu: command not found`
+
+This is a known issue with PlotNine, the Python plotting library used by ModDotPlot. This can be safely ignored.
+
+Using `--compare` in interactive mode is noticeably slower than self-identity dotplotting. I'll be looking to optimize this functionality as soon as possible. 
+
+---
+
 
 ## Cite
 

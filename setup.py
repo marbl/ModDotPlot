@@ -19,13 +19,9 @@ setup(
         "dash",
         "dash_daq",
         "plotnine",
-        "patchworklib"
+        "palettable",
     ],
     python_requires=">=3.7",
     author_email="asweeten@cs.jhu.edu",
-    entry_points={
-        "console_scripts": [
-            "moddotplot = moddotplot.__main__:main",
-        ],
-    },
+    entry_points={"console_scripts": ["moddotplot = moddotplot.__main__:main",],},
 )

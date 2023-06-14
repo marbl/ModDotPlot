@@ -87,7 +87,6 @@ def report_all_kmers(sequence: str, k: int) -> List[int]:
 
     return all_mers
 
-
 def read_kmers_from_file(filename: str, ksize: int) -> List[List[int]]:
     """
     Given a filename and an integer k, returns a list of all k-mers found in the sequences in the file.
@@ -95,9 +94,6 @@ def read_kmers_from_file(filename: str, ksize: int) -> List[List[int]]:
     all_kmers = []
     seq = pysam.FastaFile(filename)
 
-    if len(seq.references) > 1:
-        #TODO: Add -x override
-        print(f"Multiple sequences detected! \n")
     for seq_id in seq.references:
         print(f"Retrieving k-mers from {seq_id}.... \n")
         all_kmers.append(report_all_kmers(seq.fetch(seq_id), ksize))
@@ -112,3 +108,8 @@ def get_input_headers(filename: str) -> List[str]:
         header_list.append(seq_id)
 
     return header_list
+
+def get_input_seq_length(filename: str) -> List[int]:
+    length_list = []
+    seq = pysam.FastaFile(filename)
+    return seq.lengths
