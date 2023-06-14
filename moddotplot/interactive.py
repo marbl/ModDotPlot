@@ -6,14 +6,18 @@ from moddotplot.estimate_identity import (
     containment,
     jaccard,
     get_mods,
-    create_coordinates,
 )
 import itertools
 import numpy as np
 import dash
 from dash import Input, Output, ctx, html, dcc
 import dash_daq as daq
-from moddotplot.const import COLOR_SCHEMES
+from moddotplot.const import (
+    SEQUENTIAL_PALETTES,
+    DIVERGING_PALETTES,
+    QUALITATIVE_PALETTES,
+)
+from palettable import colorbrewer
 
 
 def verify_modimizers(sparsity):
@@ -36,7 +40,7 @@ def set_zoom_levels(axis_length, sparsity_layers):
     for i in range(1, len(sparsity_layers)):
         zoom_levels[i] = round(axis_length / pow(2, i))
     return zoom_levels
-  
+
 
 def create_map(kmer_list, resolution, sparsity):
     kmers = get_mods(kmer_list, sparsity)
@@ -59,6 +63,7 @@ def kmer_coordinates(kmer_list, jacc, resolution, k):
 
     return jaccard_matrix
 
+
 def kmer_coordinates2(kmer_list1, kmer_list2, jacc, resolution, k):
     jaccard_values = []
     for w in kmer_list1:
@@ -75,6 +80,7 @@ def kmer_coordinates2(kmer_list1, kmer_list2, jacc, resolution, k):
 
     return jaccard_matrix
 
+
 def create_coordinates2(kmer_list):
     tmp = []
     for k in kmer_list:
@@ -85,10 +91,41 @@ def create_coordinates2(kmer_list):
     return tmp
 
 
-def run_dash(kmer_list1, resolution, sparsity, k, identity, port_number, jacc):
+def run_dash(
+    kmer_list1,
+    resolution,
+    sparsity,
+    k,
+    identity,
+    port_number,
+    jacc,
+    palette,
+    palette_orientation,
+):
     # Run Dash app
+    palettes = colorbrewer.COLOR_MAPS
     app = dash.Dash(__name__, prevent_initial_callbacks="initial_duplicate")
-    current_color = COLOR_SCHEMES["Spectral"]
+    tmp_color = []
+    new_palette = palette.split("_")
+    if palette in DIVERGING_PALETTES:
+        tmp_color = palettes["Diverging"][new_palette[0]][new_palette[1]]["Colors"]
+        if palette_orientation == "+":
+            palette_orientation = "-"
+        else:
+            palette_orientation = "+"
+    elif palette in SEQUENTIAL_PALETTES:
+        tmp_color = palettes["Sequential"][new_palette[0]][new_palette[1]]["Colors"]
+    elif palette in QUALITATIVE_PALETTES:
+        tmp_color = palettes["Qualitative"][new_palette[0]][new_palette[1]]["Colors"]
+    if palette_orientation == "-":
+        tmp_color = tmp_color[::-1]
+    tmp_color = [[255, 255, 255]] + tmp_color
+    total_values = len(tmp_color)
+    formatted_values = [
+        [i / (total_values - 1), f"rgb({r}, {g}, {b})"]
+        for i, (r, g, b) in enumerate(tmp_color)
+    ]
+    current_color = formatted_values
 
     # Create initial coordinates & figure
     init = get_mods(kmer_list1, sparsity, resolution)
@@ -119,8 +156,8 @@ def run_dash(kmer_list1, resolution, sparsity, k, identity, port_number, jacc):
     colorscales = px.colors.named_colorscales()
     colornames = px.colors.named_colorscales()
 
-    colorscales.insert(0, COLOR_SCHEMES["Spectral"])
-    colornames.insert(0, "Spectral")
+    colorscales.insert(0, formatted_values)
+    colornames.insert(0, palette)
 
     # HTML for plot webpage
     app.layout = html.Div(
@@ -180,7 +217,7 @@ def run_dash(kmer_list1, resolution, sparsity, k, identity, port_number, jacc):
                     x_init = create_coordinates2(new_map_x)
                     y_init = create_coordinates2(new_map_y)
                     updated_jaccard_values = []
-                    
+
                     for w in y_init:
                         for q in x_init:
                             if jacc:
@@ -211,7 +248,7 @@ def run_dash(kmer_list1, resolution, sparsity, k, identity, port_number, jacc):
                         zmax=1,
                         height=1000,
                         width=1000,
-                        color_continuous_scale=COLOR_SCHEMES["Spectral"],
+                        color_continuous_scale=formatted_values,
                     )
                     current_fig = new_fig
                     current_fig.update_layout(hovermode="x unified")
@@ -249,11 +286,43 @@ def run_dash(kmer_list1, resolution, sparsity, k, identity, port_number, jacc):
 
     app.run_server(debug=True, use_reloader=False, port=port_number)
 
-def run_dash_pairwise(kmer_list1, kmer_list2, resolution, sparsity, k, identity, port_number, jacc):
+
+def run_dash_pairwise(
+    kmer_list1,
+    kmer_list2,
+    resolution,
+    sparsity,
+    k,
+    identity,
+    port_number,
+    jacc,
+    palette,
+    palette_orientation,
+):
     # Run Dash app
-    print("using pairwise")
+    palettes = colorbrewer.COLOR_MAPS
     app = dash.Dash(__name__, prevent_initial_callbacks="initial_duplicate")
-    current_color = COLOR_SCHEMES["Spectral"]
+    tmp_color = []
+    new_palette = palette.split("_")
+    if palette in DIVERGING_PALETTES:
+        tmp_color = palettes["Diverging"][new_palette[0]][new_palette[1]]["Colors"]
+        if palette_orientation == "+":
+            palette_orientation = "-"
+        else:
+            palette_orientation = "+"
+    elif palette in SEQUENTIAL_PALETTES:
+        tmp_color = palettes["Sequential"][new_palette[0]][new_palette[1]]["Colors"]
+    elif palette in QUALITATIVE_PALETTES:
+        tmp_color = palettes["Qualitative"][new_palette[0]][new_palette[1]]["Colors"]
+    if palette_orientation == "-":
+        tmp_color = tmp_color[::-1]
+    tmp_color = [[255, 255, 255]] + tmp_color
+    total_values = len(tmp_color)
+    formatted_values = [
+        [i / (total_values - 1), f"rgb({r}, {g}, {b})"]
+        for i, (r, g, b) in enumerate(tmp_color)
+    ]
+    current_color = formatted_values
 
     # Create initial coordinates & figure
     x_d = get_mods(kmer_list1, sparsity, resolution)
@@ -289,8 +358,8 @@ def run_dash_pairwise(kmer_list1, kmer_list2, resolution, sparsity, k, identity,
     colorscales = px.colors.named_colorscales()
     colornames = px.colors.named_colorscales()
 
-    colorscales.insert(0, COLOR_SCHEMES["Spectral"])
-    colornames.insert(0, "Spectral")
+    colorscales.insert(0, current_color)
+    colornames.insert(0, palette)
 
     # HTML for plot webpage
     app.layout = html.Div(
@@ -342,15 +411,15 @@ def run_dash_pairwise(kmer_list1, kmer_list2, resolution, sparsity, k, identity,
                     amount = x_end - x_begin
 
                     new_jaccard = []
-                    x_mers = kmer_list1[x_begin:x_end]
-                    y_mers = kmer_list2[y_end:y_begin]
+                    y_mers = kmer_list1[x_begin:x_end]
+                    x_mers = kmer_list2[y_end:y_begin]
                     new_map_x = get_mods(x_mers, sparsity, resolution)
                     new_map_y = get_mods(y_mers, sparsity, resolution)
 
                     x_init = create_coordinates2(new_map_x)
                     y_init = create_coordinates2(new_map_y)
                     updated_jaccard_values = []
-                    
+
                     for w in y_init:
                         for q in x_init:
                             if jacc:
@@ -381,7 +450,7 @@ def run_dash_pairwise(kmer_list1, kmer_list2, resolution, sparsity, k, identity,
                         zmax=1,
                         height=1000,
                         width=1000,
-                        color_continuous_scale=COLOR_SCHEMES["Spectral"],
+                        color_continuous_scale=formatted_values,
                     )
                     current_fig = new_fig
                     current_fig.update_layout(hovermode="x unified")
