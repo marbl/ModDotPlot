@@ -25,6 +25,7 @@ import pandas as pd
 import numpy as np
 import math
 import os
+import polars as pl
 import shutil
 from moddotplot.const import (
     COLS,
@@ -490,7 +491,7 @@ def create_plots(
     df_d["z_new"] = df_d["z"] * window * 2 / 3 / 1000000
     tri = make_tri(df_d, input_sequence, palette, palette_orientation)
 
-    plot_filename = f"{output}.png"
+    plot_filename = f"{output}"
     print("Plots created! \n")
 
     print(f"Saving plots to {plot_filename}... \n")
