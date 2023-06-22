@@ -25,7 +25,6 @@ import pandas as pd
 import numpy as np
 import math
 import os
-import polars as pl
 import shutil
 from moddotplot.const import (
     COLS,
