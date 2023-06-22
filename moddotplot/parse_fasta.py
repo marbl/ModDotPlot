@@ -1,6 +1,14 @@
 from typing import Generator, List
 import pysam
 
+def custom_hash_fn(h):
+    h ^= h >> 33
+    h *= 0xff51afd7ed558ccd
+    h ^= h >> 33
+    h *= 0xc4ceb9fe1a85ec53
+    h ^= h >> 33
+    return h
+
 def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
     """
     Given a DNA sequence and a value k, generate all k-mers from the sequence.
@@ -29,7 +37,7 @@ def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
         rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (3*(k-1))
 
     # Yield the hash value of the first k-mer and its reverse complement
-    yield hash(rc_kmer) if hash(rc_kmer) < hash(kmer) else hash(kmer)
+    yield custom_hash_fn(rc_kmer) if custom_hash_fn(rc_kmer) < custom_hash_fn(kmer) else custom_hash_fn(kmer)
 
     # Generate the remaining k-mers
     for i in range(k, n):
@@ -38,7 +46,7 @@ def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
         rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (3*(k-1))
 
         # Yield the hash value of the current k-mer and its reverse complement
-        yield hash(rc_kmer) if hash(rc_kmer) < hash(kmer) else hash(kmer)
+        yield custom_hash_fn(rc_kmer) if custom_hash_fn(rc_kmer) < custom_hash_fn(kmer) else custom_hash_fn(kmer)
 
 
 def encode_base(base: str, reverse_complement: bool = False) -> int:
