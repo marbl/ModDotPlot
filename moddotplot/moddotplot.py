@@ -63,6 +63,10 @@ def get_args_parse():
     )
 
     dist_params.add_argument(
+        "-a", "--alpha", default=0.01, type=float, help="Alpha parameter: ."
+    )
+
+    dist_params.add_argument(
         "-o",
         "--output",
         default=None,
@@ -209,6 +213,7 @@ def main():
                 False,
                 args.palette,
                 args.palette_orientation,
+                args.alpha,
             )
         else:
             if len(seq_list) > 1:
@@ -223,6 +228,7 @@ def main():
                 False,
                 args.palette,
                 args.palette_orientation,
+                args.alpha,
             )
 
     else:

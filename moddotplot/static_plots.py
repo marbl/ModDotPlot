@@ -24,9 +24,6 @@ from plotnine import (
 import pandas as pd
 import numpy as np
 import math
-import os
-import polars as pl
-import shutil
 from moddotplot.const import (
     COLS,
     DIVERGING_PALETTES,
@@ -108,6 +105,7 @@ def paired_bed_file(
                 ]
             )
     df = pd.DataFrame(bed, columns=cols)
+    print(df)
     if not output:
         bedfile_output = input_name + ".bed"
         if not no_bed:
