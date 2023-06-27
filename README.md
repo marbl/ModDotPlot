@@ -59,15 +59,23 @@ K-mer size to use. This should be large enough to distinguish unique k-mers with
 
 `-s / --sparsity <int>`
 
-This is the value used selecting modimizers using `0 mod s`, an inverse of the selected k-mer density. A lower value will be more accurate, at the expense of longer plotting time & longer refresh rates in interactive mode. The default is `s = 2/Mbp` of sequence for fast performance without compromising accuracy. For example, on a human Y chromosome ~ 64Mbp, Mod.Plot will set `s = 128`. Interactive mode will automatically round up to the nearest even integer. 
+A higher sparsity value means less k-mers to compare, at the expense of lower accuracy. Modimizers are selected `0 mod s`, an inverse of the selected k-mer density. The default is `s = 2/Mbp` of sequence for fast performance without compromising accuracy. For example, on a human Y chromosome ~ 64Mbp, Mod.Plot will set `s = 128`. Interactive mode will automatically round up to the nearest even integer. 
 
-`-o / --output <string>`
+`-o / --output-dir <string>`
 
-Name of output bed file & plots. Default is `<INPUT_FASTA_FILE>_<SEQUENCE_HEADER>`.
+Name of output directory for bed file & plots. Default is current working directory.
 
 `--identity <int>`
 
-Identity cutoff threshold. Must be greater than 50, less than 100. 
+Identity cutoff threshold. Must be greater than 50, less than 100. Default is 80.
+
+`resolution <int>`
+
+Dotplot resolution. This corresponds to the number of partitions for each sequence. Default is 1000. 
+
+`--alpha <float>`
+
+Each partition takes into account a fraction of its neighboring partition;s k-mers. This is to avoid sub-optimal identity scores when partitons don't overlap identically. Default is 0.01.
 
 `-nc / --non-canonical`
 

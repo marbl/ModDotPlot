@@ -24,6 +24,7 @@ from plotnine import (
 import pandas as pd
 import numpy as np
 import math
+import os
 from moddotplot.const import (
     COLS,
     DIVERGING_PALETTES,
@@ -34,7 +35,6 @@ import itertools
 from typing import List
 from moddotplot.estimate_identity import binomial_distance, containment
 from palettable.colorbrewer import qualitative, sequential, diverging
-import importlib
 
 
 def make_k(vals):
@@ -50,9 +50,7 @@ def paired_bed_file(
     window_partitions: dict,
     input_name: str,
     id_threshold: int,
-    density: int,
     output: str,
-    seq_length: int,
     no_bed: bool,
     no_plot: bool,
     no_hist: bool,
@@ -105,7 +103,6 @@ def paired_bed_file(
                 ]
             )
     df = pd.DataFrame(bed, columns=cols)
-    print(df)
     if not output:
         bedfile_output = input_name + ".bed"
         if not no_bed:
@@ -115,6 +112,7 @@ def paired_bed_file(
             print(f"Creating plots... \n")
             create_plots(
                 [df],
+                ".",
                 input_name,
                 input_name,
                 palette,
@@ -126,15 +124,19 @@ def paired_bed_file(
                 is_freq,
             )
     else:
+        if not os.path.exists(output):
+            os.makedirs(output)
+            print(f"Directory '{output}' created successfully. \n")
         if not no_bed:
-            bedfile_output = output + ".bed"
+            bedfile_output = output + "/" + input_name + ".bed"
             df.to_csv(bedfile_output, sep="\t")
-            print(f"Identity computed! Saved to {bedfile_output} \n")
+            print(f"Self identity matrix complete! Saved to {bedfile_output} \n")
         if not no_plot:
             print(f"Creating plots... \n")
             create_plots(
                 [df],
                 output,
+                input_name,
                 input_name,
                 palette,
                 palette_orientation,
@@ -460,6 +462,7 @@ def make_hist(sdf, palette, palette_orientation):
 
 def create_plots(
     sdf,
+    directory,
     output,
     input_sequence,
     palette,
@@ -489,7 +492,7 @@ def create_plots(
     df_d["z_new"] = df_d["z"] * window * 2 / 3 / 1000000
     tri = make_tri(df_d, input_sequence, palette, palette_orientation)
 
-    plot_filename = f"{output}"
+    plot_filename = f"{directory}/{output}"
     print("Plots created! \n")
 
     print(f"Saving plots to {plot_filename}... \n")
