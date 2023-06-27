@@ -63,12 +63,12 @@ def get_args_parse():
     )
 
     dist_params.add_argument(
-        "-a", "--alpha", default=0.01, type=float, help="Alpha parameter: ."
+        "-a", "--alpha", default=0.01, type=float, help="Alpha parameter: Fraction of neighboring k-mers to include in identity estimation."
     )
 
     dist_params.add_argument(
         "-o",
-        "--output",
+        "--output-dir",
         default=None,
         help="Name for bed file and plots. Will be set to input fasta file name if not provided.",
     )
@@ -243,9 +243,7 @@ def main():
                     windows,
                     seq_list[i],
                     args.identity,
-                    args.sparsity,
-                    args.output,
-                    len(k_list[i]) + args.kmer - 1,
+                    args.output_dir,
                     args.no_bed,
                     args.no_plot,
                     args.no_hist,
@@ -320,6 +318,7 @@ def main():
                         args.dpi,
                         args.kmer,
                         args.bin_freq,
+                        args.output_dir
                     )
                 else:
                     ratio = round(
