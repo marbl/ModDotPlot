@@ -61,6 +61,7 @@ def paired_bed_file(
     dpi: int,
     k: int,
     is_freq: bool,
+    xlim: int,
 ) -> None:
     """
     Given a dictionary of window partitions, creates a BED file containing pairs of
@@ -122,6 +123,7 @@ def paired_bed_file(
                 height,
                 dpi,
                 is_freq,
+                xlim,
             )
     else:
         if not os.path.exists(output):
@@ -145,6 +147,7 @@ def paired_bed_file(
                 height,
                 dpi,
                 is_freq,
+                xlim,
             )
 
 
@@ -164,6 +167,7 @@ def paired_bed_file_a_vs_b(
     dpi: int,
     k: int,
     is_freq: bool,
+    output_dir: str
 ) -> None:
 
     cols: List[str] = COLS
@@ -235,6 +239,11 @@ def get_colors(sdf, ncolors, is_freq):
     else:
         breaks = [bot + i * interval for i in range(ncolors + 1)]
 
+    #breaks = [87.0,89.0,91.0,92.0,93.0,94.0,95.0,96.0,97.0,98.0,99.0,100.0]
+    breaks = [94.5,95.0,95.5,96.0,96.5,97.0,97.5,98.0,98.5,99.0,99.5,100]
+    #breaks = [98.0,98.25,98.5,98.75,99.0,99.25,99.5,99.7,99.8,99.9,100]
+    print(breaks)
+
     labels = np.arange(len(breaks) - 1)
     # corner case of only one %id value
     if len(breaks) == 1:
@@ -277,7 +286,7 @@ def read_df(pj, palette, palette_orientation, is_freq):
     df["discrete"] = get_colors(df, ncolors, is_freq)
 
     # Rename columns if they have different names in the dataframe
-    if "#query_name" in df.columns:
+    if "query_name" in df.columns or "#query_name" in df.columns:
         df.rename(
             columns={
                 "#query_name": "q",
@@ -305,6 +314,7 @@ def diamond(row):
     base = np.array([[1, 0], [0, 1], [-1, 0], [0, -1]]) * side_length
     trans = base + np.array([row["w"], row["z"]])
     df = pd.DataFrame(trans, columns=["w", "z"])
+    #print(df)
     df["discrete"] = int(row["discrete"])
     df["group"] = int(row["group"])
     return df
@@ -383,6 +393,7 @@ def make_tri(df_d, title_name, palette, palette_orientation):
         palette_orientation = "-"
         hexcodes = function_name.hex_colors
 
+    hexcodes = ['#9E0142', '#D53E4F', '#F46D43', '#FDAE61', '#FEE08B', '#E0CB4f', '#E6F598', '#ABDDA4', '#66C2A5', '#3288BD', '#5E4FA2']
     if palette_orientation == "-":
         new_hexcodes = hexcodes[::-1]
     else:
@@ -472,6 +483,7 @@ def create_plots(
     height,
     dpi,
     is_freq,
+    xlim
 ):
 
     df = read_df(sdf, palette, palette_orientation, is_freq)
@@ -491,6 +503,7 @@ def create_plots(
     df_d["w_new"] = df_d["w"] * tri_scale / 1000000
     df_d["z_new"] = df_d["z"] * window * 2 / 3 / 1000000
     tri = make_tri(df_d, input_sequence, palette, palette_orientation)
+    tri += coord_cartesian(xlim=(0,180))
 
     plot_filename = f"{directory}/{output}"
     print("Plots created! \n")

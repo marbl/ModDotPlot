@@ -1,5 +1,7 @@
 from typing import Generator, List
 import pysam
+import numpy as np
+import sys
 
 def custom_hash_fn(h):
     h ^= h >> 33
@@ -8,6 +10,38 @@ def custom_hash_fn(h):
     h *= 0xc4ceb9fe1a85ec53
     h ^= h >> 33
     return h
+
+def is_valid_fasta(file_path):
+    try:
+        with open(file_path, 'r') as file:
+            in_sequence = False
+            for line in file:
+                line = line.strip()
+                if line.startswith('>'):
+                    if in_sequence:
+                        print("Fasta formatting error: '>' found within sequence")
+                        sys.exit(2)
+                    in_sequence = True
+                elif in_sequence and not line:
+                    print("Fasta formatting error: Empty lines found within sequence")
+                    sys.exit(3)
+            return in_sequence 
+    except FileNotFoundError:
+        print("Unable to find fasta file. Check filename and/or directory!")
+        sys.exit(5)
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+        sys.exit(6)
+
+def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='█', printEnd="\r"):
+    percent = f"{100 * (iteration / total):.{decimals}f}"
+    filledLength = int(length * iteration // total)
+    bar = [fill] * filledLength + ['-'] * (length - filledLength)
+    bar_str = ''.join(bar)
+    print(f'\r{prefix} |{bar_str}| {percent}% {suffix}', end=printEnd)
+    if iteration == total:
+        print()
+
 
 def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
     """
@@ -24,6 +58,10 @@ def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
 
     # Calculate the length of the sequence
     n = len(sequence)
+    moddh = round(n/77)
+
+    # Progress bar updates
+    printProgressBar(0, n, prefix = 'Progress:', suffix = 'Complete', length = 40)
 
     # Calculate a mask to use for masking off any bits outside of the k-mer range
     mask = (1 << (3*k)) - 1
@@ -44,6 +82,11 @@ def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
         # Update the k-mer and its reverse complement by adding the next base and dropping the leftmost base
         kmer = ((kmer << 3) & mask) | encode_base(sequence[i])
         rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (3*(k-1))
+
+        #Print progress only if 
+        if i % moddh == 0:
+             printProgressBar(i, n, prefix='Progress:', suffix='Completed', length=40)
+             
 
         # Yield the hash value of the current k-mer and its reverse complement
         yield custom_hash_fn(rc_kmer) if custom_hash_fn(rc_kmer) < custom_hash_fn(kmer) else custom_hash_fn(kmer)
