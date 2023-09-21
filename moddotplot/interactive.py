@@ -20,6 +20,8 @@ import numpy as np
 import dash
 from dash import Input, Output, ctx, html, dcc, State
 import math
+import plotly.graph_objs as go
+
 
 def run_dash(
     kmer_list1,
@@ -58,37 +60,33 @@ def run_dash(
     main_level = image_pyramid[0]
     main_axis = image_axes[0]
 
-    # Create figure
-    fig = px.imshow(
-        main_level,
-        x=main_axis,
-        y=main_axis,
-        zmin=identity,
-        zmax=100,
+    heatmap = go.Heatmap(z=main_level,
+                        zmin=identity,
+                        zmax=100,
+                        colorscale=current_color,
+                        x=main_axis,
+                        y=main_axis,
+                        showscale=True,  # Shows color scale bar
+                        colorbar=dict(title="Identity"),  # Color bar title
+                        hoverinfo="x+y+z",  # Hover info to display
+                        text=main_level,  # Text to display on hover
+                        hovertemplate="X: %{x}<br>Y: %{y}<br>Identity: %{z:.2f}",  # Custom hover template
+                        name=""
+                        )
+
+    fig = go.Figure(data=[heatmap])
+    fig.update_xaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True)
+    fig.update_xaxes(nticks=10, title_text=x_name, title_font=dict(size=18))
+
+    # Update y-axis properties directly within the heatmap trace
+    fig.update_yaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True, autorange='reversed')
+    fig.update_yaxes(title_text=y_name, title_font=dict(size=18))
+
+    # Set layout properties
+    fig.update_layout(
         height=1000,
         width=1000,
-        color_continuous_scale=current_color,
-        labels=dict(color="Identity"),
-        #origin="lower",
-    )
-
-    # Cross layout on hovering dotplot
-    fig.update_layout(
-        hovermode="x unified"
-    )
-    fig.update_xaxes(showspikes=True, spikemode="across")
-    fig.update_xaxes(ticks="outside")
-    fig.update_yaxes(showspikes=True, spikemode="across")
-    fig.update_yaxes(ticks="outside")
-    fig.update_xaxes(title_text=x_name)
-    fig.update_yaxes(title_text=y_name)
-    fig.update_xaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
-    fig.update_yaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
-    fig.update_yaxes(nticks=10)
-    fig.update_xaxes(title_font=dict(size=18))
-    fig.update_yaxes(title_font=dict(size=18))
-    fig.update_layout(
-        hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica")
+        hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica"),
     )
 
     colorscales = px.colors.named_colorscales()
@@ -104,11 +102,32 @@ def run_dash(
         children=[
             
             html.Div(
-                dcc.Graph(id="dotplot", figure=fig), 
-                style={"flex": "1", "display": "flex", "justify-content": "center"},
+                [
+                    dcc.Graph(id="dotplot", figure=fig),
+                    html.Div(
+                        html.Div(
+                                dcc.RangeSlider(
+                                id='threshold-slider',
+                                min=identity,
+                                max=100,
+                                step=1,
+                                value=[identity, 100],  # Initial range values
+                                marks=None,  # Empty labels to remove numbers
+                                vertical=True,  # Make the slider vertical
+                                verticalHeight=800,  # Adjust the height of the slider
+                                allowCross=False,  # Disable the circle handle
+                                pushable=1,  # Use pushable to create a line handle
+                                tooltip={"placement": "bottom", "always_visible": False},  # Hide tooltip
+                            ),
+                            style={"height":"100%"},  # Add 100px padding to the top
+                        ),
+                        style={"padding-top":"132px", "padding-bottom": "88px"},
+                    ),
+                ],  
+                style={"display": "flex", "justify-content": "center"},
             ),
             html.Div(
-                style={"width": "330px"},
+                style={"width": "330px", "justify-content": "left"},
                 children=[
                     # Div for loading screen upon refresh
                     html.Div(
@@ -1179,6 +1198,36 @@ def run_dash(
         # Return the appropriate style based on the current mode
         return dark_mode_style if dark_mode else light_mode_style
 
+    '''@app.callback(
+        Output('dotplot', 'figure', allow_duplicate=True),
+        [Input('threshold-slider', 'value'),
+        Input('gradient-toggle', 'value')]
+    )
+    def update_heatmap(threshold_range, button_states):
+        # Apply the threshold range to the data using conditional indexing
+        masked_data = np.where((main_level < threshold_range[0]) | (main_level > threshold_range[1]), 0, main_level)
+        print(masked_data[0])
+        # Create the heatmap using go.Heatmap
+        
+        # Adjust the color scale based on the "Keep Original Gradient" button
+        if 'keep-original' in button_states:
+            zmin = 0
+            zmax = 16
+        else:
+            zmin, zmax = threshold_range
+        
+        new_heatmap = go.Heatmap(z=masked_data,
+                            zmin=zmin,
+                            zmax=zmax,
+                            x=main_axis,
+                            y=main_axis)
+        
+        # Create a figure with the updated heatmap
+        fig = go.Figure(data=[heatmap])
+        fig.update_layout(yaxis_scaleanchor="x")
+        #print("Is something happening???")
+        return fig'''
+
     # Callback activates when panning, zooming, or changing color
     @app.callback(
         Output("dotplot", "figure", allow_duplicate=True),
@@ -1186,10 +1235,27 @@ def run_dash(
         Input("dotplot", "relayoutData"),
         Input("dotplot", "figure"),
         Input("color-options", "value"),
+        Input("threshold-slider", "value"),
     )
-    def update_dotplot(relayoutData, figure, color):
+    def update_dotplot(relayoutData, figure, color, threshold_range):
         current_color = get_interactive_color(get_matching_colors(color), "+")
-        fig.update_layout(coloraxis=dict(colorscale=current_color))
+        new_heatmap = heatmap
+        new_heatmap.update(dict(colorscale=current_color))
+
+        masked_data = np.where((new_heatmap["z"] < threshold_range[0]) | (new_heatmap["z"] > threshold_range[1]), 0, new_heatmap["z"])
+        fig = go.Figure(data=[new_heatmap])
+        fig.update_traces(z=masked_data)
+        fig.update_xaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True)
+        fig.update_xaxes(nticks=10, title_text=x_name, title_font=dict(size=18))
+
+        # Update y-axis properties directly within the heatmap trace
+        fig.update_yaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True, autorange='reversed')
+        fig.update_yaxes(title_text=y_name, title_font=dict(size=18))
+        # Set layout properties
+
+        
+        
+        fig.update_layout(yaxis_scaleanchor="x")
         # Flip y axis since the layout of ModDotPlot it's goes top to bottom
         # TODO: Add option to flip y axis
         if relayoutData is not None:
@@ -1253,34 +1319,34 @@ def run_dash(
                             relayoutData["yaxis.range[1]"] + (i * amount / resolution)
                             for i in range(resolution)
                         ]
-                        new_fig = px.imshow(
-                            identity_matrix,
-                            x=x_ax,
-                            y=y_ax,
+                        new_heatmap = go.Heatmap(
+                            z=using_matrix,
                             zmin=identity,
                             zmax=100,
-                            height=1000,
-                            width=1000,
-                            color_continuous_scale=current_color,
-                            labels=dict(color="Identity"),
+                            colorscale=current_color,
+                            x=x_ax,
+                            y=y_ax,
+                            showscale=True,  # Shows color scale bar
+                            colorbar=dict(title="Identity"),  # Color bar title
+                            hoverinfo="x+y+z",  # Hover info to display
+                            text=main_level,  # Text to display on hover
+                            hovertemplate="X: %{x}<br>Y: %{y}<br>Identity: %{z:.2f}",
+                            name=""
                         )
-                        current_fig = new_fig
-                        current_fig.update_layout(hovermode="x unified")
-                        current_fig.update_xaxes(showspikes=True, spikemode="across")
-                        current_fig.update_yaxes(showspikes=True, spikemode="across")
+
+                        current_fig = go.Figure(data=[new_heatmap])
+                        current_fig.update_xaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True)
+                        current_fig.update_xaxes(nticks=10, title_text=x_name, title_font=dict(size=18))
+
+                        # Update y-axis properties directly within the heatmap trace
+                        current_fig.update_yaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True, autorange='reversed')
+                        current_fig.update_yaxes(title_text=y_name, title_font=dict(size=18))
                         current_fig.update_layout(
                             hoverlabel=dict(
                                 bgcolor="white", font_size=16, font_family="Helvetica"
                             )
                         )
-                        current_fig.update_xaxes(title_text=x_name)
-                        current_fig.update_yaxes(title_text=y_name)
-                        current_fig.update_xaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
-                        current_fig.update_yaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
-                        current_fig.update_layout(
-                            hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica")
-                        )
-                        return current_fig, ""
+                        current_fig.update_layout(yaxis_scaleanchor="x")
                     
                     else:
                         using_matrix = image_pyramid[new_yy]
@@ -1294,34 +1360,41 @@ def run_dash(
 
                         x_equi, y_equi = make_differences_equal(x_start_updated, x_end_updated,y_start_updated,y_end_updated)
                         using_matrix = np.copy(using_matrix[y_start_updated:y_equi, x_start_updated:x_equi])
+                        masked_matrix = np.where((using_matrix < threshold_range[0]) | (using_matrix > threshold_range[1]), 0, using_matrix)
 
                         x_ax = image_axes[new_yy][x_start_updated:x_equi]
                         y_ax = image_axes[new_yy][y_start_updated:y_equi]
 
 
                         # Create figure
-                        new_fig = px.imshow(
-                            using_matrix,
-                            x=x_ax,
-                            y=y_ax,
+                        new_heatmap = go.Heatmap(
+                            z=masked_matrix,
                             zmin=identity,
                             zmax=100,
-                            color_continuous_scale=current_color,
-                            labels=dict(color="Identity"),
+                            colorscale=current_color,
+                            x=x_ax,
+                            y=y_ax,
+                            showscale=True,  # Shows color scale bar
+                            colorbar=dict(title="Identity"),  # Color bar title
+                            hoverinfo="x+y+z",  # Hover info to display
+                            text=main_level,  # Text to display on hover
+                            hovertemplate="X: %{x}<br>Y: %{y}<br>Identity: %{z:.2f}", 
+                            name=""
                         )
-                        current_fig = new_fig
-                        current_fig.update_layout(hovermode="x unified")
-                        current_fig.update_xaxes(showspikes=True, spikemode="across")
-                        current_fig.update_yaxes(showspikes=True, spikemode="across")
+
+                        current_fig = go.Figure(data=[new_heatmap])
+                        current_fig.update_xaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True)
+                        current_fig.update_xaxes(nticks=10, title_text=x_name, title_font=dict(size=18))
+
+                        # Update y-axis properties directly within the heatmap trace
+                        current_fig.update_yaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True, autorange='reversed')
+                        current_fig.update_yaxes(title_text=y_name, title_font=dict(size=18))
                         current_fig.update_layout(
                             hoverlabel=dict(
                                 bgcolor="white", font_size=16, font_family="Helvetica"
                             )
                         )
-                        current_fig.update_xaxes(title_text=x_name)
-                        current_fig.update_yaxes(title_text=y_name)
-                        current_fig.update_xaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
-                        current_fig.update_yaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
+                        current_fig.update_layout(yaxis_scaleanchor="x")
                         return current_fig, ""
                     
             elif 'xaxis.autorange' in relayoutData:
@@ -1340,5 +1413,7 @@ def run_dash(
             #figure.update_layout(coloraxis=dict(colorscale=current_color))
             # This occurs at startup and when selecting color. Return the base figure with color
             return fig, ""
+
+        
     
     app.run_server(debug=True, use_reloader=False, port=port_number)
