@@ -233,7 +233,7 @@ def pairwise_containment_matrix(
             )
     if not supress_progress:
         printProgressBar(n, n, prefix='Progress:', suffix='Completed', length=40) # show completed progress bar
-
+        print("\n")
     return containment_matrix
 
 # Function used to find matching color palette to those available in const.py

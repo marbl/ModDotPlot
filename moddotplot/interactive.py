@@ -70,7 +70,7 @@ def run_dash(
                         colorbar=dict(title="Identity"),  # Color bar title
                         hoverinfo="x+y+z",  # Hover info to display
                         text=main_level,  # Text to display on hover
-                        hovertemplate="X: %{x}<br>Y: %{y}<br>Identity: %{z:.2f}",  # Custom hover template
+                        hovertemplate="X: %{x}<br>Y: %{y}<br><b>Identity: %{z:.2f}</b>",  # Custom hover template
                         name=""
                         )
 
@@ -84,9 +84,10 @@ def run_dash(
 
     # Set layout properties
     fig.update_layout(
-        height=1000,
-        width=1000,
+        height=800,
+        width=800,
         hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica"),
+        yaxis_scaleanchor="x",
     )
 
     colorscales = px.colors.named_colorscales()
@@ -98,30 +99,27 @@ def run_dash(
     # HTML for plot webpage
     app.layout = html.Div(
         id="main_color",
-        style={"display": "flex", "height": "100vh", "backgroundColor": "black", "color": "white"},
+        style={"display": "flex", "flexDirection": "row", "alignItems": "center", "backgroundColor": "white", "color": "white", "height": "100vh"},
         children=[
-            
             html.Div(
                 [
                     dcc.Graph(id="dotplot", figure=fig),
                     html.Div(
-                        html.Div(
-                                dcc.RangeSlider(
-                                id='threshold-slider',
-                                min=identity,
-                                max=100,
-                                step=1,
-                                value=[identity, 100],  # Initial range values
-                                marks=None,  # Empty labels to remove numbers
-                                vertical=True,  # Make the slider vertical
-                                verticalHeight=800,  # Adjust the height of the slider
-                                allowCross=False,  # Disable the circle handle
-                                pushable=1,  # Use pushable to create a line handle
-                                tooltip={"placement": "bottom", "always_visible": False},  # Hide tooltip
-                            ),
-                            style={"height":"100%"},  # Add 100px padding to the top
+                        dcc.RangeSlider(
+                            id='threshold-slider',
+                            min=identity,
+                            max=100,
+                            step=0.1,
+                            value=[identity, 100], 
+                            marks=None,  
+                            vertical=True,  
+                            verticalHeight=580,  
+                            allowCross=False,  
+                            pushable=0.1,  
+                            tooltip={"placement": "bottom", "always_visible": False},
+                            className="custom-slider"
                         ),
-                        style={"padding-top":"132px", "padding-bottom": "88px"},
+                        style={"display": "flex", "justify-content": "center", "padding-top": "110px"},
                     ),
                 ],  
                 style={"display": "flex", "justify-content": "center"},
@@ -139,7 +137,7 @@ def run_dash(
                             )
                         ],
                         style={
-                            "padding-top": "50px",
+                            "padding-top": "140px",
                             "padding-left": "20px",
                             "padding-bot": "130px",
                             "width": "120px",
@@ -162,7 +160,7 @@ def run_dash(
                         html.Button("Print plot", id="print"),
                             style={"padding-top": "10px", "padding-left": "20px","padding-bot": "30px", "width": "160px", "text-align": "left"}
                     ),
-    
+                    
                     # Placeholder for content
                     html.Div(id="content"),
                     html.Div(
@@ -1058,6 +1056,10 @@ def run_dash(
                             )
                         ],
                     ),
+                    html.Div(
+                        f"Alpha: {alpha}",
+                            style={"font-family": "Helvetica, Arial, sans-serif", "padding-top": "10px", "padding-left": "20px","padding-bot": "30px", "width": "160px", "text-align": "left"}
+                    ),
                 ],
             ),
         ],
@@ -1146,11 +1148,11 @@ def run_dash(
             trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
             if trigger_id == "zoom-in-button":
-                new_width = current_figure['layout']['width'] + 100
-                new_height = current_figure['layout']['height'] + 100
+                new_width = current_figure["layout"]['width'] + 100
+                new_height = current_figure["layout"]['height'] + 100
             elif trigger_id == "zoom-out-button":
-                new_width = max(current_figure['layout']['width'] - 100, 100)
-                new_height = max(current_figure['layout']['height'] - 100, 100)
+                new_width = max(current_figure["layout"]['width'] - 100, 100)
+                new_height = max(current_figure["layout"]['height'] - 100, 100)
             else:
                 raise dash.exceptions.PreventUpdate
 
@@ -1236,6 +1238,7 @@ def run_dash(
         Input("dotplot", "figure"),
         Input("color-options", "value"),
         Input("threshold-slider", "value"),
+        prevent_initial_call=True,
     )
     def update_dotplot(relayoutData, figure, color, threshold_range):
         current_color = get_interactive_color(get_matching_colors(color), "+")
@@ -1253,7 +1256,10 @@ def run_dash(
         fig.update_yaxes(title_text=y_name, title_font=dict(size=18))
         # Set layout properties
 
-        
+        # Figure doesn't have height here... how do I fix that? 
+        fig.update_layout(
+            hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica"),
+        )
         
         fig.update_layout(yaxis_scaleanchor="x")
         # Flip y axis since the layout of ModDotPlot it's goes top to bottom
@@ -1415,5 +1421,39 @@ def run_dash(
             return fig, ""
 
         
+    app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            /* Custom CSS for the RangeSlider */
+            .custom-slider .rc-slider-track {
+                background-color: gray;  /* Change the highlight color to gray */
+            }
+
+            .custom-slider .rc-slider-dot {
+                display: none;  /* Hide the dots */
+            }
+
+            .custom-slider .rc-slider-handle {
+                border: 2px solid black;  /* Change the handle border color to gray */
+                font-family: Helvetica, Arial, sans-serif;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
     
     app.run_server(debug=True, use_reloader=False, port=port_number)
