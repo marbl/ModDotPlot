@@ -22,7 +22,6 @@ import math
 from moddotplot.static_plots import (
     paired_bed_file,
     paired_bed_file_a_vs_b,
-    create_plots,
 )
 import itertools
 import pandas as pd
@@ -64,7 +63,7 @@ def get_args_parse():
     )
 
     dist_params.add_argument(
-        "-r", "--resolution", default=800, type=int, help="Dotplot resolution."
+        "-r", "--resolution", default=1000, type=int, help="Dotplot resolution."
     )
 
     dist_params.add_argument(
@@ -104,7 +103,7 @@ def get_args_parse():
     interactive_params = parser.add_argument_group("Interactive plotting commands")
 
     interactive_params.add_argument(
-        "--no-interactive",
+        "--static",
         action="store_true",
         help="Prevent launching interactive mode: used for producing images only."
     )
@@ -120,7 +119,7 @@ def get_args_parse():
     interactive_params.add_argument(
         "--save",
         action="store_true",
-        help="Save image pyramid to . Only used in interactive mode.",
+        help="Save image pyramid to file. Only used in interactive mode.",
     )
 
     interactive_params.add_argument(
@@ -241,7 +240,7 @@ def main():
         args.sparsity = math.ceil(max(len_list) / 500000)
         print(f"Using s = {args.sparsity}. \n")
 
-    if not args.no_interactive:
+    if not args.static:
         # Compute base layer for modimizers
 
         if len(seq_list) > 1 and (args.compare or args.compare_only):
@@ -316,11 +315,15 @@ def main():
             for i in range(len(seq_list)):
                 print(f"Computing self identity matrix for {seq_list[i]}... \n")
                 mod_list = get_mods(k_list[i], args.sparsity, args.resolution)
+                mod_set_neighbors_hi = convert_set_neighbors(mod_list, args.alpha)
                 windows = partition_evenly_spaced_modimizers(
                     mod_list, len(k_list[i]) + args.kmer - 1, args.resolution
                 )
+                new_windows = partition_evenly_spaced_modimizers(
+                    mod_set_neighbors_hi, len(k_list[i]) + args.kmer - 1, args.resolution
+                )
                 paired_bed_file(
-                    windows,
+                    new_windows,
                     seq_list[i],
                     args.identity,
                     args.output_dir,
@@ -457,6 +460,7 @@ def main():
                         args.dpi,
                         args.kmer,
                         args.bin_freq,
+                        args.output_dir
                     )
 
 
