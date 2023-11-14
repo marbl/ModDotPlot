@@ -44,7 +44,7 @@ def get_args_parse():
         "--input",
         required=True,
         default=argparse.SUPPRESS,
-        help="Path to input fasta file(s)",
+        help="Path to input files. Accepts fasta file(s), or bed files (if re-running a previously computed matrix)",
         nargs="+",
     )
 
@@ -57,17 +57,21 @@ def get_args_parse():
     dist_params.add_argument(
         "-s",
         "--sparsity",
-        help="Modimizer sparsity value. Higher value will reduce the number of modimizers, but will increase performance. Default set to 2 per Mbp of sequence, rounded up to nearest even integer)",
+        help="Modimizer sparsity value. Higher value will reduce the number of modimizers, but will increase performance. Default set to 1 per Mbp of sequence, rounded up to nearest even integer.",
         default=None,
         type=int,
     )
 
     dist_params.add_argument(
-        "-r", "--resolution", default=1000, type=int, help="Dotplot resolution."
+        "-r", "--resolution", default=1000, type=int, help="Dotplot resolution, or the number of cells to compare against. Prioritized over window size."
     )
 
     dist_params.add_argument(
-        "-id", "--identity", default=86, type=int, help="Identity cutoff threshold."
+        "-w", "--window", default=None, type=int, help="Window size, or how many k-mers partitoned per cell. Used in lieu of resolution"
+    )
+
+    dist_params.add_argument(
+        "-id", "--identity", default=86, type=int, help="Identity cutoff threshold. Set higher for faster computations."
     )
 
     dist_params.add_argument(
@@ -78,14 +82,7 @@ def get_args_parse():
         "-o",
         "--output-dir",
         default=None,
-        help="Name for bed file and plots. Will be set to input fasta file name if not provided.",
-    )
-
-    dist_params.add_argument(
-        "-nc",
-        "--non-canonical",
-        default=False,
-        help="Only consider forward strand when computing k-mers. Not recommended for most applications.",
+        help="Directory name for bed file, plots, and stored matrices. Defaults to working directory.",
     )
 
     dist_params.add_argument(
@@ -103,30 +100,24 @@ def get_args_parse():
     interactive_params = parser.add_argument_group("Interactive plotting commands")
 
     interactive_params.add_argument(
-        "--static",
-        action="store_true",
-        help="Prevent launching interactive mode: used for producing images only."
-    )
-
-    interactive_params.add_argument(
         "-l",
         "--layers",
         default=3,
         type=int,
-        help="Number of image pyramid layers to compute when rendering interactive mode."
+        help="Number of matrix hierarchy layers to compute when preparing interactive mode."
     )
 
     interactive_params.add_argument(
         "--save",
         action="store_true",
-        help="Save image pyramid to file. Only used in interactive mode.",
+        help="Save hierarchical matrices to file. Only used in interactive mode.",
     )
 
     interactive_params.add_argument(
         "--load",
         default=None,
         type=str,
-        help="Load previously computed image pyramid file. Only used in interactive mode.",
+        help="Load previously computed hierarchical matrices.",
     )
 
     interactive_params.add_argument(
@@ -139,11 +130,15 @@ def get_args_parse():
     plot_params = parser.add_argument_group("Static plotting commands")
 
     plot_params.add_argument(
+        "--static", action="store_true", help="Create static bitmap and vector dotplots. Prevents launching of Plotly & Dash. "
+    )
+
+    plot_params.add_argument(
         "--no-bed", action="store_true", help="Don't output bed file."
     )
 
     plot_params.add_argument(
-        "--no-plot", action="store_true", help="Don't output svg and png image files."
+        "--no-plot", action="store_true", help="Don't output pdf and png image files."
     )
 
     plot_params.add_argument(
@@ -159,13 +154,14 @@ def get_args_parse():
     )
 
     plot_params.add_argument(
-        "--xaxis", default=None, type=float, help="Change x axis for static plot."
+        "--xaxis", default=None, type=float, help="Change x axis for static plot. Default is length of the sequence, in mbp."
     )
 
     plot_params.add_argument(
         "--dpi", default=300, type=int, help="Change default plot dpi."
     )
 
+    # TODO: Create list of accepted colors.
     plot_params.add_argument(
         "--palette",
         default="Spectral_11",
@@ -182,10 +178,17 @@ def get_args_parse():
     )
 
     plot_params.add_argument(
-        "-b",
-        "--bedfile",
+        "--colors",
         default=None,
-        help="Take bedfile as input instead.",
+        nargs="+",
+        help="Use a custom color palette, entered in either hexcode or rgb format.",
+    )
+
+    plot_params.add_argument(
+        "--breakpoints",
+        default=None,
+        nargs="+",
+        help="Introduce custom color thresholds. Must be between identity threshold and 100.",
     )
 
     plot_params.add_argument(
@@ -194,15 +197,6 @@ def get_args_parse():
         help="By default, histograms are evenly spaced based on the number of colors and the identity threshold. Select this argument to bin based on the frequency of observed identity values.",
     )
     # TODO: implement logging options
-    """logging_params = parser.add_argument_group("Logging options")
-
-    logging_params.add_argument(
-        "-q", "--quiet", action="store_true", help="Supress help text when running."
-    )
-
-    logging_params.add_argument(
-        "-v", "--verbose", action="store_true", help="Add additional logging info when running."
-    )"""
 
     args = parser.parse_args()
 
