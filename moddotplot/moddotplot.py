@@ -158,7 +158,7 @@ def get_args_parse():
     )
 
     plot_params.add_argument(
-        "--dpi", default=300, type=int, help="Change default plot dpi."
+        "--dpi", default=600, type=int, help="Change default plot dpi."
     )
 
     # TODO: Create list of accepted colors.
@@ -238,7 +238,7 @@ def main():
         # Compute base layer for modimizers
 
         if len(seq_list) > 1 and (args.compare or args.compare_only):
-            print(f"Building image pyramid with {args.layers} layers.... \n")
+            print(f"Building matrix hierarchy with {args.layers} layers.... \n")
 
             #TODO: assert that args layers is a reasonable number
 
@@ -251,7 +251,7 @@ def main():
                 mod_set_2 = convert_set(mod_list_2)
                 mod_set_neighbors_1 = convert_set_neighbors(mod_list_1, args.alpha)
                 mod_set_neighbors_2 = convert_set_neighbors(mod_list_2, args.alpha)
-                print(f"Layer {i+1} \n")
+                print(f"Layer {i+1} using sparsity {(2**i)}\n")
                 xd = pairwise_containment_matrix(mod_set_1, mod_set_2, mod_set_neighbors_1, mod_set_neighbors_2, args.identity, args.kmer, False)
                 image_pyramid.append(xd)
 
@@ -332,6 +332,8 @@ def main():
                     args.kmer,
                     args.bin_freq,
                     args.xaxis,
+                    args.colors,
+                    args.breakpoints,
                 )
         # --------------------
         if (args.compare or args.compare_only) and len(seq_list) > 1:
