@@ -1,3 +1,4 @@
+from turtle import position
 import plotly.express as px
 from moddotplot.estimate_identity import (
     get_mods,
@@ -50,6 +51,7 @@ def run_dash(
 
     important = generate_dict_from_list(mod_thresholds_list)
 
+    new_sparsity = sparsity
     image_axes = []
     # Multiply the identity threshold by 100
     for img in image_pyramid:
@@ -82,12 +84,22 @@ def run_dash(
     fig.update_yaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True, autorange='reversed')
     fig.update_yaxes(title_text=y_name, title_font=dict(size=18))
 
+    fig_title = ""
+    if x_name == y_name:
+        fig_title = f"Self-Identity Plot: {x_name}"
+    else:
+        fig_title = f"Comparative Plot: {x_name} vs. {y_name}"
+
     # Set layout properties
     fig.update_layout(
         height=800,
         width=800,
         hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica"),
         yaxis_scaleanchor="x",
+        title=fig_title, 
+        title_font=dict(size=28, family="Helvetica"),  
+        title_x = 0.5,
+        title_y = 0.95,
     )
 
     colorscales = px.colors.named_colorscales()
@@ -99,7 +111,7 @@ def run_dash(
     # HTML for plot webpage
     app.layout = html.Div(
         id="main_color",
-        style={"display": "flex", "flexDirection": "row", "alignItems": "center", "backgroundColor": "white", "color": "white", "height": "100vh"},
+        style={"alignItems": "center", "backgroundColor": "white", "color": "black", "height": "100vh"},
         children=[
             html.Div(
                 [
@@ -119,57 +131,56 @@ def run_dash(
                             tooltip={"placement": "bottom", "always_visible": False},
                             className="custom-slider"
                         ),
-                        style={"display": "flex", "justify-content": "center", "padding-top": "110px"},
+                        style={"display": "flex", "justifyContent": "center", "paddingTop": "110px"},
                     ),
-                ],  
-                style={"display": "flex", "justify-content": "center"},
-            ),
-            html.Div(
-                style={"width": "330px", "justify-content": "left"},
-                children=[
-                    # Div for loading screen upon refresh
                     html.Div(
                         [
-                            dcc.Loading(
-                                id="loading-2",
-                                children=[html.Div(id="loading-output-2")],
-                                type="circle",
-                            )
-                        ],
-                        style={
-                            "padding-top": "140px",
-                            "padding-left": "20px",
-                            "padding-bot": "130px",
-                            "width": "120px",
-                            "font-family": "Helvetica, Arial, sans-serif",
-                        },  # Added padding to separate the content
-                    ),
-                    html.Div(
-                        html.Button("Toggle Dark Mode", id="dark-mode-toggle"),
-                            style={"padding-top": "50px","padding-left": "20px","padding-bot": "30px"}
-                    ),
-                    html.Div(
-                        html.Button("+ Expand Plot", id="zoom-in-button"),
-                            style={"padding-top": "10px", "padding-left": "20px","padding-bot": "30px", "width": "160px", "text-align": "left"}
-                    ),
-                    html.Div(
-                        html.Button("- Condense Plot", id="zoom-out-button"),
-                            style={"padding-top": "10px", "padding-left": "20px","padding-bot": "30px", "width": "160px", "text-align": "left"}
-                    ),
-                    html.Div(
-                        html.Button("Print plot", id="print"),
-                            style={"padding-top": "10px", "padding-left": "20px","padding-bot": "30px", "width": "160px", "text-align": "left"}
-                    ),
-                    
-                    # Placeholder for content
+                            html.Div(
+                                [
+                                    dcc.Loading(
+                                        id="loading-2",
+                                        children=[html.Div(id="loading-output-2")],
+                                        type="circle",
+                                    )
+                                ],
+                                style={
+                                    "paddingBottom": "40px",
+                                    "paddingLeft": "40px",
+                                    "width": "100px",
+                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                },  # Added padding to separate the content
+                            ),
+                            html.Div(
+                                children=[f"Sparsity: {new_sparsity}"],
+                                id='sparsity-div',
+                                    style={"fontFamily": "Helvetica, Arial, sans-serif", "paddingTop": "10px", "paddingLeft": "45px","paddingBot": "30px", "width": "160px", "textAlign": "left"}
+                            ),
+                            html.Div(
+                                children=[f"Layer: 1/{len(image_pyramid)}"],
+                                id='layer-div',
+                                    style={"fontFamily": "Helvetica, Arial, sans-serif", "paddingTop": "10px", "paddingLeft": "45px","paddingBot": "30px", "width": "160px", "textAlign": "left"}
+                            ),
+                            html.Div(
+                                f"Alpha: {alpha}",
+                                    style={"fontFamily": "Helvetica, Arial, sans-serif", "paddingTop": "10px", "paddingLeft": "45px","paddingBot": "30px", "width": "160px", "textAlign": "left"}
+                            ),
+                            
+                            dcc.Checklist(
+                                id='gradient-toggle',
+                                options=[
+                                    {'label': '  Readjust Gradient', 'value': 'keep-original'}
+                                ],
+                                value=[],
+                                style={"paddingTop": "10px", "paddingLeft": "24px", "paddingBottom": "30px", "width": "260px", "textAlign": "left", "fontFamily": "Helvetica, Arial, sans-serif",}
+                            ),
+                            # Placeholder for content
                     html.Div(id="content"),
                     html.Div(
                         "Color Palette",
                         id="color-palette-text",
                         style={
-                            "font-family": "Helvetica, Arial, sans-serif",
-                            "padding-top": "30px",
-                            "padding-left": "20px",  # Added padding to separate the content
+                            "fontFamily": "Helvetica, Arial, sans-serif",
+                            "paddingLeft": "45px",  # Added padding to separate the content
                         },
                     ),
                     html.Div(
@@ -190,14 +201,14 @@ def run_dash(
                                                         html.Span(
                                                             "Spectral",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Spectral",
@@ -208,14 +219,14 @@ def run_dash(
                                                         html.Span(
                                                             "Sequential Color Palettes",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Sequential",
@@ -232,14 +243,14 @@ def run_dash(
                                                         html.Span(
                                                             "Blues",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Blues",
@@ -255,14 +266,14 @@ def run_dash(
                                                         html.Span(
                                                             "BuGn",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "BuGn",
@@ -278,14 +289,14 @@ def run_dash(
                                                         html.Span(
                                                             "BuPu",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "BuPu",
@@ -301,14 +312,14 @@ def run_dash(
                                                         html.Span(
                                                             "GnBu",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "GnBu",
@@ -324,14 +335,14 @@ def run_dash(
                                                         html.Span(
                                                             "Greens",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Green",
@@ -347,14 +358,14 @@ def run_dash(
                                                         html.Span(
                                                             "Greys",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Greys",
@@ -370,14 +381,14 @@ def run_dash(
                                                         html.Span(
                                                             "OrRd",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "OrRd",
@@ -393,14 +404,14 @@ def run_dash(
                                                         html.Span(
                                                             "Oranges",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Oranges",
@@ -416,14 +427,14 @@ def run_dash(
                                                         html.Span(
                                                             "PuBu",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "PuBu",
@@ -439,14 +450,14 @@ def run_dash(
                                                         html.Span(
                                                             "PuBuGn",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "PuBuGn",
@@ -462,14 +473,14 @@ def run_dash(
                                                         html.Span(
                                                             "PuRd",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "PuRd",
@@ -485,14 +496,14 @@ def run_dash(
                                                         html.Span(
                                                             "Purples",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Purples",
@@ -508,14 +519,14 @@ def run_dash(
                                                         html.Span(
                                                             "RdPu",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "RdPu",
@@ -531,14 +542,14 @@ def run_dash(
                                                         html.Span(
                                                             "Reds",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Reds",
@@ -554,14 +565,14 @@ def run_dash(
                                                         html.Span(
                                                             "YlGn",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "YlGn",
@@ -577,14 +588,14 @@ def run_dash(
                                                         html.Span(
                                                             "YlGnBu",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "YlGnBu",
@@ -600,14 +611,14 @@ def run_dash(
                                                         html.Span(
                                                             "YlOrBr",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "YlOrBr",
@@ -623,14 +634,14 @@ def run_dash(
                                                         html.Span(
                                                             "YlOrRd",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "YlOrRd",
@@ -641,14 +652,14 @@ def run_dash(
                                                         html.Span(
                                                             "Divergent Color Palettes",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Divergent",
@@ -665,14 +676,14 @@ def run_dash(
                                                         html.Span(
                                                             "BrBG",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "BrBG",
@@ -688,14 +699,14 @@ def run_dash(
                                                         html.Span(
                                                             "PRGn",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "PRGn",
@@ -711,14 +722,14 @@ def run_dash(
                                                         html.Span(
                                                             "PiYG",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "PiYG",
@@ -734,14 +745,14 @@ def run_dash(
                                                         html.Span(
                                                             "PuOr",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "PuOr",
@@ -757,14 +768,14 @@ def run_dash(
                                                         html.Span(
                                                             "RdBu",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "RdBu",
@@ -780,14 +791,14 @@ def run_dash(
                                                         html.Span(
                                                             "RdGy",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "RdGy",
@@ -803,14 +814,14 @@ def run_dash(
                                                         html.Span(
                                                             "RdYlBu",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "RdYlBu",
@@ -826,14 +837,14 @@ def run_dash(
                                                         html.Span(
                                                             "RdYlGn",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "RdYlGn",
@@ -844,14 +855,14 @@ def run_dash(
                                                         html.Span(
                                                             "Qualitative Color Palettes",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Qualitative",
@@ -868,14 +879,14 @@ def run_dash(
                                                         html.Span(
                                                             "Accent",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Accent",
@@ -891,14 +902,14 @@ def run_dash(
                                                         html.Span(
                                                             "Dark2",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Dark2",
@@ -914,14 +925,14 @@ def run_dash(
                                                         html.Span(
                                                             "Paired",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Paired",
@@ -937,14 +948,14 @@ def run_dash(
                                                         html.Span(
                                                             "Pastel1",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Pastel1",
@@ -960,14 +971,14 @@ def run_dash(
                                                         html.Span(
                                                             "Pastel2",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Pastel2",
@@ -983,14 +994,14 @@ def run_dash(
                                                         html.Span(
                                                             "Set1",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Set1",
@@ -1006,14 +1017,14 @@ def run_dash(
                                                         html.Span(
                                                             "Set2",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Set2",
@@ -1029,14 +1040,14 @@ def run_dash(
                                                         html.Span(
                                                             "Set3",
                                                             style={
-                                                                "font-size": 15,
-                                                                "padding-left": 10,
+                                                                "fontSize": 15,
+                                                                "paddingLeft": 10,
                                                             },
                                                         ),
                                                     ],
                                                     style={
-                                                        "align-items": "center",
-                                                        "justify-content": "center",
+                                                        "alignItems": "center",
+                                                        "justifyContent": "center",
                                                     },
                                                 ),
                                                 "value": "Set3",
@@ -1048,19 +1059,19 @@ def run_dash(
                                     html.Div(id="output-div"),
                                 ],
                                 style={
-                                    "padding-top": "10px",
-                                    "padding-left": "20px",
+                                    "paddingTop": "10px",
+                                    "paddingLeft": "20px",
                                     "width": "250px",
-                                    "font-family": "Helvetica, Arial, sans-serif",
+                                    "fontFamily": "Helvetica, Arial, sans-serif",
                                 },  # Added padding to separate the content
                             )
                         ],
                     ),
-                    html.Div(
-                        f"Alpha: {alpha}",
-                            style={"font-family": "Helvetica, Arial, sans-serif", "padding-top": "10px", "padding-left": "20px","padding-bot": "30px", "width": "160px", "text-align": "left"}
-                    ),
-                ],
+                        ],
+                        style={"paddingTop": "110px", "paddingLeft": "20px", "textAlign": "left"}  # Added paddingTop for the text and centered the text
+                    )
+                ], 
+                style={"display": "flex", "justifyContent": "center"}
             ),
         ],
     )
@@ -1094,7 +1105,7 @@ def run_dash(
             zmax=value[1],
         )
 
-        return fig'''
+        return fig
 
     @app.callback(
         Output('main_color', 'style', allow_duplicate=True),
@@ -1131,9 +1142,9 @@ def run_dash(
             "display": "flex", 
             "height": "100vh", 
         }
-        return dark_mode_style
+        return dark_mode_style'''
 
-    @app.callback(
+    '''@app.callback(
         Output('dotplot', 'figure', allow_duplicate=True),
         Input('zoom-in-button', 'n_clicks'),
         Input('zoom-out-button', 'n_clicks'),
@@ -1158,11 +1169,11 @@ def run_dash(
 
             fig.update_layout(width=new_width, height=new_height)
 
-        return fig
+        return fig'''
 
 
     # Dark mode
-    @app.callback(
+    '''@app.callback(
         Output("main_color", "style", allow_duplicate=True),
         Input("dark-mode-toggle", "n_clicks"),
         State('dotplot', 'figure'),
@@ -1190,15 +1201,15 @@ def run_dash(
             "height": "100vh", 
         }
 
-        '''if dark_mode:
+        if dark_mode:
             figure.update_xaxes(showline=True, linewidth=2, linecolor="white", mirror=True)
             figure.update_yaxes(showline=True, linewidth=2, linecolor="white", mirror=True)
         else:
             figure.update_xaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
-            fig.update_yaxes(showline=True, linewidth=2, linecolor="black", mirror=True)'''
+            fig.update_yaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
 
         # Return the appropriate style based on the current mode
-        return dark_mode_style if dark_mode else light_mode_style
+        return dark_mode_style if dark_mode else light_mode_style'''
 
     '''@app.callback(
         Output('dotplot', 'figure', allow_duplicate=True),
@@ -1234,31 +1245,46 @@ def run_dash(
     @app.callback(
         Output("dotplot", "figure", allow_duplicate=True),
         Output("loading-output-2", "children"),
+        Output("sparsity-div", "children"),
+        Output("layer-div", "children"),
         Input("dotplot", "relayoutData"),
         Input("dotplot", "figure"),
         Input("color-options", "value"),
         Input("threshold-slider", "value"),
+        Input('gradient-toggle', 'value'),
         prevent_initial_call=True,
     )
-    def update_dotplot(relayoutData, figure, color, threshold_range):
+    def update_dotplot(relayoutData, figure, color, threshold_range, button_states):
+        new_sparsity = sparsity
         current_color = get_interactive_color(get_matching_colors(color), "+")
         new_heatmap = heatmap
         new_heatmap.update(dict(colorscale=current_color))
+        
 
         masked_data = np.where((new_heatmap["z"] < threshold_range[0]) | (new_heatmap["z"] > threshold_range[1]), 0, new_heatmap["z"])
         fig = go.Figure(data=[new_heatmap])
         fig.update_traces(z=masked_data)
+
+        if 'keep-original' in button_states:
+            fig.update_traces(zmin=threshold_range[0])
+            fig.update_traces(zmax=threshold_range[1])
+        else:
+            fig.update_traces(zmin=identity)
+            fig.update_traces(zmax=100)
+        
         fig.update_xaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True)
         fig.update_xaxes(nticks=10, title_text=x_name, title_font=dict(size=18))
 
         # Update y-axis properties directly within the heatmap trace
         fig.update_yaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True, autorange='reversed')
         fig.update_yaxes(title_text=y_name, title_font=dict(size=18))
-        # Set layout properties
 
-        # Figure doesn't have height here... how do I fix that? 
         fig.update_layout(
             hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica"),
+            title=fig_title,  # Add your title here
+            title_font=dict(size=28, family="Helvetica"),  # Adjust the title font size if needed
+            title_x = 0.5,
+            title_y = 0.95,
         )
         
         fig.update_layout(yaxis_scaleanchor="x")
@@ -1301,9 +1327,13 @@ def run_dash(
 
                     # This function finds the correct level in the image pyramid
                     new_yy = find_value_in_range(amount, important)
+                    new_sparsity = sparsity // (2**new_yy)
 
+                    # TODO: add option to manually compute new dotplot
                     if new_yy > len(image_pyramid) - 1:
-                        x_mers = kmer_list1[x_begin:x_end]
+                        new_sparsity = sparsity // (2**(len(image_pyramid)-1))
+                        return figure, "", f"Sparsity: {new_sparsity}", f"Layer: {len(image_pyramid)}/{len(image_pyramid)}"
+                        '''x_mers = kmer_list1[x_begin:x_end]
                         y_mers = kmer_list1[y_end:y_begin]
 
                         x_mods = get_mods(x_mers, sparsity/(2**new_yy) , resolution)
@@ -1325,6 +1355,7 @@ def run_dash(
                             relayoutData["yaxis.range[1]"] + (i * amount / resolution)
                             for i in range(resolution)
                         ]
+                        using_matrix = identity_matrix
                         new_heatmap = go.Heatmap(
                             z=using_matrix,
                             zmin=identity,
@@ -1350,11 +1381,17 @@ def run_dash(
                         current_fig.update_layout(
                             hoverlabel=dict(
                                 bgcolor="white", font_size=16, font_family="Helvetica"
-                            )
+                            ),
+                            title="Self-Identity Plot: CHM13 chrY",  # Add your title here
+                            title_font=dict(size=24, family="Helvetica"),  # Adjust the title font size if needed
+                            title_x = 0.5,
+                            title_y = 0.95,
                         )
-                        current_fig.update_layout(yaxis_scaleanchor="x")
+                        
+                        current_fig.update_layout(yaxis_scaleanchor="x")'''
                     
                     else:
+                        new_sparsity = sparsity // (2**new_yy)
                         using_matrix = image_pyramid[new_yy]
 
                         # Get the coordinates for the better matrix
@@ -1398,27 +1435,31 @@ def run_dash(
                         current_fig.update_layout(
                             hoverlabel=dict(
                                 bgcolor="white", font_size=16, font_family="Helvetica"
-                            )
+                            ),
+                            title=fig_title,  # Add your title here
+                            title_font=dict(size=28, family="Helvetica"), 
+                            title_x=0.5,  # Center horizontally
+                            title_y=0.95,   # Center vertically
                         )
                         current_fig.update_layout(yaxis_scaleanchor="x")
-                        return current_fig, ""
+                        return current_fig, "", f"Sparsity: {new_sparsity}", f"Layer: {new_yy + 1}/{len(image_pyramid)}"
                     
             elif 'xaxis.autorange' in relayoutData:
                 # Triggers when double-clicked or reset axes
-                return fig, ""
+                return fig, "", f"Sparsity: {new_sparsity}", f"Layer: 1/{len(image_pyramid)}"
 
             #TODO: disable Autosizing
             elif 'autosize' in relayoutData:
                 # Autosize should be disabled: if not it gets handled here
-                return figure, ""
+                return figure, "", f"Sparsity: {new_sparsity}", f"Layer: 1/{len(image_pyramid)}"
 
             else:
                 # Happens when user selects pan mode. 
-                return figure, ""
+                return figure, "", f"Sparsity: {new_sparsity}", f"Layer: 1/{len(image_pyramid)}"
         else:
             #figure.update_layout(coloraxis=dict(colorscale=current_color))
             # This occurs at startup and when selecting color. Return the base figure with color
-            return fig, ""
+            return fig, "", f"Sparsity: {new_sparsity}", f"Layer: 1/{len(image_pyramid)}"
 
         
     app.index_string = '''
@@ -1442,6 +1483,9 @@ def run_dash(
             .custom-slider .rc-slider-handle {
                 border: 2px solid black;  /* Change the handle border color to gray */
                 font-family: Helvetica, Arial, sans-serif;
+            }
+            #main_color {
+                justify-content:center;
             }
         </style>
     </head>
