@@ -7,7 +7,6 @@ from moddotplot.const import (
     QUALITATIVE_PALETTES,
 )
 from palettable import colorbrewer
-import concurrent.futures
 from typing import List, Set, Dict, Tuple
 
 from moddotplot.parse_fasta import printProgressBar
@@ -35,8 +34,6 @@ def divide_into_chunks(lst: List[int], res: int) -> List[List[int]]:
         start = end
 
     return chunks
-
-
 
 def get_mods(kmer_list: List[int], s: int, res: int) -> List[List[int]]:
     """
@@ -294,8 +291,6 @@ def partition_evenly_spaced_modimizers(mod_list, seq_length, resolution):
         name = f"{start_site}-{end_site}"
         thousand_dict[name] = mod_list[i]
     return thousand_dict
-
-
 
 
 def containment(set1, set2):

@@ -14,7 +14,7 @@ from plotnine import (
     scale_color_cmap,
     coord_cartesian,
     ylab,
-    scale_x_continuous,
+    scale_x_continuous, 
     scale_y_continuous,
     geom_tile,
     coord_fixed,
@@ -62,10 +62,23 @@ def paired_bed_file(
     k: int,
     is_freq: bool,
     xlim: int,
+    custom_colors: List,
+    custom_breakpoints: List
 ) -> None:
     assert 50 < id_threshold < 100
 
     bed = []
+    bed.append(
+        (
+            '#query_name', 
+            'query_start', 
+            'query_end', 
+            'reference_name', 
+            'reference_start', 
+            'reference_end', 
+            'perID_by_events'
+        )
+    )
     for w in itertools.combinations_with_replacement(window_partitions, 2):
         if input_name:
             query_name = input_name
@@ -118,6 +131,8 @@ def paired_bed_file(
             dpi,
             is_freq,
             xlim,
+            custom_colors,
+            custom_breakpoints
         )
 
 
@@ -137,11 +152,24 @@ def paired_bed_file_a_vs_b(
     dpi: int,
     k: int,
     is_freq: bool,
-    output_dir: str
+    output: str,
+    custom_colors: List,
+    custom_breakpoints: List,
+    compare_only: bool
 ) -> None:
 
-    cols: List[str] = COLS
-    bed: List[List[str]] = []
+    bed = []
+    bed.append(
+        (
+            '#query_name', 
+            'query_start', 
+            'query_end', 
+            'reference_name', 
+            'reference_start', 
+            'reference_end', 
+            'perID_by_events'
+        )
+    )
     assert id_threshold > 50 and id_threshold < 100
     for i in window_partitions_a:
         for j in window_partitions_b:
@@ -151,26 +179,38 @@ def paired_bed_file_a_vs_b(
                 containment(set(window_partitions_a[i]), set(window_partitions_b[j])), k
             )
             if perID * 100 >= id_threshold:
-                # TODO: Add strand orientation into bed file
-                bed.extend(
-                    [
-                        a_name,
-                        int(reference_start),
-                        int(reference_end),
-                        b_name,
-                        int(query_start),
-                        int(query_end),
-                        perID * 100,
-                    ]
-                )
-    df = pd.DataFrame(bed, columns=cols)
-    bedfile_output = a_name + "_" + b_name + ".bed"
+                if perID * 100 >= id_threshold:
+                    bed.append(
+                        (
+                            a_name,
+                            int(query_start),
+                            int(query_end),
+                            b_name,
+                            int(reference_start),
+                            int(reference_end),
+                            perID * 100,
+                        )
+                    )
+    bedfile_output = ""
+    image_prefix = a_name + "_" + b_name
+    if not output:
+        bedfile_output = a_name + "_" + b_name + ".bed"
+    else:
+        if not os.path.exists(output):
+            os.makedirs(output)
+        bedfile_output = os.path.join(output, a_name + "_" + b_name + ".bed")
+        image_prefix = os.path.join(output, image_prefix)
+
     image_output = a_name + "_" + b_name
     if not no_bed:
-        df.to_csv(bedfile_output, sep="\t")
-        print(f"Success! Bed file output to {bedfile_output} \n")
-    sdf = read_df([df], palette, palette_orientation, is_freq)
+        with open(bedfile_output, 'w') as bedfile:
+            for row in bed:
+                bedfile.write('\t'.join(map(str, row)) + '\n')
+        print(f"Self identity matrix complete! Saved to {bedfile_output}\n")
+
+    sdf = read_df([bed], palette, palette_orientation, is_freq, custom_colors, custom_breakpoints)
     cdf = sdf.dropna(subset=["discrete"])
+
     if not no_plot:
         print(f"Creating plots... \n")
         c = make_dot(cdf, image_output, palette, palette_orientation)
@@ -180,7 +220,7 @@ def paired_bed_file_a_vs_b(
             height=height,
             dpi=dpi,
             format="png",
-            filename=image_output + ".png",
+            filename=image_prefix + ".png",
             verbose=False,
         )
         ggsave(
@@ -188,19 +228,40 @@ def paired_bed_file_a_vs_b(
             width=width,
             height=height,
             dpi=dpi,
-            format="svg",
-            filename=image_output + ".svg",
+            format="pdf",
+            filename=image_prefix + ".pdf",
             verbose=False,
         )
-        print(f"{image_output}.png and {image_output}.svg saved sucessfully. \n")
+        if compare_only:
+            histy = make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints)
+            ggsave(
+                histy,
+                width=3,
+                height=3,
+                dpi=dpi,
+                format="pdf",
+                filename=image_prefix + "_HIST.pdf",
+                verbose=False,
+            )
+            ggsave(
+                histy,
+                width=3,
+                height=3,
+                dpi=dpi,
+                format="png",
+                filename=image_prefix + "_HIST.png",
+                verbose=False,
+            )
+            print(f"{image_prefix}.png, {image_prefix}.pdf, {image_prefix}_HIST.pdf, and {image_prefix}_HIST.png saved sucessfully. \n")
+        else:
+            print(f"{image_prefix}.png and {image_prefix}.pdf saved sucessfully. \n")
 
 
-def get_colors(sdf, ncolors, is_freq):
+def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
     assert ncolors > 2 and ncolors < 12
     bot = math.floor(min(sdf["perID_by_events"]))
     top = 100
     interval = (top - bot) / ncolors
-    # TODO: Sort by frequency if arg is selected.
     breaks = []
     if is_freq:
         breaks = np.unique(
@@ -209,17 +270,24 @@ def get_colors(sdf, ncolors, is_freq):
     else:
         breaks = [bot + i * interval for i in range(ncolors + 1)]
 
+    if custom_breakpoints:
+        breaks = np.asfarray(custom_breakpoints)
     labels = np.arange(len(breaks) - 1)
+
     # corner case of only one %id value
     if len(breaks) == 1:
         return pd.factorize([1] * len(sdf["perID_by_events"]))[0]
-    return pd.cut(
-        sdf["perID_by_events"], bins=breaks, labels=labels, include_lowest=True
-    )
+    else:
+        tmp = pd.cut(
+            sdf["perID_by_events"], bins=breaks, labels=labels, include_lowest=True
+        )
+        return tmp
 
 
-def read_df(pj, palette, palette_orientation, is_freq):
-    df = pd.concat(pj)
+
+def read_df(pj, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints):
+    data = pj[0]
+    df = pd.DataFrame(data[1:], columns=data[0])
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -245,10 +313,13 @@ def read_df(pj, palette, palette_orientation, is_freq):
     else:
         new_hexcodes = hexcodes
 
+    if custom_colors:
+        new_hexcodes = custom_colors
+
     ncolors = len(new_hexcodes)
 
     # Get colors for each row based on the values in the dataframe
-    df["discrete"] = get_colors(df, ncolors, is_freq)
+    df["discrete"] = get_colors(df, ncolors, is_freq, custom_breakpoints)
 
     # Rename columns if they have different names in the dataframe
     if "query_name" in df.columns or "#query_name" in df.columns:
@@ -279,7 +350,6 @@ def diamond(row):
     base = np.array([[1, 0], [0, 1], [-1, 0], [0, -1]]) * side_length
     trans = base + np.array([row["w"], row["z"]])
     df = pd.DataFrame(trans, columns=["w", "z"])
-    #print(df)
     df["discrete"] = int(row["discrete"])
     df["group"] = int(row["group"])
     return df
@@ -337,7 +407,7 @@ def make_dot(sdf, title_name, palette, palette_orientation):
     return p
 
 
-def make_tri(df_d, title_name, palette, palette_orientation):
+def make_tri(df_d, title_name, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints):
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -358,11 +428,13 @@ def make_tri(df_d, title_name, palette, palette_orientation):
         palette_orientation = "-"
         hexcodes = function_name.hex_colors
 
-    hexcodes = ['#9E0142', '#D53E4F', '#F46D43', '#FDAE61', '#FEE08B', '#E0CB4f', '#E6F598', '#ABDDA4', '#66C2A5', '#3288BD', '#5E4FA2']
     if palette_orientation == "-":
         new_hexcodes = hexcodes[::-1]
     else:
         new_hexcodes = hexcodes
+    
+    if custom_colors:
+        new_hexcodes = custom_colors
     p_tri = (
         ggplot(df_d)
         + aes(x="w_new", y="z_new", group="group", fill="discrete")
@@ -388,7 +460,7 @@ def make_tri(df_d, title_name, palette, palette_orientation):
     return p_tri
 
 
-def make_hist(sdf, palette, palette_orientation):
+def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints):
 
     hexcodes = []
     new_hexcodes = []
@@ -414,6 +486,9 @@ def make_hist(sdf, palette, palette_orientation):
         new_hexcodes = hexcodes[::-1]
     else:
         new_hexcodes = hexcodes
+
+    if custom_colors:
+        new_hexcodes = custom_colors
     bot = np.quantile(sdf["perID_by_events"], q=0.001)
     count = sdf.shape[0]
     extra = ""
@@ -425,9 +500,7 @@ def make_hist(sdf, palette, palette_orientation):
         ggplot(data=sdf, mapping=aes(x="perID_by_events", fill="discrete"))
         + geom_histogram(bins=300)
         + scale_color_cmap(cmap_name="plasma")
-        +
-        # Make sure there's enough colors
-        scale_fill_manual(new_hexcodes)
+        + scale_fill_manual(new_hexcodes)
         + theme(legend_position="none")
         + coord_cartesian(xlim=(bot, 100))
         + xlab("% identity estimate")
@@ -448,10 +521,12 @@ def create_plots(
     height,
     dpi,
     is_freq,
-    xlim
+    xlim,
+    custom_colors,
+    custom_breakpoints,
 ):
 
-    df = read_df(sdf, palette, palette_orientation, is_freq)
+    df = read_df(sdf, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints)
     sdf = df
 
     sdf["w"] = sdf["first_pos"] + sdf["second_pos"]
@@ -467,9 +542,18 @@ def create_plots(
     # TODO: Scale based on size of the input genome, cant always assume Mbp is appropriate
     df_d["w_new"] = df_d["w"] * tri_scale / 1000000
     df_d["z_new"] = df_d["z"] * window * 2 / 3 / 1000000
-    tri = make_tri(df_d, input_sequence, palette, palette_orientation)
-    #TODO: Make xlim a usable command line arg
-    #tri += coord_cartesian(xlim=(0,180))
+    tri = make_tri(
+        df_d, 
+        input_sequence, 
+        palette, 
+        palette_orientation, 
+        is_freq, 
+        custom_colors, 
+        custom_breakpoints
+    )
+
+    if xlim:
+        tri += coord_cartesian(xlim=(0,xlim))
 
     plot_filename = f"{directory}/{output}"
     print("Plots created! \n")
@@ -480,8 +564,8 @@ def create_plots(
         width=width,
         height=height,
         dpi=dpi,
-        format="svg",
-        filename=plot_filename + "_TRI.svg",
+        format="pdf",
+        filename=plot_filename + "_TRI.pdf",
         verbose=False,
     )
     ggsave(
@@ -495,14 +579,14 @@ def create_plots(
     )
 
     if not no_hist:
-        histy = make_hist(sdf, palette, palette_orientation)
+        histy = make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints)
         ggsave(
             histy,
             width=3,
             height=3,
             dpi=dpi,
-            format="svg",
-            filename=plot_filename + "_HIST.svg",
+            format="pdf",
+            filename=plot_filename + "_HIST.pdf",
             verbose=False,
         )
         ggsave(
@@ -515,10 +599,10 @@ def create_plots(
             verbose=False,
         )
         print(
-            f"{plot_filename}_TRI.png, {plot_filename}_TRI.svg, {plot_filename}_HIST.png and {plot_filename}_HIST.svg, saved sucessfully. \n"
+            f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_HIST.png and {plot_filename}_HIST.pdf, saved sucessfully. \n"
         )
 
     else:
         print(
-            f"{plot_filename}_TRI.png and {plot_filename}_TRI.svg saved sucessfully. \n"
+            f"{plot_filename}_TRI.png and {plot_filename}_TRI.pdf saved sucessfully. \n"
         )

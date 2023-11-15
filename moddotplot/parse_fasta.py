@@ -1,6 +1,5 @@
 from typing import Generator, List
 import pysam
-import numpy as np
 import sys
 
 def custom_hash_fn(h):
@@ -23,9 +22,13 @@ def is_valid_fasta(file_path):
                         sys.exit(2)
                     in_sequence = True
                 elif in_sequence and not line:
-                    print("Fasta formatting error: Empty lines found within sequence")
-                    sys.exit(3)
-            return in_sequence 
+                    # Empty line encountered after the sequence header
+                    in_sequence = False  # Exit the sequence mode but continue checking
+                elif in_sequence:
+                    # Check if the line contains valid sequence characters (modify this condition as needed)
+                    # For example, you could add your sequence validation logic here
+                    pass
+            return in_sequence
     except FileNotFoundError:
         print("Unable to find fasta file. Check filename and/or directory!")
         sys.exit(5)

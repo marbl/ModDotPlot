@@ -1,10 +1,6 @@
 from turtle import position
 import plotly.express as px
 from moddotplot.estimate_identity import (
-    get_mods,
-    convert_set,
-    convert_set_neighbors,
-    pairwise_containment_matrix,
     get_interactive_color,
     get_matching_colors,
     verify_modimizers,
@@ -12,14 +8,11 @@ from moddotplot.estimate_identity import (
     make_differences_equal,
     generate_dict_from_list,
     find_value_in_range,
-    partition_evenly_spaced_modimizers
 )
-
-from moddotplot.static_plots import paired_bed_file
 
 import numpy as np
 import dash
-from dash import Input, Output, ctx, html, dcc, State
+from dash import Input, Output, html, dcc
 import math
 import plotly.graph_objs as go
 
@@ -42,6 +35,7 @@ def run_dash(
     # Run Dash app
     app = dash.Dash(__name__, prevent_initial_callbacks="initial_duplicate")
     app.title = "ModDotPlot"
+    print(f"{app.title} interactive mode is successfully running on http://127.0.0.1:8050/ \n")
     # Set color palette
     current_color = get_interactive_color(palette, palette_orientation)
     # Get zooming thresholds, adjust sparsity respectively.
@@ -1499,5 +1493,5 @@ def run_dash(
     </body>
 </html>
 '''
-    
-    app.run_server(debug=True, use_reloader=False, port=port_number)
+    #TODO: Change use reloader to avoid text
+    app.run(debug=True, use_reloader=False, port=port_number)
