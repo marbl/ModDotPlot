@@ -1,0 +1,23 @@
+{
+    "static": true,
+    "alpha": 0.4,
+    "identity": 90,
+    "sparsity": 10,
+    "colors": [
+        "#5C509D",
+        "#DEE89B",
+        "#FBFBC3",
+        "#8B1B40"
+    ],
+    "breakpoints": [
+        90,
+        93,
+        96,
+        99,
+        100
+    ],
+    "output_dir": "Chr1_cen_plots",
+    "input": [
+        "./test/Chr1_cen.fa"
+    ]
+}
