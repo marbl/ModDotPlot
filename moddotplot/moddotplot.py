@@ -1,14 +1,22 @@
 #!/usr/bin/env python3
+import sys
 from moddotplot.parse_fasta import (
     read_kmers_from_file,
     get_input_headers,
+    is_valid_fasta,
 )
+
 from moddotplot.estimate_identity import (
     get_mods,
+    convert_set,
+    convert_set_neighbors,
     partition_evenly_spaced_modimizers,
+    self_containment_matrix,
+    pairwise_containment_matrix,
+    next_power_of_two,
 )
-from moddotplot.interactive import run_dash, run_dash_pairwise
-from moddotplot.const import ASCII_ART
+from moddotplot.interactive import run_dash
+from moddotplot.const import ASCII_ART, VERSION
 
 import argparse
 import math
@@ -17,6 +25,7 @@ from moddotplot.static_plots import (
     paired_bed_file_a_vs_b,
 )
 import itertools
+import json
 
 
 def get_args_parse():
@@ -26,68 +35,142 @@ def get_args_parse():
     """
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Mod.Plot, A Rapid and Interactive Visualization of Tandem Repeats.",
+        description="Mod.Plot, Visualization of Complex Repeat Structures.",
     )
 
-    req_params = parser.add_argument_group("Required input")
+    group = parser.add_mutually_exclusive_group(required=True)
 
-    req_params.add_argument(
+    group.add_argument(
         "-i",
         "--input",
-        required=True,
         default=argparse.SUPPRESS,
-        help="Path to input fasta file(s)",
+        help="Path to input files. Accepts fasta file(s).",
         nargs="+",
+    )
+
+    group.add_argument(
+        "-c",
+        "--config",
+        default=None,
+        type=str,
+        help="Config file to use. Takes precedence over any other competing command line arguments.",
     )
 
     dist_params = parser.add_argument_group("Mod.Plot distance matrix commands")
 
+    # Add a mutually exclusive group for compare and compare only.
+    dist_group = parser.add_mutually_exclusive_group(required=False)
+
     dist_params.add_argument(
-        "-k", "--kmer", default=21, type=int, help="k-mer length. Must be < 32"
+        "-k", "--kmer", default=21, type=int, help="k-mer length. Must be < 32."
     )
 
     dist_params.add_argument(
         "-s",
         "--sparsity",
-        help="Modimizer sparsity value. Higher value will reduce the number of modimizers, but will increase performance. Default set to 2 per Mbp of sequence, rounded up to nearest even integer)",
+        help="Modimizer sparsity value. Higher value will reduce the number of modimizers, but will increase performance. Default set to 2 per Mbp of sequence, rounded up to nearest even integer.",
         default=None,
         type=int,
     )
 
     dist_params.add_argument(
-        "-r", "--resolution", default=1000, type=int, help="Dotplot resolution."
+        "-r",
+        "--resolution",
+        default=1000,
+        type=int,
+        help="Dotplot resolution, or the number of cells to compare against. Prioritized over window size.",
+    )
+
+    # TODO: Implement this functionality
+    dist_params.add_argument(
+        "-w",
+        "--window",
+        default=None,
+        type=int,
+        help="Window size, or how many k-mers partitoned per cell. Used in lieu of resolution",
     )
 
     dist_params.add_argument(
-        "-id", "--identity", default=80, type=int, help="Identity cutoff threshold."
+        "-id",
+        "--identity",
+        default=86,
+        type=int,
+        help="Identity cutoff threshold. Set higher for faster computations.",
     )
 
     dist_params.add_argument(
-        "-a", "--alpha", default=0.01, type=float, help="Alpha parameter: Fraction of neighboring k-mers to include in identity estimation."
+        "-a",
+        "--alpha",
+        default=0.2,
+        type=float,
+        help="Fraction of neighboring k-mers to include in identity estimation.",
     )
 
     dist_params.add_argument(
         "-o",
         "--output-dir",
         default=None,
-        help="Name for bed file and plots. Will be set to input fasta file name if not provided.",
+        help="Directory name for bed file, plots, and stored matrices. Defaults to working directory.",
     )
 
-    dist_params.add_argument(
-        "-nc",
-        "--non-canonical",
-        default=False,
-        help="Only consider forward strand when computing k-mers.",
+    dist_group.add_argument(
+        "--compare",
+        action="store_true",
+        help="Create a dotplot with two different sequences. Valid for 2+ input fasta sequences.",
+    )
+
+    dist_group.add_argument(
+        "--compare-only",
+        action="store_true",
+        help="Create a dotplot with two different sequences, skipping self-identity dotplot.",
+    )
+
+    interactive_params = parser.add_argument_group("Interactive plotting commands")
+
+    interactive_params.add_argument(
+        "-l",
+        "--layers",
+        default=3,
+        type=int,
+        help="Number of matrix hierarchy layers to compute when preparing interactive mode.",
+    )
+
+    # TODO: Implement this functionality
+    """interactive_params.add_argument(
+        "--save",
+        action="store_true",
+        help="Save hierarchical matrices to file. Only used in interactive mode.",
+    )"""
+
+    # TODO: Implement this functionality
+    """interactive_params.add_argument(
+        "--load",
+        default=None,
+        type=str,
+        help="Load previously computed hierarchical matrices.",
+    )"""
+
+    interactive_params.add_argument(
+        "--port",
+        default="8050",
+        type=int,
+        help="Port number for launching interactive mode on localhost. Only used in interactive mode.",
     )
 
     plot_params = parser.add_argument_group("Static plotting commands")
+
+    plot_params.add_argument(
+        "--static",
+        action="store_true",
+        help="Create static bitmap and vector dotplots. Prevents launching of Plotly & Dash. ",
+    )
 
     plot_params.add_argument(
         "--no-bed", action="store_true", help="Don't output bed file."
     )
 
     plot_params.add_argument(
-        "--no-plot", action="store_true", help="Don't output svg and png image files."
+        "--no-plot", action="store_true", help="Don't output pdf and png image files."
     )
 
     plot_params.add_argument(
@@ -95,17 +178,26 @@ def get_args_parse():
     )
 
     plot_params.add_argument(
-        "--width", default=9, type=int, help="Change default plot width."
+        "--width", default=9, type=float, nargs="+", help="Change default plot width."
     )
 
     plot_params.add_argument(
-        "--height", default=5, type=int, help="Change default plot height."
+        "--height", default=5, type=float, nargs="+", help="Change default plot height."
     )
 
     plot_params.add_argument(
-        "--dpi", default=300, type=int, help="Change default plot dpi."
+        "--xaxis",
+        default=None,
+        type=float,
+        nargs="+",
+        help="Change x axis for static plot. Default is length of the sequence, in mbp.",
     )
 
+    plot_params.add_argument(
+        "--dpi", default=600, type=int, help="Change default plot dpi."
+    )
+
+    # TODO: Create list of accepted colors.
     plot_params.add_argument(
         "--palette",
         default="Spectral_11",
@@ -122,48 +214,25 @@ def get_args_parse():
     )
 
     plot_params.add_argument(
+        "--colors",
+        default=None,
+        nargs="+",
+        help="Use a custom color palette, entered in either hexcode or rgb format.",
+    )
+
+    plot_params.add_argument(
+        "--breakpoints",
+        default=None,
+        nargs="+",
+        help="Introduce custom color thresholds. Must be between identity threshold and 100.",
+    )
+
+    plot_params.add_argument(
         "--bin-freq",
         action="store_true",
         help="By default, histograms are evenly spaced based on the number of colors and the identity threshold. Select this argument to bin based on the frequency of observed identity values.",
     )
-
-    plot_params.add_argument(
-        "--compare",
-        action="store_true",
-        help="Create a dotplot with two different sequences.",
-    )
-
-    plot_params.add_argument(
-        "--compare-only",
-        action="store_true",
-        help="Create a dotplot with two different sequences, skipping self-identity dotplot.",
-    )
-
-    interactive_params = parser.add_argument_group("Interactive plotting commands")
-
-    interactive_params.add_argument(
-        "--interactive",
-        action="store_true",
-        help="Launch a interactive Dash application on localhost.",
-    )
-
-    interactive_params.add_argument(
-        "--port",
-        default="8050",
-        type=int,
-        help="Port number for launching interactive mode on localhost. Only used in interactive mode.",
-    )
-
     # TODO: implement logging options
-    """logging_params = parser.add_argument_group("Logging options")
-
-    logging_params.add_argument(
-        "-q", "--quiet", action="store_true", help="Supress help text when running."
-    )
-
-    logging_params.add_argument(
-        "-v", "--verbose", action="store_true", help="Add additional logging info when running."
-    )"""
 
     args = parser.parse_args()
 
@@ -172,10 +241,68 @@ def get_args_parse():
 
 def main():
     print(ASCII_ART)
+    print(f"v{VERSION} \n")
     args = get_args_parse()
+
+    # If config file selected, parse those arguments first
+    if args.config:
+        with open(args.config, "r") as f:
+            config = json.load(f)
+            args.input = config.get("input")
+
+            # Distance matrix commands
+            args.kmer = config.get("kmer", args.kmer)
+            args.sparsity = config.get("sparsity", args.sparsity)
+            args.resolution = config.get("resolution", args.resolution)
+            args.window = config.get("window", args.window)
+            args.identity = config.get("identity", args.identity)
+            args.alpha = config.get("alpha", args.alpha)
+            args.output_dir = config.get("output_dir", args.output_dir)
+            args.compare = config.get("compare", args.compare)
+            args.compare_only = config.get("compare_only", args.compare_only)
+
+            # Interactive plotting commands
+            args.layers = config.get("layers", args.layers)
+            args.save = config.get("save", args.save)
+            args.load = config.get("load", args.load)
+            args.port = config.get("port", args.port)
+
+            # Static plotting commands
+            args.static = config.get("static", args.static)
+            args.no_bed = config.get("no_bed", args.no_bed)
+            args.no_plot = config.get("no_plot", args.no_plot)
+            args.no_hist = config.get("no_hist", args.no_hist)
+            args.width = config.get("width", args.width)
+            args.height = config.get("height", args.height)
+            args.xaxis = config.get("xaxis", args.xaxis)
+            args.dpi = config.get("dpi", args.dpi)
+            args.palette = config.get("palette", args.palette)
+            args.palette_orientation = config.get(
+                "palette_orientation", args.palette_orientation
+            )
+            args.colors = config.get("color", args.colors)
+            args.breakpoints = config.get("breakpoints", args.breakpoints)
+            args.bin_freq = config.get("bin_freq", args.bin_freq)
+
+            # TODO: Include logging options here
+
+    # Tests for specific bugs here
+    # TODO: More tests!
+    if args.breakpoints:
+        # Check that start value fro breakpoints = identity
+        if args.breakpoints[0] != args.identity:
+            print(
+                f"Identity threshold is {args.identity}, but starting breakpoint is {args.breakpoints[0]}! \n"
+            )
+            print(
+                f"Please modify identity threshold using --identity {args.breakpoints[0]}.\n"
+            )
+            sys.exit(2)
+
     # Validate input sequence:
     seq_list = []
     for i in args.input:
+        is_valid_fasta(i)
         headers = get_input_headers(i)
         if len(headers) > 1:
             print(f"File {i} contains multiple fasta entries: \n")
@@ -197,50 +324,133 @@ def main():
         for x in k_list:
             len_list.append(len(x))
         args.sparsity = math.ceil(max(len_list) / 500000)
-        print(f"Using s = {args.sparsity}. \n")
 
-    if args.interactive:
-        # Modimizers computed at runtime using Dash
+    if not args.static:
+        args.sparsity = next_power_of_two(args.sparsity)
+        print(f"Setting top layer sparsity = {args.sparsity}. \n")
+        # Compute base layer for modimizers
+
         if len(seq_list) > 1 and (args.compare or args.compare_only):
-            run_dash_pairwise(
+            print(f"Building matrix hierarchy with {args.layers} layers.... \n")
+
+            # TODO: assert that args layers is a reasonable number
+            image_pyramid = []
+            for i in range(args.layers):
+                mod_list_1 = get_mods(
+                    k_list[0], args.sparsity // (2**i), args.resolution * (2**i)
+                )
+                mod_list_2 = get_mods(
+                    k_list[1], args.sparsity // (2**i), args.resolution * (2**i)
+                )
+                mod_set_1 = convert_set(mod_list_1)
+                mod_set_2 = convert_set(mod_list_2)
+                mod_set_neighbors_1 = convert_set_neighbors(mod_list_1, args.alpha)
+                mod_set_neighbors_2 = convert_set_neighbors(mod_list_2, args.alpha)
+                print(f"Layer {i+1} using sparsity {args.sparsity // (2**i)}\n")
+                xd = pairwise_containment_matrix(
+                    mod_set_1,
+                    mod_set_2,
+                    mod_set_neighbors_1,
+                    mod_set_neighbors_2,
+                    args.identity,
+                    args.kmer,
+                    False,
+                )
+                image_pyramid.append(xd)
+
+            run_dash(
                 k_list[0],
                 k_list[1],
+                seq_list[0],
+                seq_list[1],
                 args.resolution,
                 args.sparsity,
                 args.kmer,
                 args.identity,
                 args.port,
-                False,
                 args.palette,
                 args.palette_orientation,
                 args.alpha,
+                image_pyramid,
             )
         else:
             if len(seq_list) > 1:
-                print(f"Multiple sequences ")
+                # Only using the first seq!!!
+                print(f"Multiple sequences detected, only one currently used.")
+
+            print(f"Building matrix hierarchy with {args.layers} layers.... \n")
+
+            # TODO: assert that args layers is a reasonable number
+
+            image_pyramid = []
+            for i in range(args.layers):
+                mod_list = get_mods(
+                    k_list[0], args.sparsity // (2**i), args.resolution * (2**i)
+                )
+                mod_set = convert_set(mod_list)
+                mod_set_neighbors = convert_set_neighbors(mod_list, args.alpha)
+                print(f"Layer {i+1} using sparsity {args.sparsity // (2**i)}\n")
+                xd = self_containment_matrix(
+                    mod_set, mod_set_neighbors, args.kmer, args.identity
+                )
+                image_pyramid.append(xd)
+
             run_dash(
                 k_list[0],
+                None,
+                seq_list[0],
+                seq_list[0],
                 args.resolution,
                 args.sparsity,
                 args.kmer,
                 args.identity,
                 args.port,
-                False,
                 args.palette,
                 args.palette_orientation,
                 args.alpha,
+                image_pyramid,
             )
 
+    # Static plots
     else:
+        print(f"Using s = {args.sparsity}. \n")
         if not args.compare_only:
             for i in range(len(seq_list)):
+                xaxis = 0
+                width = 0
+                height = 0
+                if isinstance(args.xaxis, int) or args.xaxis == None:
+                    xaxis = args.xaxis
+                else:
+                    assert len(args.xaxis) == len(seq_list)
+                    xaxis = args.xaxis[i]
+                if isinstance(args.width, int):
+                    width = args.width
+                else:
+                    assert len(args.width) == len(seq_list)
+                    width = args.width[i]
+                if isinstance(args.height, int):
+                    height = args.height
+                else:
+                    assert len(args.height) == len(seq_list)
+                    height = args.height[i]
                 print(f"Computing self identity matrix for {seq_list[i]}... \n")
                 mod_list = get_mods(k_list[i], args.sparsity, args.resolution)
-                windows = partition_evenly_spaced_modimizers(
-                    mod_list, len(k_list[i]) + args.kmer - 1, args.resolution
-                )
+                mod_set_neighbors_hi = convert_set_neighbors(mod_list, args.alpha)
+                # TODO: make cleaner
+                new_windows = []
+                if args.alpha == 0:
+                    new_windows = partition_evenly_spaced_modimizers(
+                        mod_list, len(k_list[i]) + args.kmer - 1, args.resolution
+                    )
+                else:
+                    new_windows = partition_evenly_spaced_modimizers(
+                        mod_set_neighbors_hi,
+                        len(k_list[i]) + args.kmer - 1,
+                        args.resolution,
+                    )
                 paired_bed_file(
-                    windows,
+                    new_windows,
                     seq_list[i],
                     args.identity,
                     args.output_dir,
@@ -249,15 +459,17 @@ def main():
                     args.no_hist,
                     args.palette,
                     args.palette_orientation,
-                    args.width,
-                    args.height,
+                    width,
+                    height,
                     args.dpi,
                     args.kmer,
                     args.bin_freq,
+                    xaxis,
+                    args.colors,
+                    args.breakpoints,
                 )
-        # --------------------
+        # Compare only
         if (args.compare or args.compare_only) and len(seq_list) > 1:
-
             seq_kmers = {}
             for j in range(len(seq_list)):
                 seq_kmers[seq_list[j]] = k_list[j]
@@ -318,7 +530,10 @@ def main():
                         args.dpi,
                         args.kmer,
                         args.bin_freq,
-                        args.output_dir
+                        args.output_dir,
+                        args.colors,
+                        args.breakpoints,
+                        args.compare_only,
                     )
                 else:
                     ratio = round(
@@ -376,6 +591,10 @@ def main():
                         args.dpi,
                         args.kmer,
                         args.bin_freq,
+                        args.output_dir,
+                        args.colors,
+                        args.breakpoints,
+                        args.compare_only,
                     )
 
 

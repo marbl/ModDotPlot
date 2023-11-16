@@ -35,6 +35,7 @@ import itertools
 from typing import List
 from moddotplot.estimate_identity import binomial_distance, containment
 from palettable.colorbrewer import qualitative, sequential, diverging
+from moddotplot.parse_fasta import printProgressBar
 
 
 def make_k(vals):
@@ -61,38 +62,50 @@ def paired_bed_file(
     dpi: int,
     k: int,
     is_freq: bool,
+    xlim: int,
+    custom_colors: List,
+    custom_breakpoints: List,
 ) -> None:
-    """
-    Given a dictionary of window partitions, creates a BED file containing pairs of
-    genomic regions with specified identity threshold.
-    Args:
-    window_partitions: a dictionary of window partitions containing genomic regions.
-    input_name: a string representing the name of the input sequence.
-    id_threshold: an integer specifying the identity threshold between 50 and 100.
-    density: an integer specifying the density of the genomic regions.
-    output: a string representing the name of the output BED file.
-    Returns:
-    None
-    """
-    assert id_threshold > 50 and id_threshold < 100
+    assert 50 < id_threshold < 100
 
-    cols: List[str] = COLS
-    bed: List[List[str]] = []
+    bed = []
+    bed.append(
+        (
+            "#query_name",
+            "query_start",
+            "query_end",
+            "reference_name",
+            "reference_start",
+            "reference_end",
+            "perID_by_events",
+        )
+    )
+    counter = 0
+    n = (len(window_partitions) * len(window_partitions)) / 2 + (
+        len(window_partitions) / 2
+    )
+    moddh = round(n / 77)
+    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
+
     for w in itertools.combinations_with_replacement(window_partitions, 2):
+        counter += 1
+        if counter % moddh == 0:
+            printProgressBar(
+                counter, n, prefix="Progress:", suffix="Completed", length=40
+            )
         if input_name:
             query_name = input_name
         else:
             query_name = "input_sequence"
         query_start, query_end = w[0].split("-")
         reference_start, reference_end = w[1].split("-")
-        # TODO: Update with Jaccard when available
+
         perID = binomial_distance(
             containment(set(window_partitions[w[0]]), set(window_partitions[w[1]])), k
         )
         if perID * 100 >= id_threshold:
-            # TODO: Add strand orientation into bed file
             bed.append(
-                [
+                (
                     query_name,
                     int(query_start),
                     int(query_end),
@@ -100,52 +113,40 @@ def paired_bed_file(
                     int(reference_start),
                     int(reference_end),
                     perID * 100,
-                ]
+                )
             )
-    df = pd.DataFrame(bed, columns=cols)
     if not output:
         bedfile_output = input_name + ".bed"
-        if not no_bed:
-            df.to_csv(bedfile_output, sep="\t")
-            print(f"Self identity matrix complete! Saved to {bedfile_output} \n")
-        if not no_plot:
-            print(f"Creating plots... \n")
-            create_plots(
-                [df],
-                ".",
-                input_name,
-                input_name,
-                palette,
-                palette_orientation,
-                no_hist,
-                width,
-                height,
-                dpi,
-                is_freq,
-            )
     else:
         if not os.path.exists(output):
             os.makedirs(output)
-            print(f"Directory '{output}' created successfully. \n")
-        if not no_bed:
-            bedfile_output = output + "/" + input_name + ".bed"
-            df.to_csv(bedfile_output, sep="\t")
-            print(f"Self identity matrix complete! Saved to {bedfile_output} \n")
-        if not no_plot:
-            print(f"Creating plots... \n")
-            create_plots(
-                [df],
-                output,
-                input_name,
-                input_name,
-                palette,
-                palette_orientation,
-                no_hist,
-                width,
-                height,
-                dpi,
-                is_freq,
-            )
+        bedfile_output = os.path.join(output, input_name + ".bed")
+
+    if not no_bed:
+        with open(bedfile_output, "w") as bedfile:
+            for row in bed:
+                bedfile.write("\t".join(map(str, row)) + "\n")
+        print("\n")
+        print(f"Self identity matrix complete! Saved to {bedfile_output}\n")
+
+    if not no_plot:
+        print(f"Creating plots...\n")
+        create_plots(
+            [bed],
+            output if output else ".",
+            input_name,
+            input_name,
+            palette,
+            palette_orientation,
+            no_hist,
+            width,
+            height,
+            dpi,
+            is_freq,
+            xlim,
+            custom_colors,
+            custom_breakpoints,
+        )
 
 
 def paired_bed_file_a_vs_b(
@@ -164,39 +165,76 @@ def paired_bed_file_a_vs_b(
     dpi: int,
     k: int,
     is_freq: bool,
+    output: str,
+    custom_colors: List,
+    custom_breakpoints: List,
+    compare_only: bool,
 ) -> None:
-
-    cols: List[str] = COLS
-    bed: List[List[str]] = []
+    bed = []
+    bed.append(
+        (
+            "#query_name",
+            "query_start",
+            "query_end",
+            "reference_name",
+            "reference_start",
+            "reference_end",
+            "perID_by_events",
+        )
+    )
     assert id_threshold > 50 and id_threshold < 100
+    counter = 0
+    n = len(window_partitions_a) * len(window_partitions_b)
+    moddh = round(n / 77)
+    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     for i in window_partitions_a:
         for j in window_partitions_b:
+            counter += 1
+            if counter % moddh == 0:
+                printProgressBar(
+                    counter, n, prefix="Progress:", suffix="Completed", length=40
+                )
             reference_start, reference_end = i.split("-")
             query_start, query_end = j.split("-")
             perID = binomial_distance(
                 containment(set(window_partitions_a[i]), set(window_partitions_b[j])), k
             )
             if perID * 100 >= id_threshold:
-                # TODO: Add strand orientation into bed file
-                bed.append(
-                    [
-                        a_name,
-                        int(reference_start),
-                        int(reference_end),
-                        b_name,
-                        int(query_start),
-                        int(query_end),
-                        perID * 100,
-                    ]
-                )
-    df = pd.DataFrame(bed, columns=cols)
-    bedfile_output = a_name + "_" + b_name + ".bed"
+                if perID * 100 >= id_threshold:
+                    bed.append(
+                        (
+                            a_name,
+                            int(query_start),
+                            int(query_end),
+                            b_name,
+                            int(reference_start),
+                            int(reference_end),
+                            perID * 100,
+                        )
+                    )
+    bedfile_output = ""
+    image_prefix = a_name + "_" + b_name
+    if not output:
+        bedfile_output = a_name + "_" + b_name + ".bed"
+    else:
+        if not os.path.exists(output):
+            os.makedirs(output)
+        bedfile_output = os.path.join(output, a_name + "_" + b_name + ".bed")
+        image_prefix = os.path.join(output, image_prefix)
+
     image_output = a_name + "_" + b_name
     if not no_bed:
-        df.to_csv(bedfile_output, sep="\t")
-        print(f"Success! Bed file output to {bedfile_output} \n")
-    sdf = read_df([df], palette, palette_orientation, is_freq)
+        with open(bedfile_output, "w") as bedfile:
+            for row in bed:
+                bedfile.write("\t".join(map(str, row)) + "\n")
+        print("\n")
+        print(f"Pairwise matrix complete! Saved to {bedfile_output}\n")
+
+    sdf = read_df(
+        [bed], palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+    )
     cdf = sdf.dropna(subset=["discrete"])
+
     if not no_plot:
         print(f"Creating plots... \n")
         c = make_dot(cdf, image_output, palette, palette_orientation)
@@ -206,7 +244,7 @@ def paired_bed_file_a_vs_b(
             height=height,
             dpi=dpi,
             format="png",
-            filename=image_output + ".png",
+            filename=image_prefix + ".png",
             verbose=False,
         )
         ggsave(
@@ -214,19 +252,44 @@ def paired_bed_file_a_vs_b(
             width=width,
             height=height,
             dpi=dpi,
-            format="svg",
-            filename=image_output + ".svg",
+            format="pdf",
+            filename=image_prefix + ".pdf",
             verbose=False,
         )
-        print(f"{image_output}.png and {image_output}.svg saved sucessfully. \n")
+        if compare_only:
+            histy = make_hist(
+                sdf, palette, palette_orientation, custom_colors, custom_breakpoints
+            )
+            ggsave(
+                histy,
+                width=3,
+                height=3,
+                dpi=dpi,
+                format="pdf",
+                filename=image_prefix + "_HIST.pdf",
+                verbose=False,
+            )
+            ggsave(
+                histy,
+                width=3,
+                height=3,
+                dpi=dpi,
+                format="png",
+                filename=image_prefix + "_HIST.png",
+                verbose=False,
+            )
+            print(
+                f"{image_prefix}.png, {image_prefix}.pdf, {image_prefix}_HIST.pdf, and {image_prefix}_HIST.png saved sucessfully. \n"
+            )
+        else:
+            print(f"{image_prefix}.png and {image_prefix}.pdf saved sucessfully. \n")
 
 
-def get_colors(sdf, ncolors, is_freq):
+def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
     assert ncolors > 2 and ncolors < 12
     bot = math.floor(min(sdf["perID_by_events"]))
     top = 100
     interval = (top - bot) / ncolors
-    # TODO: Sort by frequency if arg is selected.
     breaks = []
     if is_freq:
         breaks = np.unique(
@@ -235,17 +298,25 @@ def get_colors(sdf, ncolors, is_freq):
     else:
         breaks = [bot + i * interval for i in range(ncolors + 1)]
 
+    if custom_breakpoints:
+        breaks = np.asfarray(custom_breakpoints)
     labels = np.arange(len(breaks) - 1)
+
     # corner case of only one %id value
     if len(breaks) == 1:
         return pd.factorize([1] * len(sdf["perID_by_events"]))[0]
-    return pd.cut(
-        sdf["perID_by_events"], bins=breaks, labels=labels, include_lowest=True
-    )
+    else:
+        tmp = pd.cut(
+            sdf["perID_by_events"], bins=breaks, labels=labels, include_lowest=True
+        )
+        return tmp
 
 
-def read_df(pj, palette, palette_orientation, is_freq):
-    df = pd.concat(pj)
+def read_df(
+    pj, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+):
+    data = pj[0]
+    df = pd.DataFrame(data[1:], columns=data[0])
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -271,13 +342,16 @@ def read_df(pj, palette, palette_orientation, is_freq):
     else:
         new_hexcodes = hexcodes
 
+    if custom_colors:
+        new_hexcodes = custom_colors
+
     ncolors = len(new_hexcodes)
 
     # Get colors for each row based on the values in the dataframe
-    df["discrete"] = get_colors(df, ncolors, is_freq)
+    df["discrete"] = get_colors(df, ncolors, is_freq, custom_breakpoints)
 
     # Rename columns if they have different names in the dataframe
-    if "#query_name" in df.columns:
+    if "query_name" in df.columns or "#query_name" in df.columns:
         df.rename(
             columns={
                 "#query_name": "q",
@@ -311,7 +385,6 @@ def diamond(row):
 
 
 def make_dot(sdf, title_name, palette, palette_orientation):
-
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -344,7 +417,10 @@ def make_dot(sdf, title_name, palette, palette_orientation):
             aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
         )
         + scale_color_discrete(guide=False)
-        + scale_fill_manual(values=new_hexcodes, guide=False,)
+        + scale_fill_manual(
+            values=new_hexcodes,
+            guide=False,
+        )
         + theme(
             legend_position="none",
             panel_grid_major=element_blank(),
@@ -362,7 +438,15 @@ def make_dot(sdf, title_name, palette, palette_orientation):
     return p
 
 
-def make_tri(df_d, title_name, palette, palette_orientation):
+def make_tri(
+    df_d,
+    title_name,
+    palette,
+    palette_orientation,
+    is_freq,
+    custom_colors,
+    custom_breakpoints,
+):
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -387,13 +471,17 @@ def make_tri(df_d, title_name, palette, palette_orientation):
         new_hexcodes = hexcodes[::-1]
     else:
         new_hexcodes = hexcodes
+
+    if custom_colors:
+        new_hexcodes = custom_colors
     p_tri = (
         ggplot(df_d)
         + aes(x="w_new", y="z_new", group="group", fill="discrete")
         + geom_polygon()
         + scale_color_discrete(guide=False)
         + scale_fill_gradientn(  # TODO: Replace this with built in color palettes.
-            colors=new_hexcodes, guide=False,
+            colors=new_hexcodes,
+            guide=False,
         )
         + theme(
             axis_title_y=element_blank(),
@@ -412,8 +500,7 @@ def make_tri(df_d, title_name, palette, palette_orientation):
     return p_tri
 
 
-def make_hist(sdf, palette, palette_orientation):
-
+def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints):
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -438,6 +525,9 @@ def make_hist(sdf, palette, palette_orientation):
         new_hexcodes = hexcodes[::-1]
     else:
         new_hexcodes = hexcodes
+
+    if custom_colors:
+        new_hexcodes = custom_colors
     bot = np.quantile(sdf["perID_by_events"], q=0.001)
     count = sdf.shape[0]
     extra = ""
@@ -449,9 +539,7 @@ def make_hist(sdf, palette, palette_orientation):
         ggplot(data=sdf, mapping=aes(x="perID_by_events", fill="discrete"))
         + geom_histogram(bins=300)
         + scale_color_cmap(cmap_name="plasma")
-        +
-        # Make sure there's enough colors
-        scale_fill_manual(new_hexcodes)
+        + scale_fill_manual(new_hexcodes)
         + theme(legend_position="none")
         + coord_cartesian(xlim=(bot, 100))
         + xlab("% identity estimate")
@@ -472,9 +560,13 @@ def create_plots(
     height,
     dpi,
     is_freq,
+    xlim,
+    custom_colors,
+    custom_breakpoints,
 ):
-
-    df = read_df(sdf, palette, palette_orientation, is_freq)
+    df = read_df(
+        sdf, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+    )
     sdf = df
 
     sdf["w"] = sdf["first_pos"] + sdf["second_pos"]
@@ -490,7 +582,18 @@ def create_plots(
     # TODO: Scale based on size of the input genome, cant always assume Mbp is appropriate
     df_d["w_new"] = df_d["w"] * tri_scale / 1000000
     df_d["z_new"] = df_d["z"] * window * 2 / 3 / 1000000
-    tri = make_tri(df_d, input_sequence, palette, palette_orientation)
+    tri = make_tri(
+        df_d,
+        input_sequence,
+        palette,
+        palette_orientation,
+        is_freq,
+        custom_colors,
+        custom_breakpoints,
+    )
+
+    if xlim:
+        tri += coord_cartesian(xlim=(0, xlim))
 
     plot_filename = f"{directory}/{output}"
     print("Plots created! \n")
@@ -501,8 +604,8 @@ def create_plots(
         width=width,
         height=height,
         dpi=dpi,
-        format="svg",
-        filename=plot_filename + "_TRI.svg",
+        format="pdf",
+        filename=plot_filename + "_TRI.pdf",
         verbose=False,
     )
     ggsave(
@@ -516,14 +619,16 @@ def create_plots(
     )
 
     if not no_hist:
-        histy = make_hist(sdf, palette, palette_orientation)
+        histy = make_hist(
+            sdf, palette, palette_orientation, custom_colors, custom_breakpoints
+        )
         ggsave(
             histy,
             width=3,
             height=3,
             dpi=dpi,
-            format="svg",
-            filename=plot_filename + "_HIST.svg",
+            format="pdf",
+            filename=plot_filename + "_HIST.pdf",
             verbose=False,
         )
         ggsave(
@@ -536,10 +641,10 @@ def create_plots(
             verbose=False,
         )
         print(
-            f"{plot_filename}_TRI.png, {plot_filename}_TRI.svg, {plot_filename}_HIST.png and {plot_filename}_HIST.svg, saved sucessfully. \n"
+            f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_HIST.png and {plot_filename}_HIST.pdf, saved sucessfully. \n"
         )
 
     else:
         print(
-            f"{plot_filename}_TRI.png and {plot_filename}_TRI.svg saved sucessfully. \n"
+            f"{plot_filename}_TRI.png and {plot_filename}_TRI.pdf saved sucessfully. \n"
         )
