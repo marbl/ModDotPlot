@@ -89,7 +89,7 @@ If set when 2 or more sequences are input into ModDotPlot, this will show an a v
 
 `-l / --layers <int>`
 
-Default is 3. 
+Layers of matrix heirarchy to pre-compute, in interactive mode. Default is 3. Use 1 for a quick birds eye view.
 
 `--port <int>`
 
@@ -227,14 +227,17 @@ $ cat config/config.json
 
 {
     "static": true,
-    "alpha": 0.4,
+    "alpha": 0.3,
     "identity": 90,
     "sparsity": 10,
-    "palette": "Blues_4",
+    "palette": "OrRd_7",
     "breakpoints": [
         90,
+        91,
+        92,
         93,
         96,
+        98,
         99,
         100
     ],
@@ -277,7 +280,7 @@ Saving plots to Chr1_cen_plots/Chr1:14000000-18000000...
 
 Chr1_cen_plots/Chr1:14000000-18000000_TRI.png, Chr1_cen_plots/Chr1:14000000-18000000_TRI.pdf, Chr1_cen_plots/Chr1:14000000-18000000_HIST.png and Chr1_cen_plots/Chr1:14000000-18000000_HIST.pdf, saved sucessfully.
 ```
-![](images/Chr1_cen_.png)
+![](images/Chr1:14000000-18000000_TRI.png)
 
 --- 
 
