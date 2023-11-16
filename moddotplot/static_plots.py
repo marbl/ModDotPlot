@@ -14,7 +14,7 @@ from plotnine import (
     scale_color_cmap,
     coord_cartesian,
     ylab,
-    scale_x_continuous, 
+    scale_x_continuous,
     scale_y_continuous,
     geom_tile,
     coord_fixed,
@@ -35,6 +35,7 @@ import itertools
 from typing import List
 from moddotplot.estimate_identity import binomial_distance, containment
 from palettable.colorbrewer import qualitative, sequential, diverging
+from moddotplot.parse_fasta import printProgressBar
 
 
 def make_k(vals):
@@ -63,30 +64,42 @@ def paired_bed_file(
     is_freq: bool,
     xlim: int,
     custom_colors: List,
-    custom_breakpoints: List
+    custom_breakpoints: List,
 ) -> None:
     assert 50 < id_threshold < 100
 
     bed = []
     bed.append(
         (
-            '#query_name', 
-            'query_start', 
-            'query_end', 
-            'reference_name', 
-            'reference_start', 
-            'reference_end', 
-            'perID_by_events'
+            "#query_name",
+            "query_start",
+            "query_end",
+            "reference_name",
+            "reference_start",
+            "reference_end",
+            "perID_by_events",
         )
     )
+    counter = 0
+    n = (len(window_partitions) * len(window_partitions)) / 2 + (
+        len(window_partitions) / 2
+    )
+    moddh = round(n / 77)
+    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
+
     for w in itertools.combinations_with_replacement(window_partitions, 2):
+        counter += 1
+        if counter % moddh == 0:
+            printProgressBar(
+                counter, n, prefix="Progress:", suffix="Completed", length=40
+            )
         if input_name:
             query_name = input_name
         else:
             query_name = "input_sequence"
         query_start, query_end = w[0].split("-")
         reference_start, reference_end = w[1].split("-")
-        
+
         perID = binomial_distance(
             containment(set(window_partitions[w[0]]), set(window_partitions[w[1]])), k
         )
@@ -102,20 +115,20 @@ def paired_bed_file(
                     perID * 100,
                 )
             )
-    
     if not output:
         bedfile_output = input_name + ".bed"
     else:
         if not os.path.exists(output):
             os.makedirs(output)
         bedfile_output = os.path.join(output, input_name + ".bed")
-    
+
     if not no_bed:
-        with open(bedfile_output, 'w') as bedfile:
+        with open(bedfile_output, "w") as bedfile:
             for row in bed:
-                bedfile.write('\t'.join(map(str, row)) + '\n')
+                bedfile.write("\t".join(map(str, row)) + "\n")
+        print("\n")
         print(f"Self identity matrix complete! Saved to {bedfile_output}\n")
-    
+
     if not no_plot:
         print(f"Creating plots...\n")
         create_plots(
@@ -132,7 +145,7 @@ def paired_bed_file(
             is_freq,
             xlim,
             custom_colors,
-            custom_breakpoints
+            custom_breakpoints,
         )
 
 
@@ -155,24 +168,32 @@ def paired_bed_file_a_vs_b(
     output: str,
     custom_colors: List,
     custom_breakpoints: List,
-    compare_only: bool
+    compare_only: bool,
 ) -> None:
-
     bed = []
     bed.append(
         (
-            '#query_name', 
-            'query_start', 
-            'query_end', 
-            'reference_name', 
-            'reference_start', 
-            'reference_end', 
-            'perID_by_events'
+            "#query_name",
+            "query_start",
+            "query_end",
+            "reference_name",
+            "reference_start",
+            "reference_end",
+            "perID_by_events",
         )
     )
     assert id_threshold > 50 and id_threshold < 100
+    counter = 0
+    n = len(window_partitions_a) * len(window_partitions_b)
+    moddh = round(n / 77)
+    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     for i in window_partitions_a:
         for j in window_partitions_b:
+            counter += 1
+            if counter % moddh == 0:
+                printProgressBar(
+                    counter, n, prefix="Progress:", suffix="Completed", length=40
+                )
             reference_start, reference_end = i.split("-")
             query_start, query_end = j.split("-")
             perID = binomial_distance(
@@ -203,12 +224,15 @@ def paired_bed_file_a_vs_b(
 
     image_output = a_name + "_" + b_name
     if not no_bed:
-        with open(bedfile_output, 'w') as bedfile:
+        with open(bedfile_output, "w") as bedfile:
             for row in bed:
-                bedfile.write('\t'.join(map(str, row)) + '\n')
-        print(f"Self identity matrix complete! Saved to {bedfile_output}\n")
+                bedfile.write("\t".join(map(str, row)) + "\n")
+        print("\n")
+        print(f"Pairwise matrix complete! Saved to {bedfile_output}\n")
 
-    sdf = read_df([bed], palette, palette_orientation, is_freq, custom_colors, custom_breakpoints)
+    sdf = read_df(
+        [bed], palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+    )
     cdf = sdf.dropna(subset=["discrete"])
 
     if not no_plot:
@@ -233,7 +257,9 @@ def paired_bed_file_a_vs_b(
             verbose=False,
         )
         if compare_only:
-            histy = make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints)
+            histy = make_hist(
+                sdf, palette, palette_orientation, custom_colors, custom_breakpoints
+            )
             ggsave(
                 histy,
                 width=3,
@@ -252,7 +278,9 @@ def paired_bed_file_a_vs_b(
                 filename=image_prefix + "_HIST.png",
                 verbose=False,
             )
-            print(f"{image_prefix}.png, {image_prefix}.pdf, {image_prefix}_HIST.pdf, and {image_prefix}_HIST.png saved sucessfully. \n")
+            print(
+                f"{image_prefix}.png, {image_prefix}.pdf, {image_prefix}_HIST.pdf, and {image_prefix}_HIST.png saved sucessfully. \n"
+            )
         else:
             print(f"{image_prefix}.png and {image_prefix}.pdf saved sucessfully. \n")
 
@@ -284,8 +312,9 @@ def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
         return tmp
 
 
-
-def read_df(pj, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints):
+def read_df(
+    pj, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+):
     data = pj[0]
     df = pd.DataFrame(data[1:], columns=data[0])
     hexcodes = []
@@ -356,7 +385,6 @@ def diamond(row):
 
 
 def make_dot(sdf, title_name, palette, palette_orientation):
-
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -389,7 +417,10 @@ def make_dot(sdf, title_name, palette, palette_orientation):
             aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
         )
         + scale_color_discrete(guide=False)
-        + scale_fill_manual(values=new_hexcodes, guide=False,)
+        + scale_fill_manual(
+            values=new_hexcodes,
+            guide=False,
+        )
         + theme(
             legend_position="none",
             panel_grid_major=element_blank(),
@@ -407,7 +438,15 @@ def make_dot(sdf, title_name, palette, palette_orientation):
     return p
 
 
-def make_tri(df_d, title_name, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints):
+def make_tri(
+    df_d,
+    title_name,
+    palette,
+    palette_orientation,
+    is_freq,
+    custom_colors,
+    custom_breakpoints,
+):
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -432,7 +471,7 @@ def make_tri(df_d, title_name, palette, palette_orientation, is_freq, custom_col
         new_hexcodes = hexcodes[::-1]
     else:
         new_hexcodes = hexcodes
-    
+
     if custom_colors:
         new_hexcodes = custom_colors
     p_tri = (
@@ -441,7 +480,8 @@ def make_tri(df_d, title_name, palette, palette_orientation, is_freq, custom_col
         + geom_polygon()
         + scale_color_discrete(guide=False)
         + scale_fill_gradientn(  # TODO: Replace this with built in color palettes.
-            colors=new_hexcodes, guide=False,
+            colors=new_hexcodes,
+            guide=False,
         )
         + theme(
             axis_title_y=element_blank(),
@@ -461,7 +501,6 @@ def make_tri(df_d, title_name, palette, palette_orientation, is_freq, custom_col
 
 
 def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints):
-
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -525,8 +564,9 @@ def create_plots(
     custom_colors,
     custom_breakpoints,
 ):
-
-    df = read_df(sdf, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints)
+    df = read_df(
+        sdf, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+    )
     sdf = df
 
     sdf["w"] = sdf["first_pos"] + sdf["second_pos"]
@@ -543,17 +583,17 @@ def create_plots(
     df_d["w_new"] = df_d["w"] * tri_scale / 1000000
     df_d["z_new"] = df_d["z"] * window * 2 / 3 / 1000000
     tri = make_tri(
-        df_d, 
-        input_sequence, 
-        palette, 
-        palette_orientation, 
-        is_freq, 
-        custom_colors, 
-        custom_breakpoints
+        df_d,
+        input_sequence,
+        palette,
+        palette_orientation,
+        is_freq,
+        custom_colors,
+        custom_breakpoints,
     )
 
     if xlim:
-        tri += coord_cartesian(xlim=(0,xlim))
+        tri += coord_cartesian(xlim=(0, xlim))
 
     plot_filename = f"{directory}/{output}"
     print("Plots created! \n")
@@ -579,7 +619,9 @@ def create_plots(
     )
 
     if not no_hist:
-        histy = make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints)
+        histy = make_hist(
+            sdf, palette, palette_orientation, custom_colors, custom_breakpoints
+        )
         ggsave(
             histy,
             width=3,

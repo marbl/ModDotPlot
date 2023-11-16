@@ -2,21 +2,23 @@ from typing import Generator, List
 import pysam
 import sys
 
+
 def custom_hash_fn(h):
     h ^= h >> 33
-    h *= 0xff51afd7ed558ccd
+    h *= 0xFF51AFD7ED558CCD
     h ^= h >> 33
-    h *= 0xc4ceb9fe1a85ec53
+    h *= 0xC4CEB9FE1A85EC53
     h ^= h >> 33
     return h
 
+
 def is_valid_fasta(file_path):
     try:
-        with open(file_path, 'r') as file:
+        with open(file_path, "r") as file:
             in_sequence = False
             for line in file:
                 line = line.strip()
-                if line.startswith('>'):
+                if line.startswith(">"):
                     if in_sequence:
                         print("Fasta formatting error: '>' found within sequence")
                         sys.exit(2)
@@ -36,12 +38,22 @@ def is_valid_fasta(file_path):
         print(f"An error occurred: {str(e)}")
         sys.exit(6)
 
-def printProgressBar(iteration, total, prefix='', suffix='', decimals=1, length=100, fill='█', printEnd="\r"):
+
+def printProgressBar(
+    iteration,
+    total,
+    prefix="",
+    suffix="",
+    decimals=1,
+    length=100,
+    fill="█",
+    printEnd="\r",
+):
     percent = f"{100 * (iteration / total):.{decimals}f}"
     filledLength = int(length * iteration // total)
-    bar = [fill] * filledLength + ['-'] * (length - filledLength)
-    bar_str = ''.join(bar)
-    print(f'\r{prefix} |{bar_str}| {percent}% {suffix}', end=printEnd)
+    bar = [fill] * filledLength + ["-"] * (length - filledLength)
+    bar_str = "".join(bar)
+    print(f"\r{prefix} |{bar_str}| {percent}% {suffix}", end=printEnd)
     if iteration == total:
         print()
 
@@ -61,13 +73,13 @@ def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
 
     # Calculate the length of the sequence
     n = len(sequence)
-    moddh = round(n/77)
+    moddh = round(n / 77)
 
     # Progress bar updates
-    printProgressBar(0, n, prefix = 'Progress:', suffix = 'Complete', length = 40)
+    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
 
     # Calculate a mask to use for masking off any bits outside of the k-mer range
-    mask = (1 << (3*k)) - 1
+    mask = (1 << (3 * k)) - 1
 
     # Initialize the first k-mer and its reverse complement
     kmer = 0
@@ -75,24 +87,31 @@ def generate_kmers(sequence: str, k: int) -> Generator[int, None, None]:
     for i in range(k):
         # Add the next base to the k-mer and its reverse complement
         kmer = (kmer << 3) | encode_base(sequence[i])
-        rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (3*(k-1))
+        rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (
+            3 * (k - 1)
+        )
 
     # Yield the hash value of the first k-mer and its reverse complement
-    yield custom_hash_fn(rc_kmer) if custom_hash_fn(rc_kmer) < custom_hash_fn(kmer) else custom_hash_fn(kmer)
+    yield custom_hash_fn(rc_kmer) if custom_hash_fn(rc_kmer) < custom_hash_fn(
+        kmer
+    ) else custom_hash_fn(kmer)
 
     # Generate the remaining k-mers
     for i in range(k, n):
         # Update the k-mer and its reverse complement by adding the next base and dropping the leftmost base
         kmer = ((kmer << 3) & mask) | encode_base(sequence[i])
-        rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (3*(k-1))
+        rc_kmer = (rc_kmer >> 3) | (encode_base(sequence[i], True) ^ 0b111) << (
+            3 * (k - 1)
+        )
 
-        #Print progress only if 
+        # Print progress only if
         if i % moddh == 0:
-             printProgressBar(i, n, prefix='Progress:', suffix='Completed', length=40)
-             
+            printProgressBar(i, n, prefix="Progress:", suffix="Completed", length=40)
 
         # Yield the hash value of the current k-mer and its reverse complement
-        yield custom_hash_fn(rc_kmer) if custom_hash_fn(rc_kmer) < custom_hash_fn(kmer) else custom_hash_fn(kmer)
+        yield custom_hash_fn(rc_kmer) if custom_hash_fn(rc_kmer) < custom_hash_fn(
+            kmer
+        ) else custom_hash_fn(kmer)
 
 
 def encode_base(base: str, reverse_complement: bool = False) -> int:
@@ -101,31 +120,32 @@ def encode_base(base: str, reverse_complement: bool = False) -> int:
     If `reverse_complement` is True, return the complement of the base instead.
     """
     if not reverse_complement:
-        if base == 'A':
+        if base == "A":
             return 0b000
-        elif base == 'C':
+        elif base == "C":
             return 0b001
-        elif base == 'G':
+        elif base == "G":
             return 0b010
-        elif base == 'T':
+        elif base == "T":
             return 0b011
-        elif base == 'N':
+        elif base == "N":
             return 0b100
         else:
             return 0b100
     else:
-        if base == 'T':
+        if base == "T":
             return 0b111
-        elif base == 'G':
+        elif base == "G":
             return 0b110
-        elif base == 'C':
+        elif base == "C":
             return 0b101
-        elif base == 'A':
+        elif base == "A":
             return 0b100
-        elif base == 'N':
+        elif base == "N":
             return 0b011
         else:
             return 0b100
+
 
 def report_all_kmers(sequence: str, k: int) -> List[int]:
     """
@@ -141,6 +161,7 @@ def report_all_kmers(sequence: str, k: int) -> List[int]:
 
     return all_mers
 
+
 def read_kmers_from_file(filename: str, ksize: int) -> List[List[int]]:
     """
     Given a filename and an integer k, returns a list of all k-mers found in the sequences in the file.
@@ -152,8 +173,9 @@ def read_kmers_from_file(filename: str, ksize: int) -> List[List[int]]:
         print(f"Retrieving k-mers from {seq_id}.... \n")
         all_kmers.append(report_all_kmers(seq.fetch(seq_id), ksize))
         print(f"{seq_id} k-mers retrieved! \n")
-    
+
     return all_kmers
+
 
 def get_input_headers(filename: str) -> List[str]:
     header_list = []
@@ -162,6 +184,7 @@ def get_input_headers(filename: str) -> List[str]:
         header_list.append(seq_id)
 
     return header_list
+
 
 def get_input_seq_length(filename: str) -> List[int]:
     length_list = []

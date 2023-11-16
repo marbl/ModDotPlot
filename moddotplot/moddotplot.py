@@ -13,7 +13,7 @@ from moddotplot.estimate_identity import (
     partition_evenly_spaced_modimizers,
     self_containment_matrix,
     pairwise_containment_matrix,
-    next_power_of_two
+    next_power_of_two,
 )
 from moddotplot.interactive import run_dash
 from moddotplot.const import ASCII_ART, VERSION
@@ -26,6 +26,7 @@ from moddotplot.static_plots import (
 )
 import itertools
 import json
+
 
 def get_args_parse():
     """
@@ -48,7 +49,11 @@ def get_args_parse():
     )
 
     group.add_argument(
-        "-c", "--config", default=None, type=str, help="Config file to use. Takes precedence over any other competing command line arguments."
+        "-c",
+        "--config",
+        default=None,
+        type=str,
+        help="Config file to use. Takes precedence over any other competing command line arguments.",
     )
 
     dist_params = parser.add_argument_group("Mod.Plot distance matrix commands")
@@ -69,20 +74,36 @@ def get_args_parse():
     )
 
     dist_params.add_argument(
-        "-r", "--resolution", default=1000, type=int, help="Dotplot resolution, or the number of cells to compare against. Prioritized over window size."
+        "-r",
+        "--resolution",
+        default=1000,
+        type=int,
+        help="Dotplot resolution, or the number of cells to compare against. Prioritized over window size.",
     )
 
-    #TODO: Implement this functionality
+    # TODO: Implement this functionality
     dist_params.add_argument(
-        "-w", "--window", default=None, type=int, help="Window size, or how many k-mers partitoned per cell. Used in lieu of resolution"
+        "-w",
+        "--window",
+        default=None,
+        type=int,
+        help="Window size, or how many k-mers partitoned per cell. Used in lieu of resolution",
     )
 
     dist_params.add_argument(
-        "-id", "--identity", default=86, type=int, help="Identity cutoff threshold. Set higher for faster computations."
+        "-id",
+        "--identity",
+        default=86,
+        type=int,
+        help="Identity cutoff threshold. Set higher for faster computations.",
     )
 
     dist_params.add_argument(
-        "-a", "--alpha", default=0.2, type=float, help="Fraction of neighboring k-mers to include in identity estimation."
+        "-a",
+        "--alpha",
+        default=0.2,
+        type=float,
+        help="Fraction of neighboring k-mers to include in identity estimation.",
     )
 
     dist_params.add_argument(
@@ -111,23 +132,23 @@ def get_args_parse():
         "--layers",
         default=3,
         type=int,
-        help="Number of matrix hierarchy layers to compute when preparing interactive mode."
+        help="Number of matrix hierarchy layers to compute when preparing interactive mode.",
     )
 
-    #TODO: Implement this functionality
-    interactive_params.add_argument(
+    # TODO: Implement this functionality
+    """interactive_params.add_argument(
         "--save",
         action="store_true",
         help="Save hierarchical matrices to file. Only used in interactive mode.",
-    )
+    )"""
 
-    #TODO: Implement this functionality
-    interactive_params.add_argument(
+    # TODO: Implement this functionality
+    """interactive_params.add_argument(
         "--load",
         default=None,
         type=str,
         help="Load previously computed hierarchical matrices.",
-    )
+    )"""
 
     interactive_params.add_argument(
         "--port",
@@ -139,7 +160,9 @@ def get_args_parse():
     plot_params = parser.add_argument_group("Static plotting commands")
 
     plot_params.add_argument(
-        "--static", action="store_true", help="Create static bitmap and vector dotplots. Prevents launching of Plotly & Dash. "
+        "--static",
+        action="store_true",
+        help="Create static bitmap and vector dotplots. Prevents launching of Plotly & Dash. ",
     )
 
     plot_params.add_argument(
@@ -163,7 +186,11 @@ def get_args_parse():
     )
 
     plot_params.add_argument(
-        "--xaxis", default=None, type=float, nargs="+", help="Change x axis for static plot. Default is length of the sequence, in mbp."
+        "--xaxis",
+        default=None,
+        type=float,
+        nargs="+",
+        help="Change x axis for static plot. Default is length of the sequence, in mbp.",
     )
 
     plot_params.add_argument(
@@ -219,41 +246,43 @@ def main():
 
     # If config file selected, parse those arguments first
     if args.config:
-        with open(args.config, 'r') as f:
+        with open(args.config, "r") as f:
             config = json.load(f)
-            args.input = config.get('input')
+            args.input = config.get("input")
 
             # Distance matrix commands
-            args.kmer = config.get('kmer', args.kmer)
-            args.sparsity = config.get('sparsity', args.sparsity)
-            args.resolution = config.get('resolution', args.resolution)
-            args.window = config.get('window', args.window)
-            args.identity = config.get('identity', args.identity)
-            args.alpha = config.get('alpha', args.alpha)
-            args.output_dir = config.get('output_dir', args.output_dir)
-            args.compare = config.get('compare', args.compare)
-            args.compare_only = config.get('compare_only', args.compare_only)
+            args.kmer = config.get("kmer", args.kmer)
+            args.sparsity = config.get("sparsity", args.sparsity)
+            args.resolution = config.get("resolution", args.resolution)
+            args.window = config.get("window", args.window)
+            args.identity = config.get("identity", args.identity)
+            args.alpha = config.get("alpha", args.alpha)
+            args.output_dir = config.get("output_dir", args.output_dir)
+            args.compare = config.get("compare", args.compare)
+            args.compare_only = config.get("compare_only", args.compare_only)
 
             # Interactive plotting commands
-            args.layers = config.get('layers', args.layers)
-            args.save = config.get('save', args.save)
-            args.load = config.get('load', args.load)
-            args.port = config.get('port', args.port)
+            args.layers = config.get("layers", args.layers)
+            args.save = config.get("save", args.save)
+            args.load = config.get("load", args.load)
+            args.port = config.get("port", args.port)
 
             # Static plotting commands
-            args.static = config.get('static', args.static)
-            args.no_bed = config.get('no_bed', args.no_bed)
-            args.no_plot = config.get('no_plot', args.no_plot)
-            args.no_hist = config.get('no_hist', args.no_hist)
-            args.width = config.get('width', args.width)
-            args.height = config.get('height', args.height)
-            args.xaxis = config.get('xaxis', args.xaxis)
-            args.dpi = config.get('dpi', args.dpi)
-            args.palette = config.get('palette', args.palette)
-            args.palette_orientation = config.get('palette_orientation', args.palette_orientation)
-            args.colors = config.get('color', args.colors)
-            args.breakpoints = config.get('breakpoints', args.breakpoints)
-            args.bin_freq = config.get('bin_freq', args.bin_freq)
+            args.static = config.get("static", args.static)
+            args.no_bed = config.get("no_bed", args.no_bed)
+            args.no_plot = config.get("no_plot", args.no_plot)
+            args.no_hist = config.get("no_hist", args.no_hist)
+            args.width = config.get("width", args.width)
+            args.height = config.get("height", args.height)
+            args.xaxis = config.get("xaxis", args.xaxis)
+            args.dpi = config.get("dpi", args.dpi)
+            args.palette = config.get("palette", args.palette)
+            args.palette_orientation = config.get(
+                "palette_orientation", args.palette_orientation
+            )
+            args.colors = config.get("color", args.colors)
+            args.breakpoints = config.get("breakpoints", args.breakpoints)
+            args.bin_freq = config.get("bin_freq", args.bin_freq)
 
             # TODO: Include logging options here
 
@@ -262,10 +291,13 @@ def main():
     if args.breakpoints:
         # Check that start value fro breakpoints = identity
         if args.breakpoints[0] != args.identity:
-            print(f"Identity threshold is {args.identity}, but starting breakpoint is {args.breakpoints[0]}! \n")
-            print(f"Please modify identity threshold using --identity {args.breakpoints[0]}.\n")
+            print(
+                f"Identity threshold is {args.identity}, but starting breakpoint is {args.breakpoints[0]}! \n"
+            )
+            print(
+                f"Please modify identity threshold using --identity {args.breakpoints[0]}.\n"
+            )
             sys.exit(2)
-
 
     # Validate input sequence:
     seq_list = []
@@ -292,7 +324,6 @@ def main():
         for x in k_list:
             len_list.append(len(x))
         args.sparsity = math.ceil(max(len_list) / 500000)
-        
 
     if not args.static:
         args.sparsity = next_power_of_two(args.sparsity)
@@ -302,18 +333,29 @@ def main():
         if len(seq_list) > 1 and (args.compare or args.compare_only):
             print(f"Building matrix hierarchy with {args.layers} layers.... \n")
 
-            #TODO: assert that args layers is a reasonable number
+            # TODO: assert that args layers is a reasonable number
             image_pyramid = []
             for i in range(args.layers):
-                
-                mod_list_1 = get_mods(k_list[0], args.sparsity // (2**i), args.resolution * (2**i))
-                mod_list_2 = get_mods(k_list[1], args.sparsity // (2**i), args.resolution * (2**i))
+                mod_list_1 = get_mods(
+                    k_list[0], args.sparsity // (2**i), args.resolution * (2**i)
+                )
+                mod_list_2 = get_mods(
+                    k_list[1], args.sparsity // (2**i), args.resolution * (2**i)
+                )
                 mod_set_1 = convert_set(mod_list_1)
                 mod_set_2 = convert_set(mod_list_2)
                 mod_set_neighbors_1 = convert_set_neighbors(mod_list_1, args.alpha)
                 mod_set_neighbors_2 = convert_set_neighbors(mod_list_2, args.alpha)
                 print(f"Layer {i+1} using sparsity {args.sparsity // (2**i)}\n")
-                xd = pairwise_containment_matrix(mod_set_1, mod_set_2, mod_set_neighbors_1, mod_set_neighbors_2, args.identity, args.kmer, False)
+                xd = pairwise_containment_matrix(
+                    mod_set_1,
+                    mod_set_2,
+                    mod_set_neighbors_1,
+                    mod_set_neighbors_2,
+                    args.identity,
+                    args.kmer,
+                    False,
+                )
                 image_pyramid.append(xd)
 
             run_dash(
@@ -329,7 +371,7 @@ def main():
                 args.palette,
                 args.palette_orientation,
                 args.alpha,
-                image_pyramid
+                image_pyramid,
             )
         else:
             if len(seq_list) > 1:
@@ -338,15 +380,19 @@ def main():
 
             print(f"Building matrix hierarchy with {args.layers} layers.... \n")
 
-            #TODO: assert that args layers is a reasonable number
+            # TODO: assert that args layers is a reasonable number
 
             image_pyramid = []
             for i in range(args.layers):
-                mod_list = get_mods(k_list[0], args.sparsity // (2**i), args.resolution * (2**i))
+                mod_list = get_mods(
+                    k_list[0], args.sparsity // (2**i), args.resolution * (2**i)
+                )
                 mod_set = convert_set(mod_list)
                 mod_set_neighbors = convert_set_neighbors(mod_list, args.alpha)
                 print(f"Layer {i+1} using sparsity {args.sparsity // (2**i)}\n")
-                xd = self_containment_matrix(mod_set, mod_set_neighbors, args.kmer, args.identity)
+                xd = self_containment_matrix(
+                    mod_set, mod_set_neighbors, args.kmer, args.identity
+                )
                 image_pyramid.append(xd)
 
             run_dash(
@@ -362,7 +408,7 @@ def main():
                 args.palette,
                 args.palette_orientation,
                 args.alpha,
-                image_pyramid
+                image_pyramid,
             )
 
     # Static plots
@@ -391,7 +437,7 @@ def main():
                 print(f"Computing self identity matrix for {seq_list[i]}... \n")
                 mod_list = get_mods(k_list[i], args.sparsity, args.resolution)
                 mod_set_neighbors_hi = convert_set_neighbors(mod_list, args.alpha)
-                #TODO: make cleaner
+                # TODO: make cleaner
                 new_windows = []
                 if args.alpha == 0:
                     new_windows = partition_evenly_spaced_modimizers(
@@ -399,7 +445,9 @@ def main():
                     )
                 else:
                     new_windows = partition_evenly_spaced_modimizers(
-                        mod_set_neighbors_hi, len(k_list[i]) + args.kmer - 1, args.resolution
+                        mod_set_neighbors_hi,
+                        len(k_list[i]) + args.kmer - 1,
+                        args.resolution,
                     )
                 paired_bed_file(
                     new_windows,
@@ -422,7 +470,6 @@ def main():
                 )
         # Compare only
         if (args.compare or args.compare_only) and len(seq_list) > 1:
-
             seq_kmers = {}
             for j in range(len(seq_list)):
                 seq_kmers[seq_list[j]] = k_list[j]
@@ -486,7 +533,7 @@ def main():
                         args.output_dir,
                         args.colors,
                         args.breakpoints,
-                        args.compare_only
+                        args.compare_only,
                     )
                 else:
                     ratio = round(
@@ -547,7 +594,7 @@ def main():
                         args.output_dir,
                         args.colors,
                         args.breakpoints,
-                        args.compare_only
+                        args.compare_only,
                     )
 
 

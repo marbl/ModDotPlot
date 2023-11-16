@@ -11,6 +11,7 @@ from typing import List, Set, Dict, Tuple
 
 from moddotplot.parse_fasta import printProgressBar
 
+
 def divide_into_chunks(lst: List[int], res: int) -> List[List[int]]:
     """
     Divide a list into approximately equal-sized chunks.
@@ -29,11 +30,14 @@ def divide_into_chunks(lst: List[int], res: int) -> List[List[int]]:
     start = 0
 
     for i in range(res):
-        end = start + chunk_size + (1 if i < remainder else 0)  # Adjust chunk size for remainder
+        end = (
+            start + chunk_size + (1 if i < remainder else 0)
+        )  # Adjust chunk size for remainder
         chunks.append(lst[start:end])
         start = end
 
     return chunks
+
 
 def get_mods(kmer_list: List[int], s: int, res: int) -> List[List[int]]:
     """
@@ -49,14 +53,15 @@ def get_mods(kmer_list: List[int], s: int, res: int) -> List[List[int]]:
                          that are divisible by s.
     """
     assert s > 0, "s must be a positive integer"
-    
+
     mod_list_prep = divide_into_chunks(kmer_list, res)
-    
+
     mod_list = [
         [kmer for kmer in element if kmer % s == 0] for element in mod_list_prep
     ]
-    
+
     return mod_list
+
 
 def convert_set(kmer_list: List[List[int]]) -> List[Set[int]]:
     """
@@ -100,6 +105,7 @@ def convert_set_neighbors(mod_list: List[List[int]], alpha: float) -> List[Set[i
 
     return kmer_sets
 
+
 def binomial_distance(containment_value: float, kmer_value: int) -> float:
     """
     Calculate the binomial distance based on containment and kmer values.
@@ -113,7 +119,15 @@ def binomial_distance(containment_value: float, kmer_value: int) -> float:
     """
     return math.pow(containment_value, 1.0 / kmer_value)
 
-def containment_neighbors(set1: Set[int], set2: Set[int], set3: Set[int], set4: Set[int], identity: int, k: int) -> float:
+
+def containment_neighbors(
+    set1: Set[int],
+    set2: Set[int],
+    set3: Set[int],
+    set4: Set[int],
+    identity: int,
+    k: int,
+) -> float:
     """
     Calculate the containment neighbors based on four sets and an identity threshold.
 
@@ -136,13 +150,14 @@ def containment_neighbors(set1: Set[int], set2: Set[int], set3: Set[int], set4: 
 
     if binomial_distance(containment_a_b_prime, k) < identity / 100:
         return 0.0
-    
+
     else:
         intersection_a_prime_b = len(set2 & set3)
         containment_a_prime_b = intersection_a_prime_b / len_b
 
         return max(containment_a_b_prime, containment_a_prime_b)
-    
+
+
 def self_containment_matrix(
     mod_set: List[set], mod_set_neighbors: List[set], k: int, identity: int
 ) -> np.ndarray:
@@ -160,23 +175,32 @@ def self_containment_matrix(
     n = len(mod_set)
     progress_thresholds = round(n / 77)
 
-    printProgressBar(0, n, prefix='Progress:', suffix='Complete', length=40)
+    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     containment_matrix = np.empty((n, n))
 
     for w in range(n):
         if w % progress_thresholds == 0:
-            printProgressBar(w, n, prefix='Progress:', suffix='Complete', length=40)
+            printProgressBar(w, n, prefix="Progress:", suffix="Complete", length=40)
         containment_matrix[w, w] = 1.0
-        
+
         for r in range(w + 1, n):
             c_hat = binomial_distance(
-                containment_neighbors(mod_set[w], mod_set[r], mod_set_neighbors[w], mod_set_neighbors[r], identity, k),
-                k
+                containment_neighbors(
+                    mod_set[w],
+                    mod_set[r],
+                    mod_set_neighbors[w],
+                    mod_set_neighbors[r],
+                    identity,
+                    k,
+                ),
+                k,
             )
             containment_matrix[r, w] = c_hat
             containment_matrix[w, r] = c_hat
 
-    printProgressBar(n, n, prefix='Progress:', suffix='Completed', length=40) # show completed progress bar
+    printProgressBar(
+        n, n, prefix="Progress:", suffix="Completed", length=40
+    )  # show completed progress bar
     print("\n")
     return containment_matrix
 
@@ -209,13 +233,13 @@ def pairwise_containment_matrix(
     progress_thresholds = round(n / 77)
 
     if not supress_progress:
-        printProgressBar(0, n, prefix='Progress:', suffix='Complete', length=40)
+        printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     containment_matrix = np.zeros((len(mod_set_y), len(mod_set_x)), dtype=float)
 
     for w in range(len(mod_set_y)):
         if not supress_progress:
             if w % progress_thresholds == 0:
-                printProgressBar(w, n, prefix='Progress:', suffix='Complete', length=40)
+                printProgressBar(w, n, prefix="Progress:", suffix="Complete", length=40)
         for q in range(len(mod_set_x)):
             containment_matrix[w, q] = binomial_distance(
                 containment_neighbors(
@@ -224,14 +248,17 @@ def pairwise_containment_matrix(
                     mod_set_x_neighbors[q],
                     mod_set_y_neighbors[w],
                     identity,
-                    k
+                    k,
                 ),
                 k,
             )
     if not supress_progress:
-        printProgressBar(n, n, prefix='Progress:', suffix='Completed', length=40) # show completed progress bar
+        printProgressBar(
+            n, n, prefix="Progress:", suffix="Completed", length=40
+        )  # show completed progress bar
         print("\n")
     return containment_matrix
+
 
 # Function used to find matching color palette to those available in const.py
 def find_elements_with_prefix(lst, prefix):
@@ -303,12 +330,14 @@ def containment(set1, set2):
     except:
         return 0
 
+
 ## ALL USEFUL
+
 
 def verify_modimizers(sparsity, l):
     # Get the next highest power of 2, if not provided
     updated_sparsity = next_power_of_two(sparsity)
-    
+
     sparsity_layers = [updated_sparsity]
     while l > 0:
         if sparsity_layers[-1] == 1:
@@ -327,6 +356,7 @@ def generate_dict_from_list(lst: List[int]) -> Dict[Tuple[int, int], int]:
         result[(lst[i], lst[i + 1])] = i
     return result
 
+
 def find_value_in_range(integer: int, range_dict: dict) -> int:
     if integer > max(key[0] for key in range_dict.keys()):
         return 0
@@ -336,9 +366,10 @@ def find_value_in_range(integer: int, range_dict: dict) -> int:
             return value
     return highest_value
 
+
 ## ALL USEFUL
 
-        
+
 def set_zoom_levels(axis_length, sparsity_layers):
     zoom_levels = {}
     zoom_levels[sparsity_layers[0]] = axis_length
@@ -346,12 +377,14 @@ def set_zoom_levels(axis_length, sparsity_layers):
         zoom_levels[sparsity_layers[i]] = round(axis_length / pow(2, i))
     return zoom_levels
 
+
 def set_zoom_levels_list(axis_length, sparsity_layers):
     zoom_levels = []
     zoom_levels.append(axis_length)
     for i in range(1, len(sparsity_layers)):
         zoom_levels.append(round(axis_length / pow(2, i)))
     return zoom_levels
+
 
 def find_closest_higher_index(descending_list, target_value):
     left = 0
@@ -369,17 +402,19 @@ def find_closest_higher_index(descending_list, target_value):
 
     return closest_index
 
+
 def make_differences_equal(x, x_prime, y, y_prime):
     difference_x = abs(x_prime - x)
     difference_y = abs(y_prime - y)
-    
+
     if difference_x != difference_y:
         if difference_x < difference_y:
             x_prime += difference_y - difference_x
         else:
             y_prime += difference_x - difference_y
-    
+
     return x_prime, y_prime
+
 
 def next_power_of_two(n):
     if n <= 0:
