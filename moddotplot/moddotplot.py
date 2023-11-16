@@ -263,8 +263,9 @@ def main():
 
             # Interactive plotting commands
             args.layers = config.get("layers", args.layers)
-            args.save = config.get("save", args.save)
-            args.load = config.get("load", args.load)
+            #TODO: Add dave and load functionality for matrices
+            '''args.save = config.get("save", args.save)
+            args.load = config.get("load", args.load)'''
             args.port = config.get("port", args.port)
 
             # Static plotting commands
