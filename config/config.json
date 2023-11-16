@@ -1,18 +1,16 @@
 {
     "static": true,
-    "alpha": 0.4,
+    "alpha": 0.3,
     "identity": 90,
     "sparsity": 10,
-    "colors": [
-        "#5C509D",
-        "#DEE89B",
-        "#FBFBC3",
-        "#8B1B40"
-    ],
+    "palette": "OrRd_7",
     "breakpoints": [
         90,
+        91,
+        92,
         93,
         96,
+        98,
         99,
         100
     ],
