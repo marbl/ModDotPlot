@@ -13,7 +13,7 @@
 
 ## About
 
-ModDotPlot is a novel dot plot visualization tool, similar to [StainedGlass](https://mrvollger.github.io/StainedGlass/). ModDotPlot utilizes modimizers to compute the Mash Containment Score in order to estimate sequence identity. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
+ModDotPlot is a novel dot plot visualization tool, similar to [StainedGlass](https://mrvollger.github.io/StainedGlass/). ModDotPlot utilizes modimizers to compute a modified version of the [Mash Containment Score](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1841-x) in order to rapidly estimate sequence identity. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
 
 ![](images/demo.gif)
 
@@ -327,7 +327,7 @@ chr14:2000000-5000000_chr21:2000000-5000000.png and chr14:2000000-5000000_chr21:
 
 ## Questions
 
-For bug reports or general usage questions, please raise a GitHub issue, or email asweete1 ~at~ jhu ~dot~ edu
+For bug reports or general usage questions, please raise a GitHub issue, or email alex ~dot~ sweeten ~at~ nih ~dot~ gov
 
 --- 
 
