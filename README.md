@@ -61,7 +61,7 @@ K-mer size to use. This should be large enough to distinguish unique k-mers with
 
 `-s / --sparsity <int>`
 
-A higher sparsity value means less k-mers to compare, at the expense of lower accuracy. Modimizers are selected `0 mod s`, an inverse of the selected k-mer density. The default is `s = 2/Mbp` of sequence for fast performance without compromising accuracy. For example, on a human Y chromosome ~ 62Mbp, Mod.Plot will set `s = 124`. Interactive mode will automatically round up to the nearest power of 2, in order to make computations easier. 
+A higher sparsity value means less k-mers to compare, at the expense of lower accuracy. Modimizers are selected `0 mod s`, an inverse of the selected k-mer density. The default is `s = 2/Mbp` of sequence for fast performance without compromising accuracy. For example, on a human Y chromosome ~ 62Mbp, ModDotPlot will set `s = 124`. Interactive mode will automatically round up to the nearest power of 2, in order to make computations easier. 
 
 `-o / --output-dir <string>`
 
@@ -292,15 +292,12 @@ ModDotPlot can produce an a vs. b style dotplot for each pairwise combination of
 ```
 moddotplot -i test/chr14_segment.fa test/chr21_segment.fa --compare-only -s 4
 
- _______  _______  ______                        _______  _        _______ _________
-(       )(  ___  )(  __  \                      (  ____ )( \      (  ___  )\__   __/
-| () () || (   ) || (  \  )                     | (    )|| (      | (   ) |   ) (   
-| || || || |   | || |   ) |                     | (____)|| |      | |   | |   | |   
-| |(_)| || |   | || |   | |   ___   ___ _____   |  _____)| |      | |   | |   | |   
-| |   | || |   | || |   ) |  |   \ / _ \_   _|  | (      | |      | |   | |   | |   
-| )   ( || (___) || (__/  )  | |) | (_) || |    | )      | (____/\| (___) |   | |   
-|/     \|(_______)(______/   |___/ \___/ |_|    |/       (_______/(_______)   )_(   
-
+  __  __           _   _____        _     _____  _       _   
+ |  \/  |         | | |  __ \      | |   |  __ \| |     | |  
+ | \  / | ___   __| | | |  | | ___ | |_  | |__) | | ___ | |_ 
+ | |\/| |/ _ \ / _` | | |  | |/ _ \| __| |  ___/| |/ _ \| __|
+ | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
+ |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
 Retrieving k-mers from chr14:2000000-5000000.... 
 
