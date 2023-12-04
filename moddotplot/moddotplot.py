@@ -28,7 +28,7 @@ import itertools
 import json
 
 
-def get_args_parse():
+def get_parser():
     """
     Argument parsing for stand-alone runs.
 
@@ -101,9 +101,9 @@ def get_args_parse():
     dist_params.add_argument(
         "-a",
         "--alpha",
-        default=0.2,
+        default=0.5,
         type=float,
-        help="Fraction of neighboring k-mers to include in identity estimation.",
+        help="Fraction of neighboring partition to include in identity estimation.",
     )
 
     dist_params.add_argument(
@@ -234,15 +234,13 @@ def get_args_parse():
     )
     # TODO: implement logging options
 
-    args = parser.parse_args()
-
-    return args
+    return parser
 
 
 def main():
     print(ASCII_ART)
     print(f"v{VERSION} \n")
-    args = get_args_parse()
+    args = get_parser().parse_args()
 
     # If config file selected, parse those arguments first
     if args.config:
