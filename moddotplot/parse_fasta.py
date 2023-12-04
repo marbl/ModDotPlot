@@ -1,11 +1,11 @@
-from typing import Generator, List
+from typing import Iterable, List, Sequence
 import pysam
 import sys
 import mmh3
 
 tab_b = bytes.maketrans(b"ACTG", b"TGAC")
 
-def generate_kmers_from_fasta(seq, k):
+def generate_kmers_from_fasta(seq: Sequence[str], k: int) -> Iterable[int]:
     n = len(seq)
     progress_thresholds = round(n / 77)
     printProgressBar(0, n - k + 1, prefix='Progress:', suffix='Complete', length=40)
