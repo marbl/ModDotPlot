@@ -19,6 +19,7 @@ setup(
         "dash",
         "plotnine",
         "palettable",
+        "mmh3",
     ],
     python_requires=">=3.7",
     author_email="alex.sweeten@nih.gov",
