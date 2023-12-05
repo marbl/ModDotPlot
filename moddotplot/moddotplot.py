@@ -35,7 +35,7 @@ def get_parser():
     """
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Mod.Plot, Visualization of Complex Repeat Structures.",
+        description="ModDotPlot, Visualization of Complex Repeat Structures.",
     )
 
     group = parser.add_mutually_exclusive_group(required=True)
@@ -56,7 +56,7 @@ def get_parser():
         help="Config file to use. Takes precedence over any other competing command line arguments.",
     )
 
-    dist_params = parser.add_argument_group("Mod.Plot distance matrix commands")
+    dist_params = parser.add_argument_group("ModDotPlot distance matrix commands")
 
     # Add a mutually exclusive group for compare and compare only.
     dist_group = parser.add_mutually_exclusive_group(required=False)
@@ -288,7 +288,7 @@ def main():
     # Tests for specific bugs here
     # TODO: More tests!
     if args.breakpoints:
-        # Check that start value fro breakpoints = identity
+        # Check that start value for breakpoints = identity
         if args.breakpoints[0] != args.identity:
             print(
                 f"Identity threshold is {args.identity}, but starting breakpoint is {args.breakpoints[0]}! \n"
@@ -307,7 +307,6 @@ def main():
             print(f"File {i} contains multiple fasta entries: \n")
             counter = 1
             for j in headers:
-                print(f"{counter}) {j} \n")
                 counter += 1
         for j in headers:
             seq_list.append(j)
@@ -322,7 +321,7 @@ def main():
         len_list = []
         for x in k_list:
             len_list.append(len(x))
-        args.sparsity = math.ceil(max(len_list) / 500000)
+        args.sparsity = math.ceil(max(len_list) / 500000 / 2)
 
     if not args.static:
         args.sparsity = next_power_of_two(args.sparsity)
@@ -415,6 +414,9 @@ def main():
         print(f"Using s = {args.sparsity}. \n")
         if not args.compare_only:
             for i in range(len(seq_list)):
+                if args.window:
+                    print(f"Setting window size to {args.window}. {seq_list[i]} will have a resolution of {math.ceil(len(kmer_list[0][i])/args.window)}\n")
+                    args.resolution = math.ceil(len(kmer_list[0][0])/args.window)
                 xaxis = 0
                 width = 0
                 height = 0

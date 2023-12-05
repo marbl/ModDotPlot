@@ -32,9 +32,6 @@ def is_valid_fasta(file_path):
             for line in file:
                 line = line.strip()
                 if line.startswith(">"):
-                    if in_sequence:
-                        print("Fasta formatting error: '>' found within sequence")
-                        sys.exit(2)
                     in_sequence = True
                 elif in_sequence and not line:
                     # Empty line encountered after the sequence header

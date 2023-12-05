@@ -20,13 +20,14 @@ from plotnine import (
     coord_fixed,
     facet_grid,
     labs,
+    element_line,
+    element_text
 )
 import pandas as pd
 import numpy as np
 import math
 import os
 from moddotplot.const import (
-    COLS,
     DIVERGING_PALETTES,
     QUALITATIVE_PALETTES,
     SEQUENTIAL_PALETTES,
@@ -84,12 +85,12 @@ def paired_bed_file(
     n = (len(window_partitions) * len(window_partitions)) / 2 + (
         len(window_partitions) / 2
     )
-    moddh = round(n / 77)
+    progress_thresholds = round(n / 77)
     printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
 
     for w in itertools.combinations_with_replacement(window_partitions, 2):
         counter += 1
-        if counter % moddh == 0:
+        if counter % progress_thresholds == 0:
             printProgressBar(
                 counter, n, prefix="Progress:", suffix="Completed", length=40
             )
@@ -185,12 +186,12 @@ def paired_bed_file_a_vs_b(
     assert id_threshold > 50 and id_threshold < 100
     counter = 0
     n = len(window_partitions_a) * len(window_partitions_b)
-    moddh = round(n / 77)
+    progress_thresholds = round(n / 77)
     printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     for i in window_partitions_a:
         for j in window_partitions_b:
             counter += 1
-            if counter % moddh == 0:
+            if counter % progress_thresholds == 0:
                 printProgressBar(
                     counter, n, prefix="Progress:", suffix="Completed", length=40
                 )
@@ -203,10 +204,10 @@ def paired_bed_file_a_vs_b(
                 if perID * 100 >= id_threshold:
                     bed.append(
                         (
-                            a_name,
+                            b_name,
                             int(query_start),
                             int(query_end),
-                            b_name,
+                            a_name,
                             int(reference_start),
                             int(reference_end),
                             perID * 100,
@@ -237,7 +238,7 @@ def paired_bed_file_a_vs_b(
 
     if not no_plot:
         print(f"Creating plots... \n")
-        c = make_dot(cdf, image_output, palette, palette_orientation)
+        c = make_dot(cdf, image_output, palette, palette_orientation, custom_colors)
         ggsave(
             c,
             width=width,
@@ -384,7 +385,10 @@ def diamond(row):
     return df
 
 
-def make_dot(sdf, title_name, palette, palette_orientation):
+from plotnine import ggplot, geom_tile, scale_color_discrete, scale_fill_manual, theme, element_blank, element_line, element_text, scale_x_continuous, scale_y_continuous, coord_fixed, facet_grid, labs
+import numpy as np
+
+def make_dot(sdf, title_name, palette, palette_orientation, colors):
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -409,6 +413,8 @@ def make_dot(sdf, title_name, palette, palette_orientation):
         new_hexcodes = hexcodes[::-1]
     else:
         new_hexcodes = hexcodes
+    if colors:
+        new_hexcodes = colors
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
     window = max(sdf["q_en"] - sdf["q_st"])
     p = (
@@ -427,15 +433,22 @@ def make_dot(sdf, title_name, palette, palette_orientation):
             panel_grid_minor=element_blank(),
             plot_background=element_blank(),
             panel_background=element_blank(),
+            axis_line=element_line(color="black", size=2),  # Adjust axis line size
+            axis_text=element_text(family="Helvetica", size=12),  # Change axis text font and size
+            axis_ticks_major=element_line(size=6),
         )
         + scale_x_continuous(labels=make_scale, limits=[0, max_val])
         + scale_y_continuous(labels=make_scale, limits=[0, max_val])
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
-        + labs(x="Genomic position (Mbp)", y="", title=title_name)
+        + labs(x="Genomic position (Mbp)", y="", title=title_name, size=40)
     )
 
+    # Adjust x-axis label size
+    p += theme(axis_title_x=element_text(size=18))
+
     return p
+
 
 
 def make_tri(
@@ -569,6 +582,8 @@ def create_plots(
     )
     sdf = df
 
+
+
     sdf["w"] = sdf["first_pos"] + sdf["second_pos"]
     sdf["z"] = -sdf["first_pos"] + sdf["second_pos"]
     window = max(sdf["q_en"] - sdf["q_st"])
@@ -578,6 +593,17 @@ def create_plots(
     sdf["w_new"] = sdf["w"] * tri_scale
     sdf["z_new"] = sdf["z"] * window
     df_d = pd.concat([diamond(row) for _, row in sdf.iterrows()], ignore_index=True)
+
+    def check_st_en_equality(df):
+        unequal_rows = df[(df['q_st'] != df['r_st']) | (df['q_en'] != df['r_en'])]
+        unequal_rows.loc[:, ['q_en', 'r_en', 'q_st', 'r_st']] = unequal_rows[['r_en', 'q_en', 'r_st', 'q_st']].values
+        
+        df = pd.concat([df, unequal_rows], ignore_index=True)
+        
+        return df
+
+    # Assuming df is your DataFrame
+    newd = check_st_en_equality(sdf)
 
     # TODO: Scale based on size of the input genome, cant always assume Mbp is appropriate
     df_d["w_new"] = df_d["w"] * tri_scale / 1000000
@@ -592,10 +618,23 @@ def create_plots(
         custom_breakpoints,
     )
 
+    
+
     if xlim:
         tri += coord_cartesian(xlim=(0, xlim))
 
     plot_filename = f"{directory}/{output}"
+    # TODO: Dotplot for standard
+    c = make_dot(newd, plot_filename, palette, palette_orientation, custom_colors)
+    ggsave(
+        c,
+        width=width,
+        height=width,
+        dpi=dpi,
+        format="pdf",
+        filename=plot_filename + "_FULL.pdf",
+        verbose=False,
+    )
     print("Plots created! \n")
 
     print(f"Saving plots to {plot_filename}... \n")

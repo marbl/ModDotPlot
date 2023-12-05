@@ -52,7 +52,8 @@ def get_mods(kmer_list: List[int], s: int, res: int) -> List[List[int]]:
         List[List[int]]: A list of lists, where each inner list contains k-mers from kmer_list
                          that are divisible by s.
     """
-    assert s > 0, "s must be a positive integer"
+    if s < 1:
+        s = 1
 
     mod_list_prep = divide_into_chunks(kmer_list, res)
 
