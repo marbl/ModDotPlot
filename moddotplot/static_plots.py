@@ -38,6 +38,13 @@ from moddotplot.estimate_identity import binomial_distance, containment
 from palettable.colorbrewer import qualitative, sequential, diverging
 from moddotplot.parse_fasta import printProgressBar
 
+def check_st_en_equality(df):
+        unequal_rows = df[(df['q_st'] != df['r_st']) | (df['q_en'] != df['r_en'])]
+        unequal_rows.loc[:, ['q_en', 'r_en', 'q_st', 'r_st']] = unequal_rows[['r_en', 'q_en', 'r_st', 'q_st']].values
+        
+        df = pd.concat([df, unequal_rows], ignore_index=True)
+        
+        return df
 
 def make_k(vals):
     return format(vals / 1e3, ",")
@@ -68,7 +75,6 @@ def paired_bed_file(
     custom_breakpoints: List,
 ) -> None:
     assert 50 < id_threshold < 100
-
     bed = []
     bed.append(
         (
@@ -459,6 +465,7 @@ def make_tri(
     is_freq,
     custom_colors,
     custom_breakpoints,
+    xlim
 ):
     hexcodes = []
     new_hexcodes = []
@@ -510,6 +517,11 @@ def make_tri(
         + xlab("Genomic Position (Mbp)")
         + ggtitle(title_name)
     )
+
+    if xlim:
+        print(f"Resizing x-axis to {xlim}")
+        p_tri += coord_cartesian(xlim=(0, xlim))
+
     return p_tri
 
 
@@ -594,16 +606,7 @@ def create_plots(
     sdf["z_new"] = sdf["z"] * window
     df_d = pd.concat([diamond(row) for _, row in sdf.iterrows()], ignore_index=True)
 
-    def check_st_en_equality(df):
-        unequal_rows = df[(df['q_st'] != df['r_st']) | (df['q_en'] != df['r_en'])]
-        unequal_rows.loc[:, ['q_en', 'r_en', 'q_st', 'r_st']] = unequal_rows[['r_en', 'q_en', 'r_st', 'q_st']].values
-        
-        df = pd.concat([df, unequal_rows], ignore_index=True)
-        
-        return df
-
-    # Assuming df is your DataFrame
-    newd = check_st_en_equality(sdf)
+    
 
     # TODO: Scale based on size of the input genome, cant always assume Mbp is appropriate
     df_d["w_new"] = df_d["w"] * tri_scale / 1000000
@@ -616,16 +619,15 @@ def create_plots(
         is_freq,
         custom_colors,
         custom_breakpoints,
+        xlim
     )
 
-    
-
-    if xlim:
-        tri += coord_cartesian(xlim=(0, xlim))
-
     plot_filename = f"{directory}/{output}"
-    # TODO: Dotplot for standard
-    c = make_dot(newd, plot_filename, palette, palette_orientation, custom_colors)
+    symmetric = check_st_en_equality(sdf)
+    c = make_dot(symmetric, plot_filename, palette, palette_orientation, custom_colors)
+    print("Plots created! \n")
+
+    print(f"Saving plots to {plot_filename}... \n")
     ggsave(
         c,
         width=width,
@@ -635,9 +637,15 @@ def create_plots(
         filename=plot_filename + "_FULL.pdf",
         verbose=False,
     )
-    print("Plots created! \n")
-
-    print(f"Saving plots to {plot_filename}... \n")
+    ggsave(
+        c,
+        width=width,
+        height=width,
+        dpi=dpi,
+        format="png",
+        filename=plot_filename + "_FULL.png",
+        verbose=False,
+    )
     ggsave(
         tri,
         width=width,
@@ -680,10 +688,10 @@ def create_plots(
             verbose=False,
         )
         print(
-            f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_HIST.png and {plot_filename}_HIST.pdf, saved sucessfully. \n"
+            f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_FULL.png, {plot_filename}_FULL.png, {plot_filename}_HIST.png and {plot_filename}_HIST.pdf, saved sucessfully. \n"
         )
 
     else:
         print(
-            f"{plot_filename}_TRI.png and {plot_filename}_TRI.pdf saved sucessfully. \n"
+            f"{plot_filename}_TRI.png {plot_filename}_TRI.pdf, {plot_filename}_FULL.png and {plot_filename}_FULL.png saved sucessfully. \n"
         )
