@@ -75,6 +75,10 @@ Identity cutoff threshold. Must be greater than 50, less than 100. Default is 86
 
 Dotplot resolution. This corresponds to the number of cells to partition each input sequence. Default is 1000. 
 
+`-w / --window <int>`
+
+Window size, or the number of k-mers per partition. Overrides resolution when used.
+
 `--alpha <float>`
 
 Each partition takes into account a fraction of its neighboring partitions k-mers. This is to avoid sub-optimal identity scores when partitons don't overlap identically. Default is 0.2, range is between 0 and 1.
