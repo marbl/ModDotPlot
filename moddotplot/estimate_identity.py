@@ -52,7 +52,8 @@ def get_mods(kmer_list: List[int], s: int, res: int) -> List[List[int]]:
         List[List[int]]: A list of lists, where each inner list contains k-mers from kmer_list
                          that are divisible by s.
     """
-    assert s > 0, "s must be a positive integer"
+    if s < 1:
+        s = 1
 
     mod_list_prep = divide_into_chunks(kmer_list, res)
 
@@ -146,14 +147,22 @@ def containment_neighbors(
     len_b = len(set2)
 
     intersection_a_b_prime = len(set1 & set4)
-    containment_a_b_prime = intersection_a_b_prime / len_a
+    if len_a != 0:
+        containment_a_b_prime = intersection_a_b_prime / len_a
+    else:
+        # If len_a is zero, handle it by setting containment_a_b_prime to a default value
+        containment_a_b_prime = 0
 
     if binomial_distance(containment_a_b_prime, k) < identity / 100:
         return 0.0
 
     else:
         intersection_a_prime_b = len(set2 & set3)
-        containment_a_prime_b = intersection_a_prime_b / len_b
+        if len_b != 0:
+            containment_a_prime_b = intersection_a_prime_b / len_b
+        else:
+            # If len_a is zero, handle it by setting containment_a_b_prime to a default value
+            containment_a_prime_b = 0
 
         return max(containment_a_b_prime, containment_a_prime_b)
 
@@ -323,12 +332,15 @@ def partition_evenly_spaced_modimizers(mod_list, seq_length, resolution):
 def containment(set1, set2):
     intersection = set1.intersection(set2)
     try:
-        if len(set1) > len(set2):
-            return float(len(intersection) / len(set1))
+        if len(set1) > 0 and len(set2) > 0:
+            if len(set1) > len(set2):
+                return float(len(intersection) / len(set1))
+            else:
+                return float(len(intersection) / len(set2))
         else:
-            return float(len(intersection) / len(set2))
-    except:
-        return 0
+            return 0.0
+    except ZeroDivisionError:
+        return 0.0
 
 
 ## ALL USEFUL

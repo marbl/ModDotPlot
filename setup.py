@@ -17,11 +17,11 @@ setup(
         "plotly",
         "matplotlib",
         "dash",
-        "dash_daq",
         "plotnine",
         "palettable",
+        "mmh3",
     ],
     python_requires=">=3.7",
-    author_email="asweeten@cs.jhu.edu",
+    author_email="alex.sweeten@nih.gov",
     entry_points={"console_scripts": ["moddotplot = moddotplot.__main__:main",],},
 )
