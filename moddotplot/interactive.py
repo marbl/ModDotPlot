@@ -1166,7 +1166,7 @@ def run_dash(
                 globals()['clicked_values'] = []
 
             # Append x and y values to the list and keep only the last 5 values
-            clicked_values.append(f'x: {x_val}, y: {y_val}, Identity: {round(z_val,3)} \n')
+            clicked_values.insert(0, f'x: {x_val}, y: {y_val}, Identity: {round(z_val,3)} \n')
             clicked_values = clicked_values[-100:]
             return '\n'.join((clicked_values)) 
         else:
@@ -1187,7 +1187,6 @@ def run_dash(
     def save_to_file(n_clicks, content):
         global clicked_values
         if n_clicks > 0 and content:
-            print(content)
             content = content.replace('\n', '\r\n')  # Windows line endings
             msg = f'Saved coordinate history to coordinate_log.txt!'
             with open("coordinate_log.txt", "w") as file:
