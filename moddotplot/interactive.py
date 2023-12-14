@@ -1,4 +1,3 @@
-from turtle import position
 import plotly.express as px
 from moddotplot.estimate_identity import (
     get_interactive_color,
@@ -12,10 +11,10 @@ from moddotplot.estimate_identity import (
 
 import numpy as np
 import dash
-from dash import Input, Output, html, dcc
+from dash import Input, Output, html, dcc, State
+from dash.exceptions import PreventUpdate
 import math
 import plotly.graph_objs as go
-
 
 def run_dash(
     kmer_list1,
@@ -226,7 +225,13 @@ def run_dash(
                                     "fontFamily": "Helvetica, Arial, sans-serif",
                                 },
                             ),
-                            # Placeholder for content
+                            dcc.Textarea(
+                                    id='text-input',
+                                    value='',
+                                    style={'padding': '10px', 'height': '40px', 'width': '62%', 'margin-left': '22px', "fontFamily": "Helvetica, Arial, sans-serif"}
+                                ),
+                            html.Button('Save Coordinates to File', id='save-button', n_clicks=0, disabled=True,style={'margin': '20px'}),
+                            dcc.Download(id="download"),             
                             html.Div(id="content"),
                             html.Div(
                                 "Color Palette",
@@ -1296,6 +1301,50 @@ def run_dash(
         fig.update_layout(yaxis_scaleanchor="x")
         #print("Is something happening???")
         return fig"""
+    
+    @app.callback(
+        Output('text-input', 'value'),
+        Input('dotplot', 'clickData')
+    )
+    def update_text(click_data):
+        global clicked_values
+        if click_data:
+            x_val = click_data['points'][0]['x'] if 'x' in click_data['points'][0] else ''
+            y_val = click_data['points'][0]['y'] if 'y' in click_data['points'][0] else ''
+            z_val = click_data['points'][0]['z'] if 'z' in click_data['points'][0] else ''
+
+            # Create clicked_values list if it doesn't exist in the global scope
+            if 'clicked_values' not in globals():
+                globals()['clicked_values'] = []
+
+            # Append x and y values to the list and keep only the last 5 values
+            clicked_values.append(f'x: {x_val}, y: {y_val}, Identity: {round(z_val,3)} \n')
+            clicked_values = clicked_values[-100:]
+            return '\n'.join((clicked_values)) 
+        else:
+            return ''
+    @app.callback(
+        Output('save-button', 'disabled'),
+        Input('text-input', 'value')
+    )
+    def update_button_state(text_value):
+        return text_value == ''
+
+
+    @app.callback(
+        Output("text-input", "value", allow_duplicate=True),
+        Input("save-button", "n_clicks"),
+        State("text-input", "value")
+)
+    def save_to_file(n_clicks, content):
+        global clicked_values
+        if n_clicks > 0 and content:
+            print(content)
+            content = content.replace('\n', '\r\n')  # Windows line endings
+            msg = f'Saved coordinate history to coordinate_log.txt!'
+            with open("coordinate_log.txt", "w") as file:
+                file.write(str(content))
+            return msg
 
     # Callback activates when panning, zooming, or changing color
     @app.callback(
