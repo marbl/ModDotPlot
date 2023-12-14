@@ -21,7 +21,8 @@ from plotnine import (
     facet_grid,
     labs,
     element_line,
-    element_text
+    element_text,
+    theme_light
 )
 import pandas as pd
 import numpy as np
@@ -72,7 +73,7 @@ def paired_bed_file(
     is_freq: bool,
     xlim: int,
     custom_colors: List,
-    custom_breakpoints: List,
+    custom_breakpoints: List
 ) -> None:
     assert 50 < id_threshold < 100
     bed = []
@@ -153,6 +154,7 @@ def paired_bed_file(
             xlim,
             custom_colors,
             custom_breakpoints,
+            None
         )
 
 
@@ -238,7 +240,7 @@ def paired_bed_file_a_vs_b(
         print(f"Pairwise matrix complete! Saved to {bedfile_output}\n")
 
     sdf = read_df(
-        [bed], palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+        [bed], palette, palette_orientation, is_freq, custom_colors, custom_breakpoints, None
     )
     cdf = sdf.dropna(subset=["discrete"])
 
@@ -318,12 +320,20 @@ def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
         )
         return tmp
 
+# TODO: Remove pandas dependency
+def read_df_from_file(file_path):
+    data = pd.read_csv(file_path, delimiter='\t')
+    return data
 
 def read_df(
-    pj, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+    pj, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints, from_file
 ):
-    data = pj[0]
-    df = pd.DataFrame(data[1:], columns=data[0])
+    df = ''
+    if from_file is None:
+        data = pj[0]
+        df = pd.DataFrame(data[1:], columns=data[0])
+    else:
+        df = from_file
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -561,14 +571,16 @@ def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoin
         extra = "\n(thousands)"
 
     p = (
-        ggplot(data=sdf, mapping=aes(x="perID_by_events", fill="discrete"))
-        + geom_histogram(bins=300)
-        + scale_color_cmap(cmap_name="plasma")
-        + scale_fill_manual(new_hexcodes)
-        + theme(legend_position="none")
-        + coord_cartesian(xlim=(bot, 100))
-        + xlab("% identity estimate")
-        + ylab("# of estimates{}".format(extra))
+        ggplot(data=sdf, mapping=aes(x="perID_by_events", fill="discrete")) +
+        geom_histogram(bins=300) +
+        scale_color_cmap(cmap_name="plasma") +
+        scale_fill_manual(new_hexcodes) +
+        theme_light() +  # Using a light theme instead of the default
+        theme(text=element_text(family="Helvetica")) +  # Setting Helvetica font family
+        theme(legend_position="none") +
+        coord_cartesian(xlim=(bot, 100)) +
+        xlab("% identity estimate") +
+        ylab("# of estimates{}".format(extra))
     )
     return p
 
@@ -588,9 +600,10 @@ def create_plots(
     xlim,
     custom_colors,
     custom_breakpoints,
+    from_file
 ):
     df = read_df(
-        sdf, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints
+        sdf, palette, palette_orientation, is_freq, custom_colors, custom_breakpoints, from_file
     )
     sdf = df
 

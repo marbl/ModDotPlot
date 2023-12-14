@@ -23,6 +23,8 @@ import math
 from moddotplot.static_plots import (
     paired_bed_file,
     paired_bed_file_a_vs_b,
+    read_df_from_file,
+    create_plots
 )
 import itertools
 import json
@@ -253,6 +255,7 @@ def main():
         with open(args.config, "r") as f:
             config = json.load(f)
             args.input = config.get("input")
+            args.bed = config.get("bed")
 
             # Distance matrix commands
             args.kmer = config.get("kmer", args.kmer)
@@ -267,9 +270,8 @@ def main():
 
             # Interactive plotting commands
             args.layers = config.get("layers", args.layers)
-            #TODO: Add dave and load functionality for matrices
-            '''args.save = config.get("save", args.save)
-            args.load = config.get("load", args.load)'''
+            args.save = config.get("save", args.save)
+            args.load = config.get("load", args.load)
             args.port = config.get("port", args.port)
 
             # Static plotting commands
@@ -295,7 +297,7 @@ def main():
     # TODO: More tests!
     if args.breakpoints:
         # Check that start value for breakpoints = identity
-        if args.breakpoints[0] != args.identity:
+        if float(args.breakpoints[0]) != float(args.identity):
             print(
                 f"Identity threshold is {args.identity}, but starting breakpoint is {args.breakpoints[0]}! \n"
             )
@@ -303,6 +305,22 @@ def main():
                 f"Please modify identity threshold using --identity {args.breakpoints[0]}.\n"
             )
             sys.exit(2)
+
+    # If args.bed, run static mode directly from the bed file. Skip counting input k-mers.
+    if hasattr(args, 'bed') and args.bed:
+        #TODO: Verify correct bed file
+        for bed in args.bed:
+            print(f"Reading matrix data from {bed}... \n")
+            df = read_df_from_file(bed)
+            unique_query_names = df['#query_name'].unique()
+            unique_reference_names = df['reference_name'].unique()
+            if len(unique_query_names) == 1 and len(unique_reference_names) == 1:
+                print(f"{bed} read successfully! Creating plots... \n")
+                create_plots(None, args.output_dir if args.output_dir else ".", unique_query_names[0], unique_reference_names[0], args.palette, args.palette_orientation, args.no_hist, 9, 5, args.dpi, args.bin_freq, None, args.colors, args.breakpoints, df)
+            else:
+                print(f"Unresolvable bed filex")
+                sys.exit(7)
+        sys.exit(0)
 
     # Validate input sequence:
     seq_list = []
