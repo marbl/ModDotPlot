@@ -28,7 +28,7 @@ def run_dash(
     port_number,
     palette,
     palette_orientation,
-    alpha,
+    delta,
     image_pyramid,
 ):
     # Run Dash app
@@ -197,7 +197,7 @@ def run_dash(
                                 },
                             ),
                             html.Div(
-                                f"Alpha: {alpha}",
+                                f"Delta: {delta}",
                                 style={
                                     "fontFamily": "Helvetica, Arial, sans-serif",
                                     "paddingTop": "10px",
@@ -1149,158 +1149,6 @@ def run_dash(
             return fig
         elif tab == 'tab-2':
             return fig"""
-
-    # TODO: Install identity slider
-    """ @app.callback(
-        Output('dotplot', 'figure'),
-        Input('range-slider', 'value'),
-        State('dotplot', 'figure')
-    )
-    def update_slider_output(value, current_figure):
-        # Make a copy of the current figure
-        #fig = current_figure
-        #print(fig)
-        # Update the zmin and zmax properties of the figure's layout
-        print(fig)
-        fig.update_traces(
-            zmin=value[0],
-            zmax=value[1],
-        )
-
-        return fig
-
-    @app.callback(
-        Output('main_color', 'style', allow_duplicate=True),
-        Input('print', 'n_clicks'),
-        prevent_initial_call=True,
-    )
-    def print_test(clickies):
-        mod_list = get_mods(kmer_list1, sparsity, resolution)
-        windows = partition_evenly_spaced_modimizers(
-                    mod_list, len(kmer_list1) + k - 1, resolution
-                )
-        #print(windows[0][0])
-        paired_bed_file(
-            windows,
-            x_name,
-            identity,
-            "./",
-            False,
-            False,
-            False,
-            "Spectral_11", #TODO: Change this
-            "+",
-            None,
-            None,
-            None,
-            k,
-            False,
-            None
-        )
-        #paired_bed_file()
-        dark_mode_style = {
-            "backgroundColor": "#161625",
-            "color": "white",
-            "display": "flex", 
-            "height": "100vh", 
-        }
-        return dark_mode_style"""
-
-    """@app.callback(
-        Output('dotplot', 'figure', allow_duplicate=True),
-        Input('zoom-in-button', 'n_clicks'),
-        Input('zoom-out-button', 'n_clicks'),
-        State('dotplot', 'figure'),
-        prevent_initial_call=True,
-        allow_duplicate=True,
-    )
-    def zoom_figure(zoom_in_clicks, zoom_out_clicks, current_figure):
-        ctx = dash.callback_context
-
-        if ctx.triggered:
-            trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
-
-            if trigger_id == "zoom-in-button":
-                new_width = current_figure["layout"]['width'] + 100
-                new_height = current_figure["layout"]['height'] + 100
-            elif trigger_id == "zoom-out-button":
-                new_width = max(current_figure["layout"]['width'] - 100, 100)
-                new_height = max(current_figure["layout"]['height'] - 100, 100)
-            else:
-                raise dash.exceptions.PreventUpdate
-
-            fig.update_layout(width=new_width, height=new_height)
-
-        return fig"""
-
-    # Dark mode
-    """@app.callback(
-        Output("main_color", "style", allow_duplicate=True),
-        Input("dark-mode-toggle", "n_clicks"),
-        State('dotplot', 'figure'),
-    )
-    
-    def toggle_dark_mode(n_clicks, figure):
-        if n_clicks is None:
-            n_clicks = 0
-
-        # Toggle dark mode based on the number of clicks
-        dark_mode = n_clicks % 2 == 1
-
-        # Define the styles for light and dark modes
-        light_mode_style = {
-            "backgroundColor": "white",
-            "color": "black",
-            "display": "flex", 
-            "height": "100vh", 
-        }
-
-        dark_mode_style = {
-            "backgroundColor": "#161625",
-            "color": "white",
-            "display": "flex", 
-            "height": "100vh", 
-        }
-
-        if dark_mode:
-            figure.update_xaxes(showline=True, linewidth=2, linecolor="white", mirror=True)
-            figure.update_yaxes(showline=True, linewidth=2, linecolor="white", mirror=True)
-        else:
-            figure.update_xaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
-            fig.update_yaxes(showline=True, linewidth=2, linecolor="black", mirror=True)
-
-        # Return the appropriate style based on the current mode
-        return dark_mode_style if dark_mode else light_mode_style"""
-
-    """@app.callback(
-        Output('dotplot', 'figure', allow_duplicate=True),
-        [Input('threshold-slider', 'value'),
-        Input('gradient-toggle', 'value')]
-    )
-    def update_heatmap(threshold_range, button_states):
-        # Apply the threshold range to the data using conditional indexing
-        masked_data = np.where((main_level < threshold_range[0]) | (main_level > threshold_range[1]), 0, main_level)
-        print(masked_data[0])
-        # Create the heatmap using go.Heatmap
-        
-        # Adjust the color scale based on the "Keep Original Gradient" button
-        if 'keep-original' in button_states:
-            zmin = 0
-            zmax = 16
-        else:
-            zmin, zmax = threshold_range
-        
-        new_heatmap = go.Heatmap(z=masked_data,
-                            zmin=zmin,
-                            zmax=zmax,
-                            x=main_axis,
-                            y=main_axis)
-        
-        # Create a figure with the updated heatmap
-        fig = go.Figure(data=[heatmap])
-        fig.update_layout(yaxis_scaleanchor="x")
-        #print("Is something happening???")
-        return fig"""
     
     @app.callback(
         Output('text-input', 'value'),
@@ -1466,62 +1314,6 @@ def run_dash(
                             f"Sparsity: {new_sparsity}",
                             f"Layer: {len(image_pyramid)}/{len(image_pyramid)}",
                         )
-                        """x_mers = kmer_list1[x_begin:x_end]
-                        y_mers = kmer_list1[y_end:y_begin]
-
-                        x_mods = get_mods(x_mers, sparsity/(2**new_yy) , resolution)
-                        y_mods = get_mods(y_mers, sparsity/(2**new_yy), resolution)
-
-                        x_init = convert_set(x_mods)
-                        y_init = convert_set(y_mods)
-                        x_other = convert_set_neighbors(x_mods, alpha)
-                        y_other = convert_set_neighbors(y_mods, alpha)
-
-                        identity_matrix = pairwise_containment_matrix(x_init, y_init, x_other, y_other, identity, k, True)
-                        identity_matrix *= 100
-
-                        x_ax = [
-                            relayoutData["xaxis.range[0]"] + (i * amount / resolution)
-                            for i in range(resolution)
-                        ]
-                        y_ax = [
-                            relayoutData["yaxis.range[1]"] + (i * amount / resolution)
-                            for i in range(resolution)
-                        ]
-                        using_matrix = identity_matrix
-                        new_heatmap = go.Heatmap(
-                            z=using_matrix,
-                            zmin=identity,
-                            zmax=100,
-                            colorscale=current_color,
-                            x=x_ax,
-                            y=y_ax,
-                            showscale=True,  # Shows color scale bar
-                            colorbar=dict(title="Identity"),  # Color bar title
-                            hoverinfo="x+y+z",  # Hover info to display
-                            text=main_level,  # Text to display on hover
-                            hovertemplate="X: %{x}<br>Y: %{y}<br>Identity: %{z:.2f}",
-                            name=""
-                        )
-
-                        current_fig = go.Figure(data=[new_heatmap])
-                        current_fig.update_xaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True)
-                        current_fig.update_xaxes(nticks=10, title_text=x_name, title_font=dict(size=18))
-
-                        # Update y-axis properties directly within the heatmap trace
-                        current_fig.update_yaxes(showspikes=True, spikemode="across", ticks="outside", showline=True, linewidth=2, linecolor="black", mirror=True, autorange='reversed')
-                        current_fig.update_yaxes(title_text=y_name, title_font=dict(size=18))
-                        current_fig.update_layout(
-                            hoverlabel=dict(
-                                bgcolor="white", font_size=16, font_family="Helvetica"
-                            ),
-                            title="Self-Identity Plot: CHM13 chrY",  # Add your title here
-                            title_font=dict(size=24, family="Helvetica"),  # Adjust the title font size if needed
-                            title_x = 0.5,
-                            title_y = 0.95,
-                        )
-                        
-                        current_fig.update_layout(yaxis_scaleanchor="x")"""
 
                     else:
                         new_sparsity = sparsity // (2**new_yy)

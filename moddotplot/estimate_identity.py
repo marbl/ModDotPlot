@@ -77,13 +77,13 @@ def convert_set(kmer_list: List[List[int]]) -> List[Set[int]]:
     return [set(k) for k in kmer_list]
 
 
-def convert_set_neighbors(mod_list: List[List[int]], alpha: float) -> List[Set[int]]:
+def convert_set_neighbors(mod_list: List[List[int]], delta: float) -> List[Set[int]]:
     """
     Convert a list of lists of integers into a list of sets with neighboring elements.
 
     Args:
         mod_list (List[List[int]]): A list of lists, where each inner list contains integers.
-        alpha (float): A scaling factor to determine the neighborhood size.
+        delta (float): A scaling factor to determine the neighborhood size.
 
     Returns:
         List[Set[int]]: A list of sets, where each set contains integers from neighboring elements in mod_list.
@@ -95,11 +95,11 @@ def convert_set_neighbors(mod_list: List[List[int]], alpha: float) -> List[Set[i
         ll = set(mod_list[k])
 
         if k != 0:
-            prev_length = round(len(mod_list[k - 1]) * alpha)
+            prev_length = round(len(mod_list[k - 1]) * delta)
             ll.update(mod_list[k - 1][-prev_length:])
 
         if k != length - 1:
-            high_length = round(len(mod_list[k + 1]) * alpha)
+            high_length = round(len(mod_list[k + 1]) * delta)
             ll.update(mod_list[k + 1][:high_length])
 
         kmer_sets.append(ll)
