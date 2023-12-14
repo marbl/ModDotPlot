@@ -35,25 +35,40 @@ def get_parser():
     """
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="ModDotPlot, Visualization of Complex Repeat Structures.",
+        description="ModDotPlot: Visualization of Complex Repeat Structures.",
     )
 
-    group = parser.add_mutually_exclusive_group(required=True)
+    input_group = parser.add_mutually_exclusive_group(required=True)
 
-    group.add_argument(
+    input_group.add_argument(
         "-i",
         "--input",
         default=argparse.SUPPRESS,
-        help="Path to input files. Accepts fasta file(s).",
+        help="Path to input fasta file(s).",
         nargs="+",
     )
 
-    group.add_argument(
+    input_group.add_argument(
+        "-b",
+        "--bed",
+        default=argparse.SUPPRESS,
+        help="Path to input bed file(s). Exclusively used in static mode.",
+        nargs="+",
+    )
+
+    input_group.add_argument(
         "-c",
         "--config",
         default=None,
         type=str,
         help="Config file to use. Takes precedence over any other competing command line arguments.",
+    )
+
+    input_group.add_argument(
+        "--load",
+        default=None,
+        type=str,
+        help="Load previously computed hierarchical matrices.",
     )
 
     dist_params = parser.add_argument_group("ModDotPlot distance matrix commands")
@@ -78,16 +93,15 @@ def get_parser():
         "--resolution",
         default=1000,
         type=int,
-        help="Dotplot resolution, or the number of cells to compare against. Prioritized over window size.",
+        help="Dotplot resolution, or the number of intervals to compare against.",
     )
 
-    # TODO: Implement this functionality
     dist_params.add_argument(
         "-w",
         "--window",
         default=None,
         type=int,
-        help="Window size, or how many k-mers partitoned per cell. Used in lieu of resolution",
+        help="Window size, or the length in genomic coordinates of each interval. When used, it overrides the resolution parameter.",
     )
 
     dist_params.add_argument(
@@ -99,11 +113,11 @@ def get_parser():
     )
 
     dist_params.add_argument(
-        "-a",
-        "--alpha",
+        "-d",
+        "--delta",
         default=0.5,
         type=float,
-        help="Fraction of neighboring partition to include in identity estimation.",
+        help="Fraction of neighboring partition to include in identity estimation. Must be between 0 and 1, use > 0.5 is not recommended.",
     )
 
     dist_params.add_argument(
@@ -135,20 +149,11 @@ def get_parser():
         help="Number of matrix hierarchy layers to compute when preparing interactive mode.",
     )
 
-    # TODO: Implement this functionality
-    """interactive_params.add_argument(
+    interactive_params.add_argument(
         "--save",
         action="store_true",
         help="Save hierarchical matrices to file. Only used in interactive mode.",
-    )"""
-
-    # TODO: Implement this functionality
-    """interactive_params.add_argument(
-        "--load",
-        default=None,
-        type=str,
-        help="Load previously computed hierarchical matrices.",
-    )"""
+    )
 
     interactive_params.add_argument(
         "--port",
@@ -232,6 +237,7 @@ def get_parser():
         action="store_true",
         help="By default, histograms are evenly spaced based on the number of colors and the identity threshold. Select this argument to bin based on the frequency of observed identity values.",
     )
+
     # TODO: implement logging options
 
     return parser
@@ -254,7 +260,7 @@ def main():
             args.resolution = config.get("resolution", args.resolution)
             args.window = config.get("window", args.window)
             args.identity = config.get("identity", args.identity)
-            args.alpha = config.get("alpha", args.alpha)
+            args.delta = config.get("delta", args.delta)
             args.output_dir = config.get("output_dir", args.output_dir)
             args.compare = config.get("compare", args.compare)
             args.compare_only = config.get("compare_only", args.compare_only)
@@ -342,8 +348,8 @@ def main():
                 )
                 mod_set_1 = convert_set(mod_list_1)
                 mod_set_2 = convert_set(mod_list_2)
-                mod_set_neighbors_1 = convert_set_neighbors(mod_list_1, args.alpha)
-                mod_set_neighbors_2 = convert_set_neighbors(mod_list_2, args.alpha)
+                mod_set_neighbors_1 = convert_set_neighbors(mod_list_1, args.delta)
+                mod_set_neighbors_2 = convert_set_neighbors(mod_list_2, args.delta)
                 print(f"Layer {i+1} using sparsity {args.sparsity // (2**i)}\n")
                 xd = pairwise_containment_matrix(
                     mod_set_1,
@@ -368,7 +374,7 @@ def main():
                 args.port,
                 args.palette,
                 args.palette_orientation,
-                args.alpha,
+                args.delta,
                 image_pyramid,
             )
         else:
@@ -386,7 +392,7 @@ def main():
                     k_list[0], args.sparsity // (2**i), args.resolution * (2**i)
                 )
                 mod_set = convert_set(mod_list)
-                mod_set_neighbors = convert_set_neighbors(mod_list, args.alpha)
+                mod_set_neighbors = convert_set_neighbors(mod_list, args.delta)
                 print(f"Layer {i+1} using sparsity {args.sparsity // (2**i)}\n")
                 xd = self_containment_matrix(
                     mod_set, mod_set_neighbors, args.kmer, args.identity
@@ -405,7 +411,7 @@ def main():
                 args.port,
                 args.palette,
                 args.palette_orientation,
-                args.alpha,
+                args.delta,
                 image_pyramid,
             )
 
@@ -437,10 +443,10 @@ def main():
                     height = args.height[i]
                 print(f"Computing self identity matrix for {seq_list[i]}... \n")
                 mod_list = get_mods(k_list[i], args.sparsity, args.resolution)
-                mod_set_neighbors_hi = convert_set_neighbors(mod_list, args.alpha)
+                mod_set_neighbors_hi = convert_set_neighbors(mod_list, args.delta)
                 # TODO: make cleaner
                 new_windows = []
-                if args.alpha == 0:
+                if args.delta == 0:
                     new_windows = partition_evenly_spaced_modimizers(
                         mod_list, len(k_list[i]) + args.kmer - 1, args.resolution
                     )
