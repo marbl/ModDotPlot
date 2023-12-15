@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from bz2 import compress
 import sys
 from moddotplot.parse_fasta import (
     read_kmers_from_file,
@@ -28,6 +29,7 @@ from moddotplot.static_plots import (
 )
 import itertools
 import json
+import numpy as np
 
 
 def get_parser():
@@ -417,6 +419,15 @@ def main():
                 )
                 image_pyramid.append(xd)
 
+            if hasattr(args, 'save') and args.save:
+                compressed_filename = f"{seq_list[0]}_compressed"
+                print(f"Saving to {compressed_filename}... \n")
+                # Length, initial sparsity value, name
+                compressed_hierarchy = image_pyramid.copy()
+                compressed_hierarchy.append([len(k_list[0]),args.sparsity, seq_list[0]])
+                np.savez_compressed(compressed_filename, *image_pyramid)
+                print(f"Saved to {compressed_filename}! \n")
+            
             run_dash(
                 k_list[0],
                 None,
