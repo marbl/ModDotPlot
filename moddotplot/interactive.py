@@ -17,8 +17,8 @@ import math
 import plotly.graph_objs as go
 
 def run_dash(
-    kmer_list1,
-    kmer_list2,
+    kmer_list1_length,
+    kmer_list2_length,
     x_name,
     y_name,
     resolution,
@@ -26,23 +26,26 @@ def run_dash(
     k,
     identity,
     port_number,
-    palette,
-    palette_orientation,
     delta,
-    image_pyramid,
+    image_pyramid_1,
+    image_pyramid_2,
+    image_pyramid_compare
 ):
     # Run Dash app
     app = dash.Dash(__name__, prevent_initial_callbacks="initial_duplicate")
     app.title = "ModDotPlot"
     print(
-        f"{app.title} interactive mode is successfully running on http://127.0.0.1:8050/ \n"
+        f"{app.title} interactive mode is successfully running on http://127.0.0.1:{port_number}/ \n"
     )
+    image_pyramid = image_pyramid_1
+    palette = "Spectral_11"
+    palette_orientation = "+"
     # Set color palette
     current_color = get_interactive_color(palette, palette_orientation)
     # Get zooming thresholds, adjust sparsity respectively.
     mod_ranges = verify_modimizers(sparsity, len(image_pyramid))
 
-    mod_thresholds_list = set_zoom_levels_list(round(len(kmer_list1)), mod_ranges)
+    mod_thresholds_list = set_zoom_levels_list(round(kmer_list1_length), mod_ranges)
 
     important = generate_dict_from_list(mod_thresholds_list)
 
@@ -51,7 +54,15 @@ def run_dash(
     # Multiply the identity threshold by 100
     for img in image_pyramid:
         img *= 100
-        increments = round(len(kmer_list1) / img.shape[0])
+        increments = round(kmer_list1_length / img.shape[0])
+        image_axes.append([i * increments for i in range(img.shape[0])])
+    for img in image_pyramid_2:
+        img *= 100
+        increments = round(kmer_list1_length / img.shape[0])
+        image_axes.append([i * increments for i in range(img.shape[0])])
+    for img in image_pyramid_compare:
+        img *= 100
+        increments = round(kmer_list1_length / img.shape[0])
         image_axes.append([i * increments for i in range(img.shape[0])])
 
     main_level = image_pyramid[0]
@@ -172,6 +183,19 @@ def run_dash(
                                     "fontFamily": "Helvetica, Arial, sans-serif",
                                 },  # Added padding to separate the content
                             ),
+                            html.Div([
+                                html.Label('Select an option:'),
+                                dcc.Dropdown(
+                                    options=[
+                                        {'label': 'Option 1', 'value': 'opt1'},
+                                        {'label': 'Option 2', 'value': 'opt2'},
+                                        {'label': 'Option 3', 'value': 'opt3'}
+                                    ],
+                                    value='opt1',
+                                    id="timothy"  # Default value
+                                ),
+                                html.Div(id='output-container')
+                            ]),
                             html.Div(
                                 children=[f"Sparsity: {new_sparsity}"],
                                 id="sparsity-div",
@@ -1178,12 +1202,11 @@ def run_dash(
     def update_button_state(text_value):
         return text_value == ''
 
-
     @app.callback(
         Output("text-input", "value", allow_duplicate=True),
         Input("save-button", "n_clicks"),
         State("text-input", "value")
-)
+    )
     def save_to_file(n_clicks, content):
         global clicked_values
         if n_clicks > 0 and content:
@@ -1204,13 +1227,28 @@ def run_dash(
         Input("color-options", "value"),
         Input("threshold-slider", "value"),
         Input("gradient-toggle", "value"),
+        Input("timothy", "value"),
         prevent_initial_call=True,
     )
-    def update_dotplot(relayoutData, figure, color, threshold_range, button_states):
+    def update_dotplot(relayoutData, figure, color, threshold_range, button_states, timothy):
+        print("Updating sheet")
+        if timothy == 'opt1':
+            image_pyramid = image_pyramid_1
+        elif timothy == 'opt2':
+            image_pyramid = image_pyramid_2
+        elif timothy == 'opt3':
+            image_pyramid = image_pyramid_compare
+
+        new_main_level = image_pyramid[0]
+        new_main_axis = image_axes[0]
+        print(new_main_level)
+
+
+        fig = go.Figure(data=[heatmap])
         new_sparsity = sparsity
         current_color = get_interactive_color(get_matching_colors(color), "+")
         new_heatmap = heatmap
-        new_heatmap.update(dict(colorscale=current_color))
+        new_heatmap.update(dict(colorscale=current_color,z=new_main_level))
 
         masked_data = np.where(
             (new_heatmap["z"] < threshold_range[0])
@@ -1282,14 +1320,14 @@ def run_dash(
                         print("y axis out of bounds! Shifting to y=0")
                         relayoutData["yaxis.range[1]"] = 0
                         y_start_range = 0
-                    if x_end_range > len(kmer_list1):
-                        print(f"x axis out of bounds! Shifting to x={len(kmer_list1)}")
-                        relayoutData["xaxis.range[1]"] = len(kmer_list1)
-                        x_end_range = len(kmer_list1)
-                    if y_end_range > len(kmer_list1):
-                        print(f"y axis out of bounds! Shifting to y={len(kmer_list1)}")
-                        relayoutData["yaxis.range[0]"] = len(kmer_list1)
-                        y_end_range = len(kmer_list1)
+                    if x_end_range > kmer_list1_length:
+                        print(f"x axis out of bounds! Shifting to x={kmer_list1_length}")
+                        relayoutData["xaxis.range[1]"] = kmer_list1_length
+                        x_end_range = kmer_list1_length
+                    if y_end_range > kmer_list1_length:
+                        print(f"y axis out of bounds! Shifting to y={kmer_list1_length}")
+                        relayoutData["yaxis.range[0]"] = kmer_list1_length
+                        y_end_range = kmer_list1_length
 
                 if x_start_range >= 0 and y_start_range >= 0:
                     x_begin = round(relayoutData["xaxis.range[0]"])
@@ -1321,16 +1359,16 @@ def run_dash(
                         # Get the coordinates for the better matrix
 
                         x_start_updated = math.floor(
-                            x_begin / len(kmer_list1) * resolution * (2**new_yy)
+                            x_begin / kmer_list1_length * resolution * (2**new_yy)
                         )
                         x_end_updated = math.ceil(
-                            x_end / len(kmer_list1) * resolution * (2**new_yy)
+                            x_end / kmer_list1_length * resolution * (2**new_yy)
                         )
                         y_start_updated = math.floor(
-                            y_end / len(kmer_list1) * resolution * (2**new_yy)
+                            y_end / kmer_list1_length * resolution * (2**new_yy)
                         )
                         y_end_updated = math.ceil(
-                            y_begin / len(kmer_list1) * resolution * (2**new_yy)
+                            y_begin / kmer_list1_length * resolution * (2**new_yy)
                         )
 
                         x_equi, y_equi = make_differences_equal(
@@ -1441,8 +1479,8 @@ def run_dash(
                     f"Layer: 1/{len(image_pyramid)}",
                 )
         else:
-            # figure.update_layout(coloraxis=dict(colorscale=current_color))
             # This occurs at startup and when selecting color. Return the base figure with color
+            #fig.update_layout(coloraxis=dict(colorscale=current_color))
             return (
                 fig,
                 "",
@@ -1450,6 +1488,7 @@ def run_dash(
                 f"Layer: 1/{len(image_pyramid)}",
             )
 
+    # -------DO NOT DELETE! CUSTOM CSS FOR IDENTITY THRESHOLD SLIDER--------
     app.index_string = """
 <!DOCTYPE html>
 <html>

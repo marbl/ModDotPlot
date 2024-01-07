@@ -15,7 +15,6 @@ def generate_kmers_from_fasta(seq: Sequence[str], k: int) -> Iterable[int]:
             printProgressBar(i, n - k + 1, prefix='Progress:', suffix='Complete', length=40)
         if i == n - k:
             printProgressBar(n - k + 1, n - k + 1, prefix='Progress:', suffix='Completed', length=40)
-            print('\n')
 
         kmer = seq[i:i + k]
         fh = mmh3.hash(kmer)
@@ -40,7 +39,7 @@ def is_valid_fasta(file_path):
                     pass
             return in_sequence
     except FileNotFoundError:
-        print("Unable to find fasta file. Check filename and/or directory!")
+        print(f"Unable to find fasta {file_path}. Check filename and/or directory!\n")
         sys.exit(5)
     except Exception as e:
         print(f"An error occurred: {str(e)}")
@@ -79,7 +78,7 @@ def read_kmers_from_file(filename: str, ksize: int) -> List[List[int]]:
         for kmer_hash in generate_kmers_from_fasta(seq.fetch(seq_id), ksize):
             kmers_for_seq.append(kmer_hash)
         all_kmers.append(kmers_for_seq)
-        print(f"{seq_id} k-mers retrieved! \n")
+        print(f"\n{seq_id} k-mers retrieved! \n")
 
     return all_kmers
 
@@ -94,6 +93,5 @@ def get_input_headers(filename: str) -> List[str]:
 
 
 def get_input_seq_length(filename: str) -> List[int]:
-    length_list = []
     seq = pysam.FastaFile(filename)
     return seq.lengths

@@ -11,6 +11,55 @@ from typing import List, Set, Dict, Tuple
 
 from moddotplot.parse_fasta import printProgressBar
 
+def partition_overlaps(lst: List[int], win: int, delta: float, seq_len: int, k: int) -> List[List[int]]:
+
+    kmer_list = []
+    kmer_to_genomic_coordinate_offset = win - k + 1
+    delta_offset = win * delta
+
+    # Set the first window to contain win - k + 1 kmers.
+    starting_end_index = int(round(kmer_to_genomic_coordinate_offset + delta_offset))
+    kmer_list.append(lst[0:starting_end_index])
+    counter = win - k + 1
+
+    # Set normal windows 
+    while counter <= (seq_len - win):
+        start_index = counter + 1
+        end_index = win + counter + 1
+        delta_start_index = int(round(start_index - delta_offset))
+        delta_end_index = int(round(end_index + delta_offset))
+        if delta_end_index > seq_len:
+            delta_end_index = seq_len
+        try:
+            kmer_list.append(lst[delta_start_index:delta_end_index])
+        except Exception as e:
+            print(e)
+            kmer_list.append(lst[delta_start_index:seq_len])
+        counter += win
+
+    # Set the last window to get the remainder
+    if (counter <= seq_len - 2):
+
+        final_start_index = int(round(counter + 1 - delta_offset))
+        kmer_list.append(lst[final_start_index:seq_len])
+
+    # Test that last value was added on correctly
+
+    assert kmer_list[-1][-1] == lst[-1]
+    return kmer_list
+
+def convert_to_modimizers(kmer_list: List[List[int]], sparsity: int) -> List[List[int]]:
+    mod_tot = []
+    for partition in kmer_list:
+        mod_list = []
+        for kmer in partition:
+            if kmer % sparsity == 0:
+                mod_list.append(kmer)
+        #print(f"{len(mod_list)} -> {len(set(mod_list))}")
+        mod_tot.append(set(mod_list))
+    return mod_tot
+
+
 
 def divide_into_chunks(lst: List[int], res: int) -> List[List[int]]:
     """
@@ -96,12 +145,16 @@ def convert_set_neighbors(mod_list: List[List[int]], delta: float) -> List[Set[i
 
         if k != 0:
             prev_length = round(len(mod_list[k - 1]) * delta)
+            print("\nprev")
+            print(prev_length)
             ll.update(mod_list[k - 1][-prev_length:])
 
         if k != length - 1:
             high_length = round(len(mod_list[k + 1]) * delta)
+            print("\nhigh")
+            print(high_length)
             ll.update(mod_list[k + 1][:high_length])
-
+        
         kmer_sets.append(ll)
 
     return kmer_sets
@@ -238,18 +291,20 @@ def pairwise_containment_matrix(
     Returns:
         np.ndarray: An identity matrix containing containment values.
     """
+    #X is the larger, y is the smaller
+    print("sanity check")
     n = len(mod_set_x)
     progress_thresholds = round(n / 77)
 
     if not supress_progress:
         printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
-    containment_matrix = np.zeros((len(mod_set_y), len(mod_set_x)), dtype=float)
+    containment_matrix = np.zeros((n, n), dtype=float)
 
     for w in range(len(mod_set_y)):
         if not supress_progress:
             if w % progress_thresholds == 0:
                 printProgressBar(w, n, prefix="Progress:", suffix="Complete", length=40)
-        for q in range(len(mod_set_x)):
+        for q in range(n):
             containment_matrix[w, q] = binomial_distance(
                 containment_neighbors(
                     mod_set_x[q],
@@ -261,6 +316,7 @@ def pairwise_containment_matrix(
                 ),
                 k,
             )
+    
     if not supress_progress:
         printProgressBar(
             n, n, prefix="Progress:", suffix="Completed", length=40
@@ -316,17 +372,34 @@ def get_matching_colors(color_name):
     matching_elements = find_elements_with_prefix(available_colors, color_name)
     return matching_elements[-1]
 
-
 def partition_evenly_spaced_modimizers(mod_list, seq_length, resolution):
-    thousand_dict = {}
+    coords_dict = {}
     for i in range(resolution):
-        start_site = i * round(seq_length / resolution)
+        start_site = i * round(seq_length / resolution) + 1
         end_site = (
             i * round(seq_length / resolution) + round(seq_length / resolution) - 1
-        )
+        ) + 1
         name = f"{start_site}-{end_site}"
-        thousand_dict[name] = mod_list[i]
-    return thousand_dict
+        coords_dict[name] = mod_list[i]
+    return coords_dict
+
+def partition_pairwise_modimizers_different_size(mod_list_large, mod_list_small, ratio, window_size):
+    short_seq_dict = {}
+    large_seq_dict = {}
+    assert ratio == len(mod_list_small)
+    for i in range(ratio):
+        start_site = (i * window_size) + 1
+        end_site = start_site + window_size - 1
+        name = f"{start_site}-{end_site}"
+        short_seq_dict[name] = mod_list_small[i]
+        large_seq_dict[name] = mod_list_large[i]
+    for j in range(len(mod_list_large) - ratio):
+        start_site = (ratio * window_size) + (j * window_size) + 1
+        end_site = start_site + window_size - 1
+        name = f"{start_site}-{end_site}"
+        large_seq_dict[name] = mod_list_large[j]
+    return short_seq_dict, large_seq_dict
+
 
 
 def containment(set1, set2):
