@@ -1,0 +1,8 @@
+version: 0.7.2
+
+build:
+  tools:
+    python: ">3.7"
+
+sphinx:
+  configuration: docs/conf.py
