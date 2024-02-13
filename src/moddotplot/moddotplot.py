@@ -155,6 +155,13 @@ def get_parser():
         help="Preserve diagonal when handling strings of ambiguous homopolymers (eg. long runs of N's)."
     )
 
+    interactive_parser.add_argument(
+        "-q",
+        "--quick",
+        action="store_true",
+        help="Launch a quick, non-interactive version of interactive mode."
+    )
+
     # -----------STATIC MODE SUBCOMMANDS-----------
     static_input_group = static_parser.add_mutually_exclusive_group(required=True)
     static_input_group.add_argument(
@@ -507,10 +514,16 @@ def main():
         min_window_size = 0
         window_lengths = []
         if not args.window:
-            min_window_size = round((hgi / args.resolution)/2)
-            args.window = min_window_size
+            if args.quick:
+                min_window_size = round((hgi / args.resolution))
+                args.window = min_window_size
+            else:
+                min_window_size = round((hgi / args.resolution)/2)
+                args.window = min_window_size
         else:
             min_window_size = args.window
+            if args.window:
+                print(f"Conflict with `--quick` argument.")
         max_window_size = math.ceil(hgi / args.resolution)
 
         while min_window_size <= max_window_size:
@@ -549,7 +562,10 @@ def main():
         if not args.compare_only:
             for j in range(min(len(seq_list),2)):
                 image_pyramid = []
-                print(f"Building self-identity matrices for {seq_list[j]}, using a minimum window size of {window_lengths[0]}.... \n")
+                if args.quick:
+                    print(f"Quickly building self-identity matrices for {seq_list[j]}, using a window size of {window_lengths[0]}.... \n")
+                else:
+                    print(f"Building self-identity matrices for {seq_list[j]}, using a minimum window size of {window_lengths[0]}.... \n")
                 for i in range(len(window_lengths)):
                     layer_sparsity = sparsities[i]
                     layer_window_size = window_lengths[i]
@@ -558,7 +574,8 @@ def main():
 
                     mods_neigh = convert_to_modimizers(layer_neigh, layer_sparsity, args.ambiguous, args.kmer)
                     mods_sing = convert_to_modimizers(layer_sing, layer_sparsity, args.ambiguous, args.kmer)
-                    print(f"Layer {i+1} using window length {layer_window_size}\n")
+                    if not args.quick:
+                        print(f"Layer {i+1} using window length {layer_window_size}\n")
                     matrix_layer = self_containment_matrix(
                         mods_sing, mods_neigh, args.kmer, args.identity, args.ambiguous
                     )
@@ -593,7 +610,10 @@ def main():
                 larger_seq = k_list[1]
                 smaller_name = seq_list[0]
                 smaller_seq = k_list[0]
-            print(f"Building pairwise matrices for {seq_list[j]}, using a minimum window size of {window_lengths[0]}.... \n")
+            if args.quick:
+                print(f"Quickly building pairwise matrices for {seq_list[i]} and {seq_list[j]}, using a window size of {window_lengths[0]}.... \n")
+            else:
+                print(f"Building pairwise matrices for {seq_list[i]} and {seq_list[j]}, using a minimum window size of {window_lengths[0]}.... \n")
             image_pyramid = []
             for i in range(len(window_lengths)):
                 layer_sparsity = sparsities[i]
@@ -607,7 +627,8 @@ def main():
                 larger_mods_sing = convert_to_modimizers(larger_sing, layer_sparsity, args.ambiguous, args.kmer)
                 smaller_mods_neigh = convert_to_modimizers(smaller_neigh, layer_sparsity, args.ambiguous, args.kmer)
                 smaller_mods_sing = convert_to_modimizers(smaller_sing, layer_sparsity, args.ambiguous, args.kmer)
-                print(f"Layer {i+1} using window length {layer_window_size}\n")
+                if not args.quick:
+                    print(f"Layer {i+1} using window length {layer_window_size}\n")
                 matrix_layer = pairwise_containment_matrix(
                     larger_mods_sing,
                     smaller_mods_sing,

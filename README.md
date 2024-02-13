@@ -5,12 +5,13 @@
 - [Usage](#usage)
   - [Interactive Mode](#interactive-mode)
   - [Static Mode](#static-mode)
-  - [Standard arguments](#standard-arguments)
+  - [Standard Arguments](#standard-arguments)
   - [Interactive Mode Commands](#interactive-mode-commands)
   - [Static Mode Commands](#static-mode-commands)
   - [Sample run - Interactive Mode](#sample-run---interactive-mode)
-  - [Sample run - static plots](#sample-run---static-plots)
-  - [Sample run - comparing two sequences](#sample-run---comparing-two-sequences)
+  - [Sample run - Port Forwarding](#sample-run---port-forwarding)
+  - [Sample run - Static Plots](#sample-run---static-plots)
+  - [Sample run - Comparing Two Sequences](#sample-run---comparing-two-sequences)
 - [Questions](#questions)
 - [Known Issues](#known-issues)
 - [Cite](#cite)
@@ -75,7 +76,7 @@ ModDotPlot must be run either in `interactive` mode, or `static` mode:
 ### Interactive Mode
 
 ```
-moddotplot interactive -f FASTA_FILE(S)
+moddotplot interactive -h
 ```
 
 This will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot. Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info).
@@ -83,7 +84,7 @@ This will launch a [Dash application](https://plotly.com/dash/) on your machine'
 ### Static Mode
 
 ```
-moddotplot static -f FASTA_FILE(S) -o OUTPUT_DIRECTORY
+moddotplot static -h
 ```
 
 This skips running Dash and quickly creates plots under the output directory using [plotnine](https://plotnine.readthedocs.io/en/v0.12.4/). By default, running ModDotPlot in static mode this will produce the following files:
@@ -99,6 +100,10 @@ See [static mode commands](#static-mode-commands) for further info.
 ### Standard arguments
 
 The following arguments are the same in both interactive and static mode:
+
+`-f / --fasta`
+
+Fasta files to input. Multifasta files are accepted. Interactive mode will only support a maximum of two sequences at a time.
 
 `-k / --kmer <int>`
 
@@ -144,23 +149,13 @@ By default, k-mers that are homopolymers of ambiguous IUPAC codes (eg. NNNNNNNNN
 
 Port to display ModDotPlot on. Default is 8050, this can be changed to any accepted port. 
 
-Running interactive mode on an HPC environment can be accomplished through the use of port forwarding. On your remote server, run ModDotPlot as normal:
-
-```
-moddotplot -i INPUT_FASTA_FILE(S) --port HPC_PORT_NUMBER
-```
-
-Then on your local machine, set up a port forwarding tunnel:
-
-```
-ssh -N -f -L LOCAL_PORT_NUMBER:127.0.0.1:HPC_PORT_NUMBER HPC@LOGIN.CREDENTIALS
-```
-
-You should now be able to view interactive mode using `http://127.0.0.1:<LOCAL_PORT_NUMBER>`. Note that your own HPC environment may have specific instructions and/or restrictions for setting up port forwarding.
-
 `-w / --window <int>`
 
-Minimum window size. By default, interactive mode sets a minimum window size based on the sequence length `n/2000` (eg. a 3Mbp sequence will have a 1500bp window). The maximum window size will always be set to `w/1000` (3000bp under the same example). This means that 2 matrices will be created.
+Minimum window size. By default, interactive mode sets a minimum window size based on the sequence length `n/2000` (eg. a 3Mbp sequence will have a 1500bp window). The maximum window size will always be set to `n/1000` (3000bp under the same example). This means that 2 matrices will be created. Creating more matrices will mean 
+
+`-q / --quick <bool>`
+
+This will automatically run interactive mode with a minimum window size equal to the maximum window size (`n/1000`). This will result in a quick launch, however the resolution of the plot will not improve upon zooming in.
 
 `-s / --save <bool>`
 
@@ -170,14 +165,17 @@ Save the matrices produced in interactive mode. By default, a folder called `int
 
 Load previously saved matrices. Used instead of `-f/--fasta`
 
+
 --- 
 
 ### Static Mode Commands
 
 `-c / --config`
+
 Run `moddotplot static` with a config file, rather than (sample syntax). Recommended when creating a really customized plot. Used instead of `-f/--fasta`.
 
 `-b / --bed`
+
 Create a plot from a previously computed pairwise bed file. Skips Average Nucleotide Identity computation. Used instead of `-f/--fasta`. 
 
 `-w / --window <int>`
@@ -265,7 +263,27 @@ Dash is running on http://127.0.0.1:8050/
 
 The plotly plot can be navigated using the zoom (magnifying glass) and pan (hand) icons. The plot can be reset by double-clicking or selecting the home button. The identity threshold can be modified by seelcting the slider. Colors can be readjusted according to the same gradient based on the new identity levels. 
 
-### Sample run - static plots
+### Sample run - Port Forwarding
+
+Running interactive mode on an HPC environment can be accomplished through the use of port forwarding. On your remote server, run ModDotPlot as normal:
+
+```
+moddotplot interactive -f INPUT_FASTA_FILE(S) --port HPC_PORT_NUMBER
+```
+
+Then on your local machine, set up a port forwarding tunnel:
+
+```
+ssh -N -f -L <LOCAL_PORT_NUMBER>:127.0.0.1:<HPC_PORT_NUMBER> HPC@LOGIN.CREDENTIALS
+```
+
+You should now be able to view interactive mode using `http://127.0.0.1:<LOCAL_PORT_NUMBER>`. Note that your own HPC environment may have specific instructions and/or restrictions for setting up port forwarding.
+
+VSCode now has automatic port forwarding built into the terminal menu. See [VSCode documentation](https://code.visualstudio.com/docs/editor/port-forwarding) for fruther details 
+
+![](images/portforwarding.png)
+
+### Sample run - Static Plots
 
 When running ModDotPlot to produce static plots, it is recommended to use a config file, especially when creating extremely customized plots. The config file is provided in JSON, and accepts the same syntax as the command line arguments shown above. 
 
