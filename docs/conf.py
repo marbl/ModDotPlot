@@ -9,16 +9,16 @@
 project = 'ModDotPlot'
 copyright = '2024, Alex Sweeten, Michael Schatz, Adam Phillippy'
 author = 'Alex Sweeten, Michael Schatz, Adam Phillippy'
-release = '0.7.2'
+release = '0.8.0'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = []
+extensions = ['sphinx_rtd_theme',]
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
-
+html_theme = "sphinx_rtd_theme"
 
 
 # -- Options for HTML output -------------------------------------------------

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ModDotPlot"
+version = "0.8.0"
+requires-python = ">= 3.7"
+dependencies = [
+  "pysam",
+  "pandas",
+  "plotly",
+  "dash",
+  "plotnine",
+  "palettable",
+  "mmh3",
+  "tk",
+  "setproctitle"
+]
+authors = [
+  {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"},
+  {name = "Michael Schatz"},
+  {name = "Adam Phillippy"},
+]
+maintainers = [
+  {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"}
+]
+readme = {file = "README.txt", content-type = "text/markdown"}
+license = {file = "LICENSE"}
+keywords = ["dotplot", "sketching", "modimizer", "heatmap"]
+
+[project.scripts]
+moddotplot = "moddotplot.__main__:main"
+
+[project.optional-dependencies]
+# development dependency groups
+test = [
+    "pytest",
+    "pytest-cov"
+]
