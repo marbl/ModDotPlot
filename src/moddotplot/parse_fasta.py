@@ -85,11 +85,7 @@ def extract_files(folder_path):
 
     # Convert dictionary values to lists
     result_lists = list(unique_lists.values())
-    #sorted_metadata = sorted(metadata, key=lambda x: x['title'])
     sorted_result_lists = [lst for title in metadata for lst in result_lists if lst[0][0] == title['title']]
-    print(metadata)
-    print(sorted_result_lists)
-    # Print the resulting lists
     for unique_list in sorted_result_lists:
         matrices.append([])
         for val in unique_list:
