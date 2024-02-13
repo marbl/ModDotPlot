@@ -202,11 +202,11 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors):
             panel_background=element_blank(),
             axis_line=element_line(color="black"),  # Adjust axis line size
             axis_text=element_text(
-                family=["Helvetica", "Arial", "sans-serif"]
+                family=["Helvetica", "Arial", "sans-serif", "DejaVuSans"]
             ),  # Change axis text font and size
             axis_ticks_major=element_line(),
             title=element_text(
-                family=["Helvetica", "Arial", "sans-serif"],  # Change title font family
+                family=["Helvetica", "Arial", "sans-serif", "DejaVuSans"],  # Change title font family
             )
         )
         + scale_x_continuous(labels=make_scale, limits=[0, max_val])
@@ -318,7 +318,7 @@ def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoin
         + scale_fill_manual(new_hexcodes)
         + theme_light()
         + theme( 
-            text=element_text(family=["Helvetica", "Arial", "sans-serif"])
+            text=element_text(family=["Helvetica", "Arial", "sans-serif", "DejaVuSans"])
         )
         + theme(legend_position="none")
         + coord_cartesian(xlim=(bot, 100))
