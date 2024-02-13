@@ -12,8 +12,8 @@
         99,
         100
     ],
-    "output_dir": "Chr1_cen_plots",
+    "output_dir": "chr1_cen_plots",
     "fasta": [
-        "./sequences/Chr1_cen.fa"
+        "./sequences/chr1_cen.fa"
     ]
 }
