@@ -76,7 +76,7 @@ ModDotPlot must be run either in `interactive` mode, or `static` mode:
 ### Interactive Mode
 
 ```
-moddotplot interactive -h
+moddotplot interactive <ARGS>
 ```
 
 This will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot. Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info).
@@ -84,13 +84,13 @@ This will launch a [Dash application](https://plotly.com/dash/) on your machine'
 ### Static Mode
 
 ```
-moddotplot static -h
+moddotplot static <ARGS>
 ```
 
-This skips running Dash and quickly creates plots under the output directory using [plotnine](https://plotnine.readthedocs.io/en/v0.12.4/). By default, running ModDotPlot in static mode this will produce the following files:
+This skips running Dash and quickly creates plots under the specified output directory using [plotnine](https://plotnine.readthedocs.io/en/v0.12.4/). By default, running ModDotPlot in static mode this will produce the following files:
 
-- A paired-end bed file, containing intervals alongside their corresponding identity estimates
-- A self-identity dotplot for each sequence
+- A paired-end bed file, containing intervals alongside their corresponding identity estimates.
+- A self-identity dotplot for each sequence.
 - A histogram of identity values for each sequence.
   
 See [static mode commands](#static-mode-commands) for further info.
@@ -101,7 +101,7 @@ See [static mode commands](#static-mode-commands) for further info.
 
 The following arguments are the same in both interactive and static mode:
 
-`-f / --fasta`
+`-f / --fasta <file>`
 
 Fasta files to input. Multifasta files are accepted. Interactive mode will only support a maximum of two sequences at a time.
 
@@ -170,11 +170,11 @@ Load previously saved matrices. Used instead of `-f/--fasta`
 
 ### Static Mode Commands
 
-`-c / --config`
+`-c / --config <.json file>`
 
 Run `moddotplot static` with a config file, rather than (sample syntax). Recommended when creating a really customized plot. Used instead of `-f/--fasta`.
 
-`-b / --bed`
+`-b / --bed <.bed file>`
 
 Create a plot from a previously computed pairwise bed file. Skips Average Nucleotide Identity computation. Used instead of `-f/--fasta`. 
 
@@ -198,11 +198,11 @@ Skip output of histogram legend.
 
 Adjust width of self dot plots. Default is 9 inches.
 
-`--dpi`
+`--dpi <bool>`
 
 Image resolution in dots per inch (not to be confused with dotplot resolution). Default is 600.
 
-`--palette`
+`--palette <str>`
 
 List of accepted palettes can be found [here](https://jiffyclub.github.io/palettable/colorbrewer/). The syntax is to have the name of the palette, followed by an underscore with the number of colors, eg. `OrRd_8`. Default is `Spectral_11`.
 
@@ -210,7 +210,7 @@ List of accepted palettes can be found [here](https://jiffyclub.github.io/palett
 
 Flip sequential order of color palette. Set to `-` by default for divergent palettes. 
 
-`--breakpoints <list>`
+`--breakpoints <list of ints>`
 
 Add custom identity threshold breakpoints. Note that the number of breakpoints must be equal to the number of colors + 1.
 
