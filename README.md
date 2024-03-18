@@ -121,9 +121,9 @@ Minimum sequence identity cutoff threshold. Default is 86. While it is possible 
 
 Each partition takes into account a fraction of its neighboring partitions k-mers. This is to avoid sub-optimal identity scores when partitons don't overlap identically. Default is 0.5, and the accepted range is between 0 and 1. Anything greater than 0.5 is not recommended.
 
-`-s / --sparsity <int>`
+`-m / --modimizer <int>`
 
-A higher sparsity value means less k-mers to compare, at the expense of lower accuracy. Modimizers are selected `0 mod s`, an inverse of the selected k-mer density. The default is `s = 2/Mbp` of sequence for fast performance without compromising accuracy. For example, on a human Y chromosome ~ 62Mbp, ModDotPlot will set `s = 124`. Interactive mode will automatically round up to the nearest power of 2, in order to make computations easier. 
+Modimizer sketch size. Must be higher than window size `w`. A lower sketch size means less k-mers to compare (and faster runtime), at the expense of lower accuracy. Recommended to be kept > 1000.
 
 
 `-r / --resolution <int>`
@@ -164,7 +164,6 @@ Save the matrices produced in interactive mode. By default, a folder called `int
 `-l / --load <directory>`
 
 Load previously saved matrices. Used instead of `-f/--fasta`
-
 
 --- 
 
@@ -330,13 +329,15 @@ Progress: |███████████████████████
 
 Chr1:14M-18M k-mers retrieved! 
 
-Computing self identity matrix for Chr1:14M-18M... 
+Computing self identity matrix for chr1:14M-18M... 
 
-        Sparsity value s: 10
-
-        Sequence length n: 4000001
+        Sequence length n: 4000000
 
         Window size w: 4000
+
+        Modimizer sketch value: 1000
+
+        Plot Resolution r: 1000
 
 Progress: |████████████████████████████████████████| 100.0% Completed
 

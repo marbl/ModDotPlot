@@ -37,7 +37,6 @@ def createSelfMatrix(
     ambiguous,
     sketch_size,
 ):
-    print(f"{sketch_size}\n")
     no_neighbors = partitionOverlaps(sequence, window_size, 0, sequence_length, k)
     if delta > 0:
         neighbors = partitionOverlaps(sequence, window_size, delta, sequence_length, k)
