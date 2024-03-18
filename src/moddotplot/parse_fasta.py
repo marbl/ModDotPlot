@@ -10,9 +10,8 @@ import numpy as np
 
 tab_b = bytes.maketrans(b"ACTG", b"TGAC")
 
-def generate_kmers_from_fasta(seq: Sequence[str], k: int, quiet: bool) -> Iterable[int]:
+def generateKmersFromFasta(seq: Sequence[str], k: int, quiet: bool) -> Iterable[int]:
     n = len(seq)
-
     if not quiet:
         progress_thresholds = round(n / 77)
         printProgressBar(0, n - k + 1, prefix='Progress:', suffix='Complete', length=40)
@@ -32,7 +31,7 @@ def generate_kmers_from_fasta(seq: Sequence[str], k: int, quiet: bool) -> Iterab
         
         yield fh if fh < rc else rc
 
-def is_valid_fasta(file_path):
+def isValidFasta(file_path):
     try:
         with open(file_path, "r") as file:
             in_sequence = False
@@ -53,7 +52,7 @@ def is_valid_fasta(file_path):
         print(f"An error occurred: {str(e)}")
         sys.exit(6)
 
-def extract_files(folder_path):
+def extractFiles(folder_path):
     # Check to see at least one compressed numpy matrix, and one metadata pickle are included
     metadata = []
     matrices = []
@@ -113,7 +112,7 @@ def printProgressBar(
         print()
 
 
-def read_kmers_from_file(filename: str, ksize: int, quiet: bool) -> List[List[int]]:
+def readKmersFromFile(filename: str, ksize: int, quiet: bool) -> List[List[int]]:
     """
     Given a filename and an integer k, returns a list of all k-mers found in the sequences in the file.
     """
@@ -123,7 +122,7 @@ def read_kmers_from_file(filename: str, ksize: int, quiet: bool) -> List[List[in
     for seq_id in seq.references:
         print(f"Retrieving k-mers from {seq_id}.... \n")
         kmers_for_seq = []
-        for kmer_hash in generate_kmers_from_fasta(seq.fetch(seq_id), ksize, quiet):
+        for kmer_hash in generateKmersFromFasta(seq.fetch(seq_id), ksize, quiet):
             kmers_for_seq.append(kmer_hash)
         all_kmers.append(kmers_for_seq)
         print(f"\n{seq_id} k-mers retrieved! \n")
@@ -131,7 +130,7 @@ def read_kmers_from_file(filename: str, ksize: int, quiet: bool) -> List[List[in
     return all_kmers
 
 
-def get_input_headers(filename: str) -> List[str]:
+def getInputHeaders(filename: str) -> List[str]:
     header_list = []
     seq = pysam.FastaFile(filename)
     for seq_id in seq.references:
@@ -140,6 +139,6 @@ def get_input_headers(filename: str) -> List[str]:
     return header_list
 
 
-def get_input_seq_length(filename: str) -> List[int]:
+def getInputSeqLength(filename: str) -> List[int]:
     seq = pysam.FastaFile(filename)
     return seq.lengths

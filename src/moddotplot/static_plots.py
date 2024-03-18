@@ -25,7 +25,6 @@ from plotnine import (
 import pandas as pd
 import numpy as np
 import math
-import matplotlib.font_manager
 from moddotplot.const import (
     DIVERGING_PALETTES,
     QUALITATIVE_PALETTES,
@@ -185,6 +184,7 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors):
         new_hexcodes = colors
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
     window = max(sdf["q_en"] - sdf["q_st"])
+    print(window)
     p = (
         ggplot(sdf)
         + geom_tile(
@@ -218,10 +218,9 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors):
     )
 
     # Adjust x-axis label size
-    p += theme(axis_title_x=element_text())
+    #p += theme(axis_title_x=element_text())
 
     return p
-
 
 def make_tri(sdf, title_name, palette, palette_orientation, colors):
     hexcodes = []
@@ -262,20 +261,32 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors):
             values=new_hexcodes,
             guide=False,
         )
-        + theme_void()  # Remove all background elements
+        + theme(
+            legend_position="none",
+            panel_grid_major=element_blank(),
+            panel_grid_minor=element_blank(),
+            plot_background=element_blank(),
+            panel_background=element_blank(),
+            axis_line=element_line(color="black"),  # Adjust axis line size
+            axis_text=element_text(
+                family=["DejaVu Sans"]
+            ),  # Change axis text font and size
+            axis_ticks_major=element_line(),
+            title=element_text(
+                family=["DejaVu Sans"],  # Change title font family
+            )
+        )
         + scale_x_continuous(labels=make_scale, limits=[0, max_val])
         + scale_y_continuous(labels=make_scale, limits=[0, max_val])
         + coord_fixed(ratio=1)
-        + labs(
-            x="",
-            y="",
-            title=title_name,
-            size=24
-        )
+        + facet_grid("r ~ q")
+        + labs(x="Genomic Position (Mbp)", y="", title=title_name)
     )
 
-    return p
+    # Adjust x-axis label size
+    p += theme(axis_title_x=element_text())
 
+    return p
 
 def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints):
     hexcodes = []
@@ -366,12 +377,13 @@ def create_plots(
     )
 
     if is_pairwise:
+        print(width)
         heatmap = make_dot(sdf, plot_filename, palette, palette_orientation, custom_colors)
-        print(f"Plots created! Saving to {plot_filename}...\n")
+        print(f"Creating plots and saving to {plot_filename}...\n")
         ggsave(
             heatmap,
-            width=width,
-            height=width,
+            width=9,
+            height=9,
             dpi=dpi,
             format="pdf",
             filename=f"{plot_filename}.pdf",
@@ -379,8 +391,8 @@ def create_plots(
         )
         ggsave(
             heatmap,
-            width=width,
-            height=width,
+            width=9,
+            height=9,
             dpi=dpi,
             format="png",
             filename=f"{plot_filename}.png",
@@ -391,8 +403,8 @@ def create_plots(
         else:
             ggsave(
                 histy,
-                width=width,
-                height=width,
+                width=3,
+                height=3,
                 dpi=dpi,
                 format="pdf",
                 filename=f"{plot_filename}_HIST.pdf",
@@ -400,8 +412,8 @@ def create_plots(
             )
             ggsave(
                 histy,
-                width=width,
-                height=width,
+                width=3,
+                height=3,
                 dpi=dpi,
                 format="png",
                 filename=f"{plot_filename}_HIST.png",
@@ -412,6 +424,7 @@ def create_plots(
             )
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
+        print(width)
         tri_plot = make_tri(sdf, plot_filename, palette, palette_orientation, custom_colors)
         full_plot = make_dot(
             check_st_en_equality(sdf),
@@ -421,11 +434,11 @@ def create_plots(
             custom_colors,
         )
 
-        print(f"Plots created! Saving to {plot_filename}...\n")
+        print(f"Creating plots and saving to {plot_filename}...\n")
         ggsave(
             tri_plot,
-            width=width,
-            height=width,
+            width=9,
+            height=9,
             dpi=dpi,
             format="pdf",
             filename=f"{plot_filename}_TRI.pdf",
@@ -433,17 +446,18 @@ def create_plots(
         )
         ggsave(
             tri_plot,
-            width=width,
-            height=width,
+            width=9,
+            height=9,
             dpi=dpi,
             format="png",
             filename=f"{plot_filename}_TRI.png",
             verbose=False,
         )
+
         ggsave(
             full_plot,
-            width=width,
-            height=width,
+            width=9,
+            height=9,
             dpi=dpi,
             format="pdf",
             filename=f"{plot_filename}_FULL.pdf",
@@ -451,13 +465,14 @@ def create_plots(
         )
         ggsave(
             full_plot,
-            width=width,
-            height=width,
+            width=9,
+            height=9,
             dpi=dpi,
             format="png",
             filename=f"{plot_filename}_FULL.png",
             verbose=False,
         )
+
         if no_hist:
             print(
                 f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_FULL.png and {plot_filename}_FULL.png saved sucessfully. \n"

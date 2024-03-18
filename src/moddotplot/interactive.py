@@ -1,14 +1,13 @@
-from calendar import c
 import plotly.express as px
 from moddotplot.estimate_identity import (
-    get_interactive_color,
-    get_matching_colors,
-    verify_modimizers,
-    set_zoom_levels_list,
-    make_differences_equal,
-    generate_dict_from_list,
-    find_value_in_range,
-    convertMatrixToBed
+    getInteractiveColor,
+    getMatchingColors,
+    verifyModimizers,
+    setZoomLevels,
+    makeDifferencesEqual,
+    generateDictionaryFromList,
+    findValueInRange,
+    convertMatrixToBed,
 )
 
 import numpy as np
@@ -18,12 +17,11 @@ import math
 import plotly.graph_objs as go
 import logging
 import os
-import sys
-from dash.exceptions import PreventUpdate
 
 # Prevent HTTP protocol requests from showing up in terminal
-log = logging.getLogger('werkzeug')
+log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
+
 
 def find_closest_elements(value, sorted_list):
     # Initialize variables to store the indices of the closest elements
@@ -31,7 +29,7 @@ def find_closest_elements(value, sorted_list):
     closest_index2 = None
 
     # Initialize a variable to store the minimum difference
-    min_difference = float('inf')
+    min_difference = float("inf")
 
     # Iterate through the sorted list
     for i in range(len(sorted_list)):
@@ -55,15 +53,8 @@ def find_closest_elements(value, sorted_list):
     else:
         return closest_index1, closest_index2
 
-def run_dash(
-    matrices,
-    metadata,
-    axes,
-    sparsity,
-    identity,
-    port_number,
-    output_dir
-):
+
+def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_dir):
     # Run Dash app
     app = dash.Dash(__name__, prevent_initial_callbacks="initial_duplicate")
     app.title = "ModDotPlot"
@@ -75,22 +66,22 @@ def run_dash(
     current_metadata = metadata[0]
     x_name = metadata[0]["x_name"]
     y_name = metadata[0]["y_name"]
-    
+
     # Initialize color palette
     palette = "Spectral_11"
     palette_orientation = "+"
-    current_color = get_interactive_color(palette, palette_orientation)
-    
-    #Initialize axes and titles for all images
+    current_color = getInteractiveColor(palette, palette_orientation)
+
+    # Initialize axes and titles for all images
     titles = []
     for i in range(len(metadata)):
         titles.append(metadata[i]["title"])
     # Get zooming thresholds, adjust sparsity respectively.
-    mod_ranges = verify_modimizers(sparsity, len(image_pyramid))
-    #TODO: This is probably wrong, look into it later
-    mod_thresholds_list = set_zoom_levels_list(round(metadata[0]["x_size"]), mod_ranges)
+    mod_ranges = verifyModimizers(sparsity, len(image_pyramid))
+    # TODO: This is probably wrong, look into it later
+    mod_thresholds_list = setZoomLevels(round(metadata[0]["x_size"]), mod_ranges)
 
-    important = generate_dict_from_list(mod_thresholds_list)
+    important = generateDictionaryFromList(mod_thresholds_list)
 
     main_level = image_pyramid[0]
     main_x_axis = axes[0][0]
@@ -100,16 +91,16 @@ def run_dash(
     main_x_axis_np += 3000
 
     # Modify text so that hover shows interval format
-    #TODO: This is slow. Make faster
-    X, Y = np.meshgrid(main_x_axis, main_y_axis)
-    X = np.delete(X, -1, axis=1)
+    # TODO: Add intervals in a way that's speedy
     '''X, Y = np.meshgrid(main_x_axis, main_y_axis)
+    X = np.delete(X, -1, axis=1)
+    X, Y = np.meshgrid(main_x_axis, main_y_axis)
     X = np.delete(X, -1, axis=1)
     X_str = np.array([[f"{str(val)}-{str(val + current_metadata['max_window_size'])}" for val in row] for row in X])
     Y = np.delete(Y, -1, axis=1)
     Y_str = np.array([[f"{str(val)}-{str(val + current_metadata['max_window_size'])}" for val in row] for row in Y])
     hover_template_text = "%{text}<br>%{customdata}<br>Identity: %{z:.1f}"'''
-    hover_template_text = "Identity: %{z:.1f}"
+    hover_template_text = "Identity: %{z:.2f}"
     # Create initial heatmap
     heatmap = go.Heatmap(
         z=main_level,
@@ -141,7 +132,9 @@ def run_dash(
         linecolor="black",
         mirror=True,
     )
-    fig.update_xaxes(nticks=10, title_text=metadata[0]["x_name"], title_font=dict(size=18))
+    fig.update_xaxes(
+        nticks=10, title_text=metadata[0]["x_name"], title_font=dict(size=18)
+    )
 
     # Update y-axis properties directly within the heatmap trace
     fig.update_yaxes(
@@ -155,8 +148,8 @@ def run_dash(
     )
     fig.update_yaxes(title_text=metadata[0]["y_name"], title_font=dict(size=18))
     fig_title = ""
-    
-    #TODO: Fine tuning on the names
+
+    # TODO: Fine tuning on the names
     title_size = 28
     if metadata[0]["self"]:
         fig_title = f"Self-Identity Plot: {x_name}"
@@ -194,7 +187,7 @@ def run_dash(
             "height": "100vh",
         },
         children=[
-            html.Link(rel='icon', href='/assets/favicon.png'),
+            html.Link(rel="icon", href="/assets/favicon.png"),
             html.Div(
                 [
                     dcc.Graph(id="dotplot", figure=fig),
@@ -236,38 +229,61 @@ def run_dash(
                                     "fontFamily": "Helvetica, Arial, sans-serif",
                                 },  # Added padding to separate the content
                             ),
-                            html.Div(id='invisible-div', children=0, style={'display': 'none'}),
-                            html.Div([
-                                html.Label('Currently shown plot:', style={'marginRight': '10px', 'padding-left': '20px', }),
-                                dcc.Dropdown(
-                                    id='matrix-dropdown',
-                                    options=[
-                                        {'label': f'{title}', 'value': f'{title}'}
-                                        for title in titles  # Iterate over each title
-                                    ],
-                                    value=titles[0] if titles else None,  # Set default value based on the length of matrices
-                                    clearable=False,  # Prevent dropdown from clearing values,
-                                    style={'width': '300px'}
-                                ),
-                                html.Div(id='output-container'),
-                                dcc.Store(id='matrices-store', data=len(matrices)),
-                            ],
-                            style={
-                                'display': 'none' if len(titles) < 2 else 'block',
-                                'width': 'fit-content'*2,  # Set width to fit content
-                                'fontFamily': 'Helvetica, Arial, sans-serif',
-                                'paddingTop': '10px',
-                                'paddingLeft': '25px',
-                                'paddingBottom': '30px',
-                                'textAlign': 'left'
-                            }),
                             html.Div(
-                                html.Button('Save Matrix to Bed File', id='save-bed', n_clicks=0, disabled=False, style={
-                                    "marginLeft": "45px",
-                                }),
+                                id="invisible-div",
+                                children=0,
+                                style={"display": "none"},
                             ),
                             html.Div(
-                                children=[f"Current Window Size: {current_metadata['max_window_size']}"],
+                                [
+                                    html.Label(
+                                        "Currently shown plot:",
+                                        style={
+                                            "marginRight": "10px",
+                                            "padding-left": "20px",
+                                        },
+                                    ),
+                                    dcc.Dropdown(
+                                        id="matrix-dropdown",
+                                        options=[
+                                            {"label": f"{title}", "value": f"{title}"}
+                                            for title in titles  # Iterate over each title
+                                        ],
+                                        value=titles[0]
+                                        if titles
+                                        else None,  # Set default value based on the length of matrices
+                                        clearable=False,  # Prevent dropdown from clearing values,
+                                        style={"width": "300px"},
+                                    ),
+                                    html.Div(id="output-container"),
+                                    dcc.Store(id="matrices-store", data=len(matrices)),
+                                ],
+                                style={
+                                    "display": "none" if len(titles) < 2 else "block",
+                                    "width": "fit-content"
+                                    * 2,  # Set width to fit content
+                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                    "paddingTop": "10px",
+                                    "paddingLeft": "25px",
+                                    "paddingBottom": "30px",
+                                    "textAlign": "left",
+                                },
+                            ),
+                            html.Div(
+                                html.Button(
+                                    "Save Matrix to Bed File",
+                                    id="save-bed",
+                                    n_clicks=0,
+                                    disabled=False,
+                                    style={
+                                        "marginLeft": "45px",
+                                    },
+                                ),
+                            ),
+                            html.Div(
+                                children=[
+                                    f"Current Window Size: {current_metadata['max_window_size']}"
+                                ],
                                 id="window-div",
                                 style={
                                     "fontFamily": "Helvetica, Arial, sans-serif",
@@ -1200,33 +1216,47 @@ def run_dash(
                                     )
                                 ],
                             ),
-                            html.Div([
-                                html.Div(
-                                    "Coordinate Log:",
-                                    id="coordinate-text",
-                                    style={
-                                        "fontFamily": "Helvetica, Arial, sans-serif",
-                                        "paddingLeft": "45px",  # Added padding to separate the content
-                                        "paddingBottom": "10px"
-                                    },
-                                ),
+                            html.Div(
+                                [
+                                    html.Div(
+                                        "Coordinate Log:",
+                                        id="coordinate-text",
+                                        style={
+                                            "fontFamily": "Helvetica, Arial, sans-serif",
+                                            "paddingLeft": "45px",  # Added padding to separate the content
+                                            "paddingBottom": "10px",
+                                        },
+                                    ),
                                     dcc.Loading(
                                         id="loading",
                                         type="default",
                                         children=[
                                             dcc.Textarea(
-                                                id='text-input',
-                                                value='',
-                                                style={'padding': '10px', 'height': '40px', 'width': '62%', 'margin-left': '22px', "fontFamily": "Helvetica, Arial, sans-serif"}
+                                                id="text-input",
+                                                value="",
+                                                style={
+                                                    "padding": "10px",
+                                                    "height": "40px",
+                                                    "width": "62%",
+                                                    "margin-left": "22px",
+                                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                                },
                                             ),
-                                            html.Button('Save Coordinates to Bed File', id='save-button', n_clicks=0, disabled=True, style={'margin': '20px'}),
-                                            dcc.Download(id="download")
-                                        ]
-                                    )
-                                ], style={
+                                            html.Button(
+                                                "Save Coordinates to Bed File",
+                                                id="save-button",
+                                                n_clicks=0,
+                                                disabled=True,
+                                                style={"margin": "20px"},
+                                            ),
+                                            dcc.Download(id="download"),
+                                        ],
+                                    ),
+                                ],
+                                style={
                                     "fontFamily": "Helvetica, Arial, sans-serif",
-                                }),
-                                
+                                },
+                            ),
                         ],
                         style={
                             "paddingTop": "110px",
@@ -1235,14 +1265,18 @@ def run_dash(
                         },  # Added paddingTop for the text and centered the text
                     ),
                 ],
-                style={"display": "flex", "justifyContent": "center", "flex-wrap": "wrap"},
+                style={
+                    "display": "flex",
+                    "justifyContent": "center",
+                    "flex-wrap": "wrap",
+                },
             ),
         ],
     )
 
     @app.callback(
-        Output('text-input', 'value'),
-        Input('dotplot', 'clickData'),
+        Output("text-input", "value"),
+        Input("dotplot", "clickData"),
         Input("invisible-div", "children"),
         Input("matrix-dropdown", "value"),
     )
@@ -1252,44 +1286,53 @@ def run_dash(
             if timothy == titles[i]:
                 updated_info = metadata[i]
         global clicked_values
-        tmp = updated_info["max_window_size"]//(2 ** zoom_level)
+        tmp = updated_info["max_window_size"] // (2**zoom_level)
         if click_data:
-            x_val = click_data['points'][0]['x'] if 'x' in click_data['points'][0] else ''
-            y_val = click_data['points'][0]['y'] if 'y' in click_data['points'][0] else ''
-            z_val = click_data['points'][0]['z'] if 'z' in click_data['points'][0] else ''
+            x_val = (
+                click_data["points"][0]["x"] if "x" in click_data["points"][0] else ""
+            )
+            y_val = (
+                click_data["points"][0]["y"] if "y" in click_data["points"][0] else ""
+            )
+            z_val = (
+                click_data["points"][0]["z"] if "z" in click_data["points"][0] else ""
+            )
 
             # Create clicked_values list if it doesn't exist in the global scope
-            if 'clicked_values' not in globals():
-                globals()['clicked_values'] = []
+            if "clicked_values" not in globals():
+                globals()["clicked_values"] = []
 
             # Append x and y values to the list and keep only the last 5 values
-            #TODO: I shouldn't have to round, but I do :/
-            clicked_values.insert(0, f'{updated_info["x_name"]}: {round(x_val)}-{round(x_val + tmp)}\n{updated_info["y_name"]}: {round(y_val)}-{round(y_val + tmp)}\nIdentity: {round(z_val,2)}\n~')
+            # TODO: I shouldn't have to round, but I do :/
+            clicked_values.insert(
+                0,
+                f'{updated_info["x_name"]}: {round(x_val)}-{round(x_val + tmp)}\n{updated_info["y_name"]}: {round(y_val)}-{round(y_val + tmp)}\nIdentity: {round(z_val,2)}\n~',
+            )
             clicked_values = clicked_values[-100:]
-            return '\n'.join((clicked_values)) 
+            return "\n".join((clicked_values))
         else:
-            return ''
-    @app.callback(
-        Output('save-button', 'disabled'),
-        Input('text-input', 'value')
-    )
+            return ""
+
+    @app.callback(Output("save-button", "disabled"), Input("text-input", "value"))
     def update_button_state(text_value):
-        return text_value == ''
+        return text_value == ""
 
     @app.callback(
         Output("text-input", "value", allow_duplicate=True),
-        Output('save-bed', 'n_clicks'),
+        Output("save-bed", "n_clicks"),
         Input("save-bed", "n_clicks"),
         Input("dotplot", "figure"),
     )
     def save_bed(n_clicks, figure):
         global clicked_values
         if n_clicks > 0:
-            window_size = figure['data'][0]['x'][1] - figure['data'][0]['x'][0]
+            window_size = figure["data"][0]["x"][1] - figure["data"][0]["x"][0]
             try:
-                identity = round(min([val for val in figure['data'][0]['z'][0] if val > 0]))
-                x_axis_name = figure['layout']['xaxis']['title']['text']
-                y_axis_name = figure['layout']['yaxis']['title']['text']
+                identity = round(
+                    min([val for val in figure["data"][0]["z"][0] if val > 0])
+                )
+                x_axis_name = figure["layout"]["xaxis"]["title"]["text"]
+                y_axis_name = figure["layout"]["yaxis"]["title"]["text"]
                 if x_axis_name == y_axis_name:
                     selfy = True
                     title_hi = x_axis_name + ".bed"
@@ -1302,8 +1345,10 @@ def run_dash(
                 y_axis_name = "y"
                 selfy = False
                 title_hi = "x-y.bed"
-            pls = np.array(figure['data'][0]['z'])
-            tr = convertMatrixToBed(pls, window_size, identity, x_axis_name, y_axis_name, selfy)
+            pls = np.array(figure["data"][0]["z"])
+            tr = convertMatrixToBed(
+                pls, window_size, identity, x_axis_name, y_axis_name, selfy
+            )
             if not output_dir:
                 bedfile_output = os.path.join("./", title_hi)
             else:
@@ -1316,24 +1361,26 @@ def run_dash(
             msg = f"Saved bed file to {bedfile_output}\n"
             return msg, 0  # Make sure to return a tuple of values for the outputs
         else:
-            return dash.no_update, dash.no_update  # Return dash.no_update for outputs not being updated
-
+            return (
+                dash.no_update,
+                dash.no_update,
+            )  # Return dash.no_update for outputs not being updated
 
     @app.callback(
         Output("text-input", "value", allow_duplicate=True),
         Input("save-button", "n_clicks"),
-        State("text-input", "value")
+        State("text-input", "value"),
     )
     def save_to_file(n_clicks, content):
         global clicked_values
         if n_clicks > 0 and content:
-            content = content.replace('\n', ',')
-            content = content.replace(': ', ', ')
-            content = content.replace('~,', '\n')
-            content = content.replace(' Identity,', '')
-            content = content.replace('~', '')
-            content = content.replace(',\n', '\n')
-            msg = f'Saved coordinate history to coordinate_log.txt!'
+            content = content.replace("\n", ",")
+            content = content.replace(": ", ", ")
+            content = content.replace("~,", "\n")
+            content = content.replace(" Identity,", "")
+            content = content.replace("~", "")
+            content = content.replace(",\n", "\n")
+            msg = f"Saved coordinate history to coordinate_log.txt!"
             with open("coordinate_log.txt", "w") as file:
                 file.write(str(content))
             return msg
@@ -1353,12 +1400,20 @@ def run_dash(
         Input("invisible-div", "children"),
         prevent_initial_call=True,
     )
-    def update_dotplot(relayoutData, figure, color, threshold_range, button_states, timothy, current_zoom):
+    def update_dotplot(
+        relayoutData,
+        figure,
+        color,
+        threshold_range,
+        button_states,
+        timothy,
+        current_zoom,
+    ):
         updated_info = ""
         updated_title = ""
         title_size = 28
         image_axes = []
-        #Matrix dropdown value = Timothy
+        # Matrix dropdown value = Timothy
         for i in range(len(titles)):
             if timothy == titles[i]:
                 image_pyramid = matrices[i]
@@ -1374,9 +1429,9 @@ def run_dash(
                         title_size = 16
         new_main_level = image_pyramid[0]
         fig = go.Figure(data=[heatmap])
-        current_color = get_interactive_color(get_matching_colors(color), "+")
+        current_color = getInteractiveColor(getMatchingColors(color), "+")
         new_heatmap = heatmap
-        new_heatmap.update(dict(colorscale=current_color,z=new_main_level))
+        new_heatmap.update(dict(colorscale=current_color, z=new_main_level))
 
         masked_data = np.where(
             (new_heatmap["z"] < threshold_range[0])
@@ -1403,8 +1458,10 @@ def run_dash(
             linecolor="black",
             mirror=True,
         )
-        #TODO: nticks not working
-        fig.update_xaxes(nticks=10, title_text=updated_info["x_name"], title_font=dict(size=18))
+        # TODO: nticks not working
+        fig.update_xaxes(
+            nticks=10, title_text=updated_info["x_name"], title_font=dict(size=18)
+        )
 
         # Update y-axis properties directly within the heatmap trace
         fig.update_yaxes(
@@ -1430,17 +1487,16 @@ def run_dash(
 
         fig.update_layout(yaxis_scaleanchor="x")
         if relayoutData is not None:
-            #TODO: Pan mode should stay in pan mode
+            # TODO: Pan mode should stay in pan mode
 
             if "xaxis.range[0]" in relayoutData:
-
                 x_start_range = relayoutData.get("xaxis.range[0]")
                 y_start_range = relayoutData.get("yaxis.range[0]")
                 x_end_range = relayoutData.get("xaxis.range[1]")
                 y_end_range = relayoutData.get("yaxis.range[1]")
 
                 # Check that selected range is in bounds, snap to boundary otherwise
-                #TODO: still broken here
+                # TODO: still broken here
                 if x_start_range is not None:
                     if x_start_range < 0:
                         print("x axis out of bounds! Shifting to x=0")
@@ -1451,14 +1507,17 @@ def run_dash(
                         relayoutData["yaxis.range[0]"] = 0
                         y_start_range = 0
                     if x_end_range > updated_info["x_size"]:
-                        print(f"x axis out of bounds! Shifting to x={updated_info['x_size']}")
-                        relayoutData["xaxis.range[1]"] = updated_info['x_size']
-                        x_end_range = updated_info['x_size']
-                    if y_end_range > updated_info['y_size']:
-                        print(f"y axis out of bounds! Shifting to y={updated_info['y_size']}")
-                        relayoutData["yaxis.range[1]"] = updated_info['y_size']
-                        y_end_range = updated_info['y_size']
-
+                        print(
+                            f"x axis out of bounds! Shifting to x={updated_info['x_size']}"
+                        )
+                        relayoutData["xaxis.range[1]"] = updated_info["x_size"]
+                        x_end_range = updated_info["x_size"]
+                    if y_end_range > updated_info["y_size"]:
+                        print(
+                            f"y axis out of bounds! Shifting to y={updated_info['y_size']}"
+                        )
+                        relayoutData["yaxis.range[1]"] = updated_info["y_size"]
+                        y_end_range = updated_info["y_size"]
 
                 if x_start_range >= 0 and y_start_range >= 0:
                     x_begin = round(relayoutData["xaxis.range[0]"])
@@ -1470,7 +1529,7 @@ def run_dash(
                     amount = x_end - x_begin
 
                     # This function finds the correct level in the image pyramid
-                    zoom_factor = find_value_in_range(amount, important)
+                    zoom_factor = findValueInRange(amount, important)
                     # If zoom_factor is less than current_zoom, base tmp factors on the older amount
 
                     if zoom_factor > len(image_pyramid) - 1:
@@ -1478,30 +1537,30 @@ def run_dash(
                     if (zoom_factor != 0) or (zoom_factor != current_zoom):
                         using_matrix = image_pyramid[zoom_factor]
                         # Get the coordinates for the better matrix
-                        tmp1 = find_closest_elements(x_start_range, image_axes[2*zoom_factor])[0]
-                        tmp2 = find_closest_elements(x_end_range, image_axes[2*zoom_factor])[1]
-                        tmp3 = find_closest_elements(y_start_range, image_axes[(2*zoom_factor)+1])[0]
-                        tmp4 = find_closest_elements(y_end_range, image_axes[(2*zoom_factor)+1])[1]
-                        x_start_updated = math.floor(
-                            tmp1 
-                        )
-                        x_end_updated = math.ceil(
-                            tmp2 
-                        )
-                        y_start_updated = math.floor(
-                            tmp3 
-                        )
-                        y_end_updated = math.ceil(
-                            tmp4
-                        )
+                        tmp1 = find_closest_elements(
+                            x_start_range, image_axes[2 * zoom_factor]
+                        )[0]
+                        tmp2 = find_closest_elements(
+                            x_end_range, image_axes[2 * zoom_factor]
+                        )[1]
+                        tmp3 = find_closest_elements(
+                            y_start_range, image_axes[(2 * zoom_factor) + 1]
+                        )[0]
+                        tmp4 = find_closest_elements(
+                            y_end_range, image_axes[(2 * zoom_factor) + 1]
+                        )[1]
+                        x_start_updated = math.floor(tmp1)
+                        x_end_updated = math.ceil(tmp2)
+                        y_start_updated = math.floor(tmp3)
+                        y_end_updated = math.ceil(tmp4)
 
-                        x_equi, y_equi = make_differences_equal(
+                        x_equi, y_equi = makeDifferencesEqual(
                             x_start_updated,
                             x_end_updated,
                             y_start_updated,
                             y_end_updated,
                         )
-                        #TODO: flip axes here
+                        # TODO: flip axes here
                         using_matrix = np.copy(
                             using_matrix[y_start_updated:y_equi, x_start_updated:x_equi]
                         )
@@ -1512,8 +1571,8 @@ def run_dash(
                             using_matrix,
                         )
 
-                        x_ax = image_axes[2*zoom_factor][x_start_updated:x_equi]
-                        y_ax = image_axes[(2*zoom_factor)+1][y_start_updated:y_equi]
+                        x_ax = image_axes[2 * zoom_factor][x_start_updated:x_equi]
+                        y_ax = image_axes[(2 * zoom_factor) + 1][y_start_updated:y_equi]
 
                         new_hover_template_text = "Identity: %{z:.1f}"
 
@@ -1531,10 +1590,10 @@ def run_dash(
                             hovertemplate=new_hover_template_text,
                             name="",
                             x0=x_ax[0],
-                            dx=updated_info["max_window_size"]//(2**zoom_factor),
+                            dx=updated_info["max_window_size"] // (2**zoom_factor),
                             xtype="scaled",
                             y0=y_ax[0],
-                            dy=updated_info["max_window_size"]//(2**zoom_factor),
+                            dy=updated_info["max_window_size"] // (2**zoom_factor),
                             ytype="scaled",
                         )
 
@@ -1550,7 +1609,9 @@ def run_dash(
                             mirror=True,
                         )
                         current_fig.update_xaxes(
-                            nticks=10, title_text=updated_info['x_name'], title_font=dict(size=18)
+                            nticks=10,
+                            title_text=updated_info["x_name"],
+                            title_font=dict(size=18),
                         )
 
                         # Update y-axis properties directly within the heatmap trace
@@ -1563,9 +1624,9 @@ def run_dash(
                             linecolor="black",
                             mirror=True,
                         )
-                
+
                         current_fig.update_yaxes(
-                            title_text=updated_info['y_name'], title_font=dict(size=18)
+                            title_text=updated_info["y_name"], title_font=dict(size=18)
                         )
                         current_fig.update_layout(
                             hoverlabel=dict(
@@ -1581,16 +1642,16 @@ def run_dash(
                             current_fig,
                             "",
                             f"Current Window Size: {updated_info['max_window_size']//(2**zoom_factor)}",
-                            zoom_factor
+                            zoom_factor,
                         )
                     else:
                         # Happens when panning or zooming in/out within threshold
                         return (
-                                figure,
-                                "",
-                                f"Current Window Size: {updated_info['max_window_size']//(2**current_zoom)}",
-                                current_zoom,
-                            )
+                            figure,
+                            "",
+                            f"Current Window Size: {updated_info['max_window_size']//(2**current_zoom)}",
+                            current_zoom,
+                        )
 
             elif "xaxis.autorange" in relayoutData:
                 # Triggers when double-clicked or reset axes
@@ -1598,7 +1659,7 @@ def run_dash(
                     fig,
                     "",
                     f"Current Window Size: {updated_info['max_window_size']}",
-                    0
+                    0,
                 )
 
             # TODO: disable Autosizing
@@ -1608,26 +1669,26 @@ def run_dash(
                     figure,
                     "",
                     f"Current Window Size: {updated_info['max_window_size']}",
-                    zoom_factor
+                    zoom_factor,
                 )
 
             else:
                 # Happens when user selects pan mode.
-                #TODO: get correct window size
+                # TODO: get correct window size
                 return (
                     figure,
                     "",
                     f"Current Window Size: {updated_info['max_window_size']//(2**current_zoom)}",
-                    current_zoom
+                    current_zoom,
                 )
         else:
             # This occurs at startup and when selecting color. Return the base figure with color
-            #fig.update_layout(coloraxis=dict(colorscale=current_color))
+            # fig.update_layout(coloraxis=dict(colorscale=current_color))
             return (
                 fig,
                 "",
                 f"Current Window Size: {updated_info['max_window_size']}",
-                current_zoom
+                current_zoom,
             )
 
     # -------DO NOT DELETE! CUSTOM CSS FOR IDENTITY THRESHOLD SLIDER--------
@@ -1668,5 +1729,5 @@ def run_dash(
     </body>
 </html>
 """
-    #TODO: Change debug to False for production
+    # TODO: Change debug to False for production
     app.run(debug=False, use_reloader=False, port=port_number)

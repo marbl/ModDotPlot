@@ -5,13 +5,13 @@
 - [Usage](#usage)
   - [Interactive Mode](#interactive-mode)
   - [Static Mode](#static-mode)
-  - [Standard Arguments](#standard-arguments)
+  - [Standard arguments](#standard-arguments)
   - [Interactive Mode Commands](#interactive-mode-commands)
   - [Static Mode Commands](#static-mode-commands)
   - [Sample run - Interactive Mode](#sample-run---interactive-mode)
   - [Sample run - Port Forwarding](#sample-run---port-forwarding)
   - [Sample run - Static Plots](#sample-run---static-plots)
-  - [Sample run - Comparing Two Sequences](#sample-run---comparing-two-sequences)
+  - [Sample run - comparing two sequences](#sample-run---comparing-two-sequences)
 - [Questions](#questions)
 - [Known Issues](#known-issues)
 - [Cite](#cite)
@@ -369,6 +369,8 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 --- 
 
 ## Known Issues
+
+Plot width and xlim (limiting the x axis to a different amount) currently do not work. I plan to have those working in v0.9.0.
 
 Mac users might encounter the following unexpected command line output:
 
