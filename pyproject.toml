@@ -11,7 +11,7 @@ dependencies = [
   "pandas",
   "plotly",
   "dash",
-  "plotnine",
+  "plotnine==0.12.4",
   "palettable",
   "mmh3",
   "tk",
