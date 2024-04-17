@@ -77,17 +77,29 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
     for i in range(len(metadata)):
         titles.append(metadata[i]["title"])
     # Get zooming thresholds, adjust sparsity respectively.
-    mod_ranges = verifyModimizers(sparsity, len(image_pyramid))
-    # TODO: This is probably wrong, look into it later
-    mod_thresholds_list = setZoomLevels(round(metadata[0]["x_size"]), mod_ranges)
-
+    def halving_sequence(size, start):
+        sequence = [start]
+        for _ in range(1, size):
+            start /= 2
+            sequence.append(start)
+        return sequence
+    #print(current_metadata)
+    mod_thresholds_list = halving_sequence(len(current_metadata["sparsities"]), current_metadata["x_size"])
+    #print(mod_thresholds_list)
+    
+    #print(current_metadata["min_window_size"]* current_metadata["resolution"])
+    #print(current_metadata["max_window_size"])
+    numo = round(math.log2(current_metadata['max_window_size']/current_metadata['min_window_size']) + 1)
+    #print(numo)
     important = generateDictionaryFromList(mod_thresholds_list)
+    #print(f"this is imprtant: {important}")
 
     main_level = image_pyramid[0]
     main_x_axis = axes[0][0]
     main_y_axis = axes[0][1]
     main_x_axis_np = np.array(main_x_axis)
 
+    #TODO: modify value here
     main_x_axis_np += 3000
 
     # Modify text so that hover shows interval format
@@ -1529,7 +1541,10 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                     amount = x_end - x_begin
 
                     # This function finds the correct level in the image pyramid
-                    zoom_factor = findValueInRange(amount, important)
+                    try:
+                        zoom_factor = findValueInRange(amount, important)
+                    except ValueError as err:
+                        zoom_factor = 0
                     # If zoom_factor is less than current_zoom, base tmp factors on the older amount
 
                     if zoom_factor > len(image_pyramid) - 1:

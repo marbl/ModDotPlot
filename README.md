@@ -1,3 +1,4 @@
+[![Documentation Status](https://readthedocs.org/projects/moddotplot/badge/?version=latest)](https://moddotplot.readthedocs.io/en/latest/?badge=latest)
 ![](images/logo.png)
 
 - [About](#about)
@@ -6,6 +7,7 @@
   - [Interactive Mode](#interactive-mode)
   - [Static Mode](#static-mode)
   - [Standard arguments](#standard-arguments)
+- [Save matrix to file, but don't render plots. In interactive mode, this must be utlized with the `--save` flag.](#save-matrix-to-file-but-dont-render-plots-in-interactive-mode-this-must-be-utlized-with-the---save-flag)
   - [Interactive Mode Commands](#interactive-mode-commands)
   - [Static Mode Commands](#static-mode-commands)
   - [Sample run - Interactive Mode](#sample-run---interactive-mode)
@@ -141,6 +143,8 @@ If set when 2 or more sequences are input into ModDotPlot, this will show an a v
 `--ambiguous <bool>`
 By default, k-mers that are homopolymers of ambiguous IUPAC codes (eg. NNNNNNNNNNN’s) are excluded from identity estimation. This results in gaps along the central diagonal for these regions.  If desired, these can be kept by setting the `—-ambiguous` flag in both interactive and static mode.  
 
+`--no-plot <bool>`
+Save matrix to file, but don't render plots. In interactive mode, this must be utlized with the `--save` flag. 
 --- 
 
 ### Interactive Mode Commands
@@ -151,7 +155,7 @@ Port to display ModDotPlot on. Default is 8050, this can be changed to any accep
 
 `-w / --window <int>`
 
-Minimum window size. By default, interactive mode sets a minimum window size based on the sequence length `n/2000` (eg. a 3Mbp sequence will have a 1500bp window). The maximum window size will always be set to `n/1000` (3000bp under the same example). This means that 2 matrices will be created. Creating more matrices will mean 
+Minimum window size. By default, interactive mode sets a minimum window size based on the sequence length `n/2000` (eg. a 3Mbp sequence will have a 1500bp window). The maximum window size will always be set to `n/1000` (3000bp under the same example). This means that 2 matrices will be created.
 
 `-q / --quick <bool>`
 
@@ -185,10 +189,6 @@ Window size. Unlike interactive mode, only one matrix will be created, so this r
 
 Skip output of bed file.
 
-`--no-plot <bool>`
-
-Skip output of pdf and png image files.
-
 `--no-hist <bool>`
 
 Skip output of histogram legend.
@@ -208,6 +208,10 @@ List of accepted palettes can be found [here](https://jiffyclub.github.io/palett
 `--palette-orientation <bool>`
 
 Flip sequential order of color palette. Set to `-` by default for divergent palettes. 
+
+`--color <list of hexcodes>`
+
+List of custom colors in hexcode format can be entered sequentially, mapped from low to high identity. 
 
 `--breakpoints <list of ints>`
 
@@ -278,7 +282,7 @@ ssh -N -f -L <LOCAL_PORT_NUMBER>:127.0.0.1:<HPC_PORT_NUMBER> HPC@LOGIN.CREDENTIA
 
 You should now be able to view interactive mode using `http://127.0.0.1:<LOCAL_PORT_NUMBER>`. Note that your own HPC environment may have specific instructions and/or restrictions for setting up port forwarding.
 
-VSCode now has automatic port forwarding built into the terminal menu. See [VSCode documentation](https://code.visualstudio.com/docs/editor/port-forwarding) for fruther details 
+VSCode now has automatic port forwarding built into the terminal menu. See [VSCode documentation](https://code.visualstudio.com/docs/editor/port-forwarding) for further details 
 
 ![](images/portforwarding.png)
 
@@ -319,7 +323,7 @@ $ moddotplot static -c config/config.json
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.0 
+v0.8.1
 
 Running ModDotPlot in static mode
 
@@ -371,18 +375,17 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 
 ## Known Issues
 
-Plot width and xlim (limiting the x axis to a different amount) currently do not work. I plan to have those working in v0.9.0.
+- Plot width and xlim (limiting the x axis to a different amount) currently do not work. I plan to have those working in v0.9.0.
 
-Mac users might encounter the following unexpected command line output:
+- Mac users might encounter the following unexpected command line output: `/bin/sh: lscpu: command not found`. This is a known issue with Plotnine, the Python plotting library used by ModDotPlot. This can be safely ignored.
 
-`/bin/sh: lscpu: command not found`
+- If you encounter an error with the following traceback: `rv = reductor(4) TypeError: cannot pickle 'generator' object`, ths means that you have a newer version of Plotnine that is incompatible with ModDotPlot. Please uninstall plotnine and reinstall version 0.12.4 `pip install plotnine==0.12.4`. 
 
-This is a known issue with Plotnine, the Python plotting library used by ModDotPlot. This can be safely ignored.
-
-
+- In interactive mode, comparing sequences of two sizes will lead to errors in zooming for the larger sequence. I plan to fix this in v0.9.0.
+  
 ---
 
 
 ## Cite
 
-Publication in progress!
+Publication in progress! (almost there :D)
