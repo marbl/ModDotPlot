@@ -1,4 +1,3 @@
-[![Documentation Status](https://readthedocs.org/projects/moddotplot/badge/?version=latest)](https://moddotplot.readthedocs.io/en/latest/?badge=latest)
 ![](images/logo.png)
 
 - [About](#about)
