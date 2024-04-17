@@ -55,7 +55,7 @@ Finally, confirm that the installation was installed correctly by running `moddo
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.0 
+v0.8.1
 
 usage: moddotplot [-h] {interactive,static} ...
 
@@ -141,10 +141,11 @@ If set when 2 or more sequences are input into ModDotPlot, this will show an a v
 If set when 2 or more sequences are input into ModDotPlot, this will show an a vs. b style plot, without showing self-identity plots.
 
 `--ambiguous <bool>`
-By default, k-mers that are homopolymers of ambiguous IUPAC codes (eg. NNNNNNNNNNN’s) are excluded from identity estimation. This results in gaps along the central diagonal for these regions.  If desired, these can be kept by setting the `—-ambiguous` flag in both interactive and static mode.  
+By default, k-mers that are homopolymers of ambiguous IUPAC codes (eg. NNNNNNNNNNN’s) are excluded from identity estimation. This results in gaps along the central diagonal for these regions.  If desired, these can be kept by setting the `—-ambiguous` flag in both interactive and static mode. 
 
 `--no-plot <bool>`
-Save matrix to file, but don't render plots. In interactive mode, this must be utlized with the `--save` flag. 
+Save matrix to file, but skip rendering of plots. In interactive mode, this must be used alongside the `--save` flag
+
 --- 
 
 ### Interactive Mode Commands
@@ -235,7 +236,7 @@ $ moddotplot interactive -f sequences/Chr1_cen.fa
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.0 
+v0.8.1
 
 Running ModDotPlot in interactive mode
 
