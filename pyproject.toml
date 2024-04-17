@@ -15,7 +15,9 @@ dependencies = [
   "palettable",
   "mmh3",
   "tk",
-  "setproctitle"
+  "setproctitle",
+  "sphinx_rtd_theme",
+  "numpy==1.26.4"
 ]
 authors = [
   {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"},
