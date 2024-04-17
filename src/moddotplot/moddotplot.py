@@ -159,6 +159,12 @@ def get_parser():
         help="Launch a quick, non-interactive version of interactive mode.",
     )
 
+    interactive_parser.add_argument(
+        "--no-plot",
+        action="store_true",
+        help="Prevent launching dash after saving. Must be used in combination with --save.",
+    )
+
     # -----------STATIC MODE SUBCOMMANDS-----------
     static_input_group = static_parser.add_mutually_exclusive_group(required=True)
     static_input_group.add_argument(
@@ -533,7 +539,15 @@ def main():
             if args.window and args.quick:
                 print(f"Conflict with `--quick` argument.")
         max_window_size = math.ceil(hgi / args.resolution)
-
+        # If only sequence is too small, throw an error.
+        if max_window_size < 10:
+            print(
+                    f"Error: sequence too small for analysis.\n"
+                )
+            print(
+                f"ModDotPlot requires a minimum window size of 10. Sequences less than 10Kbp will not work with ModDotPlot under normal resolution. We recommend rerunning ModDotPlot with --r {math.ceil(hgi / 10)}.\n"
+            )
+            sys.exit(0)
         while min_window_size <= max_window_size:
             window_lengths.append(min_window_size)
             min_window_size = min_window_size * 2
@@ -553,18 +567,20 @@ def main():
 
         # Set sparsity to be the closest power of 2
         sparsities = []
-        if window_lengths[0] < args.modimizer:
-            raise ValueError(
-                "Minimum window size must be greater than or equal to the modimizer sketch size"
-            )
-        sparsities.append(round(window_lengths[0] / args.modimizer))
+        if window_lengths[0] < 1000:
+            sparsities.append(1)
+        else:
+            sparsities.append(round(window_lengths[0] / args.modimizer))
         if sparsities[0] <= args.modimizer:
             sparsities[0] = 2 ** int(math.log2(sparsities[0]))
         else:
             sparsities[0] = 2 ** (int(math.log2(sparsities[0] - 1)) + 1)
         # expectation = round(win/seq_sparsity)
         for i in range(1, len(window_lengths)):
-            sparsities.append(sparsities[-1] * 2)
+            if window_lengths[i] > 1000:
+                sparsities.append(sparsities[-1] * 2)
+            else:
+                sparsities.append(1)
         expectation = round(window_lengths[-1] / sparsities[-1])
         matrices = []
         metadata = []
@@ -632,6 +648,7 @@ def main():
                         "resolution": args.resolution,
                         "kmer_length": args.kmer,
                         "title": f"{seq_list[j]}",
+                        "sparsities": sparsities,
                     }
                 )
         # -----------BUILD IMAGE PYRAMID FOR COMPARATIVE MATRICES-----------
@@ -653,11 +670,11 @@ def main():
                 smaller_seq = k_list[0]
             if args.quick:
                 print(
-                    f"Quickly building pairwise matrices for {seq_list[i]} and {seq_list[j]}, using a window size of {window_lengths[0]}.... \n"
+                    f"Quickly building pairwise matrices for {seq_list[0]} and {seq_list[1]}, using a window size of {window_lengths[0]}.... \n"
                 )
             else:
                 print(
-                    f"Building pairwise matrices for {seq_list[i]} and {seq_list[j]}, using a minimum window size of {window_lengths[0]}.... \n"
+                    f"Building pairwise matrices for {seq_list[0]} and {seq_list[1]}, using a minimum window size of {window_lengths[0]}.... \n"
                 )
             image_pyramid = []
             for i in range(len(window_lengths)):
@@ -725,6 +742,7 @@ def main():
                     "resolution": args.resolution,
                     "kmer_length": args.kmer,
                     "title": f"{larger_name}-{smaller_name}",
+                    "sparsities": sparsities,
                 }
             )
 
@@ -752,7 +770,11 @@ def main():
             # Save the dictionary as a pickle file
             with open(pickle_path, "wb") as f:
                 pickle.dump(metadata, f)
-            # Finally gzip the folder
+            # Check if no plot arg is used
+            if args.no_plot:
+                print(f"Saved matrices to {folder_path}. Thank you for using ModDotPlot!\n")
+                sys.exit(0)
+
 
         # Before running dash, change into intervals...
         axes = []
