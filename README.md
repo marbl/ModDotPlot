@@ -7,7 +7,6 @@
   - [Interactive Mode](#interactive-mode)
   - [Static Mode](#static-mode)
   - [Standard arguments](#standard-arguments)
-- [Save matrix to file, but don't render plots. In interactive mode, this must be utlized with the `--save` flag.](#save-matrix-to-file-but-dont-render-plots-in-interactive-mode-this-must-be-utlized-with-the---save-flag)
   - [Interactive Mode Commands](#interactive-mode-commands)
   - [Static Mode Commands](#static-mode-commands)
   - [Sample run - Interactive Mode](#sample-run---interactive-mode)
