@@ -510,7 +510,6 @@ def findValueInRange(integer: int, range_dict: dict) -> int:
         if key[0] >= integer >= key[1]:
             return value
     return highest_value
-    
 
 
 def setZoomLevels(axis_length, sparsity_layers):

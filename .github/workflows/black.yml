@@ -1,0 +1,19 @@
+name: black
+
+# Controls when the action will run.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+  workflow_dispatch:
+
+jobs:
+  black:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: psf/black@stable
+        with:
+          options: ". --check --verbose"

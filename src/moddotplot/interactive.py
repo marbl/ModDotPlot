@@ -2,8 +2,6 @@ import plotly.express as px
 from moddotplot.estimate_identity import (
     getInteractiveColor,
     getMatchingColors,
-    verifyModimizers,
-    setZoomLevels,
     makeDifferencesEqual,
     generateDictionaryFromList,
     findValueInRange,
@@ -76,6 +74,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
     titles = []
     for i in range(len(metadata)):
         titles.append(metadata[i]["title"])
+
     # Get zooming thresholds, adjust sparsity respectively.
     def halving_sequence(size, start):
         sequence = [start]
@@ -83,23 +82,31 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
             start /= 2
             sequence.append(start)
         return sequence
-    #print(current_metadata)
-    mod_thresholds_list = halving_sequence(len(current_metadata["sparsities"]), current_metadata["x_size"])
-    #print(mod_thresholds_list)
-    
-    #print(current_metadata["min_window_size"]* current_metadata["resolution"])
-    #print(current_metadata["max_window_size"])
-    numo = round(math.log2(current_metadata['max_window_size']/current_metadata['min_window_size']) + 1)
-    #print(numo)
+
+    # print(current_metadata)
+    mod_thresholds_list = halving_sequence(
+        len(current_metadata["sparsities"]), current_metadata["x_size"]
+    )
+    # print(mod_thresholds_list)
+
+    # print(current_metadata["min_window_size"]* current_metadata["resolution"])
+    # print(current_metadata["max_window_size"])
+    numo = round(
+        math.log2(
+            current_metadata["max_window_size"] / current_metadata["min_window_size"]
+        )
+        + 1
+    )
+    # print(numo)
     important = generateDictionaryFromList(mod_thresholds_list)
-    #print(f"this is imprtant: {important}")
+    # print(f"this is imprtant: {important}")
 
     main_level = image_pyramid[0]
     main_x_axis = axes[0][0]
     main_y_axis = axes[0][1]
     main_x_axis_np = np.array(main_x_axis)
 
-    #TODO: modify value here
+    # TODO: modify value here
     main_x_axis_np += 3000
 
     # Modify text so that hover shows interval format
@@ -261,9 +268,9 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                             {"label": f"{title}", "value": f"{title}"}
                                             for title in titles  # Iterate over each title
                                         ],
-                                        value=titles[0]
-                                        if titles
-                                        else None,  # Set default value based on the length of matrices
+                                        value=(
+                                            titles[0] if titles else None
+                                        ),  # Set default value based on the length of matrices
                                         clearable=False,  # Prevent dropdown from clearing values,
                                         style={"width": "300px"},
                                     ),

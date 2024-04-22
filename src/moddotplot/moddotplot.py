@@ -502,7 +502,7 @@ def main():
         isValidFasta(i)
         headers = getInputHeaders(i)
         if len(headers) > 1:
-            print(f"File {i} contains multiple fasta entries: \n")
+            print(f"File {i} contains multiple fasta entries. \n")
             counter = 1
             for j in headers:
                 counter += 1
@@ -541,9 +541,7 @@ def main():
         max_window_size = math.ceil(hgi / args.resolution)
         # If only sequence is too small, throw an error.
         if max_window_size < 10:
-            print(
-                    f"Error: sequence too small for analysis.\n"
-                )
+            print(f"Error: sequence too small for analysis.\n")
             print(
                 f"ModDotPlot requires a minimum window size of 10. Sequences less than 10Kbp will not work with ModDotPlot under normal resolution. We recommend rerunning ModDotPlot with --r {math.ceil(hgi / 10)}.\n"
             )
@@ -772,9 +770,10 @@ def main():
                 pickle.dump(metadata, f)
             # Check if no plot arg is used
             if args.no_plot:
-                print(f"Saved matrices to {folder_path}. Thank you for using ModDotPlot!\n")
+                print(
+                    f"Saved matrices to {folder_path}. Thank you for using ModDotPlot!\n"
+                )
                 sys.exit(0)
-
 
         # Before running dash, change into intervals...
         axes = []
@@ -799,8 +798,8 @@ def main():
     # -----------SETUP STATIC MODE-----------
     elif args.command == "static":
         # -----------SET SPARSITY VALUE-----------
+        # TODO: this is not sorting correctly
         sequences = list(zip(seq_list, k_list))
-        sequences.sort(key=lambda x: len(x[1]), reverse=True)
 
         # Create output directory, if doesn't exist:
         if (args.output_dir) and not os.path.exists(args.output_dir):
@@ -816,10 +815,12 @@ def main():
                     res = math.ceil(seq_length / args.window)
                 else:
                     win = math.ceil(seq_length / args.resolution)
+
                 if win < args.modimizer:
-                    raise ValueError(
+                    args.modimizer = win
+                    """raise ValueError(
                         "Window size must be greater than or equal to the modimizer sketch size"
-                    )
+                    )"""
 
                 seq_sparsity = round(win / args.modimizer)
                 if seq_sparsity <= args.modimizer:
@@ -845,7 +846,7 @@ def main():
                 # print(f"\tSparsity value s: {seq_sparsity}\n")
                 print(f"\tSequence length n: {len(k_list[i]) + args.kmer - 1}\n")
                 print(f"\tWindow size w: {win}\n")
-                print(f"\tModimizer sketch value: {expectation}\n")
+                print(f"\tModimizer sketch size: {expectation}\n")
                 print(f"\tPlot Resolution r: {res}\n")
                 self_mat = createSelfMatrix(
                     seq_length,
@@ -905,9 +906,7 @@ def main():
             else:
                 win = math.ceil(len(sequences[0][1]) / args.resolution)
             if win < args.modimizer:
-                raise ValueError(
-                    "Window size must be greater than or equal to the modimizer sketch size"
-                )
+                args.modimizer = win
 
             seq_sparsity = round(win / args.modimizer)
             if seq_sparsity <= args.modimizer:
@@ -935,7 +934,7 @@ def main():
                         f"\tSequence length {sequences[j][0]}: {smaller_length + args.kmer - 1}\n"
                     )
                     print(f"\tWindow size w: {win}\n")
-                    print(f"\tModimizer sketch value: {expectation}\n")
+                    print(f"\tModimizer sketch size: {expectation}\n")
                     print(f"\tPlot Resolution r: {res}\n")
 
                     pair_mat = createPairwiseMatrix(
