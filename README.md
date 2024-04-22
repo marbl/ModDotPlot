@@ -53,7 +53,7 @@ Finally, confirm that the installation was installed correctly by running `moddo
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.1
+v0.8.2
 
 usage: moddotplot [-h] {interactive,static} ...
 
@@ -234,7 +234,7 @@ $ moddotplot interactive -f sequences/Chr1_cen.fa
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.1
+v0.8.2
 
 Running ModDotPlot in interactive mode
 
@@ -322,7 +322,7 @@ $ moddotplot static -c config/config.json
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.1
+v0.8.2
 
 Running ModDotPlot in static mode
 
