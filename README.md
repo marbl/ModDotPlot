@@ -387,4 +387,6 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 
 ## Cite
 
-Publication in progress! (almost there :D)
+Alexander P. Sweeten, Michael C. Schatz, Adam M. Phillippy, ModDotPlot - Rapid and interactive visualization of complex repeats
+bioRxiv 2024.04.15.589623; doi: https://doi.org/10.1101/2024.04.15.589623
+

@@ -268,9 +268,9 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                             {"label": f"{title}", "value": f"{title}"}
                                             for title in titles  # Iterate over each title
                                         ],
-                                        value=titles[0]
-                                        if titles
-                                        else None,  # Set default value based on the length of matrices
+                                        value=(
+                                            titles[0] if titles else None
+                                        ),  # Set default value based on the length of matrices
                                         clearable=False,  # Prevent dropdown from clearing values,
                                         style={"width": "300px"},
                                     ),
