@@ -2,8 +2,6 @@ import plotly.express as px
 from moddotplot.estimate_identity import (
     getInteractiveColor,
     getMatchingColors,
-    verifyModimizers,
-    setZoomLevels,
     makeDifferencesEqual,
     generateDictionaryFromList,
     findValueInRange,
