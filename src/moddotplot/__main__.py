@@ -6,6 +6,6 @@ from moddotplot.parse_fasta import *
 import setproctitle
 
 # Set the process title to a custom name
-setproctitle.setproctitle('ModDotPlot')
+setproctitle.setproctitle("ModDotPlot")
 
 sys.exit(main())

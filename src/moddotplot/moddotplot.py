@@ -541,9 +541,7 @@ def main():
         max_window_size = math.ceil(hgi / args.resolution)
         # If only sequence is too small, throw an error.
         if max_window_size < 10:
-            print(
-                    f"Error: sequence too small for analysis.\n"
-                )
+            print(f"Error: sequence too small for analysis.\n")
             print(
                 f"ModDotPlot requires a minimum window size of 10. Sequences less than 10Kbp will not work with ModDotPlot under normal resolution. We recommend rerunning ModDotPlot with --r {math.ceil(hgi / 10)}.\n"
             )
@@ -772,9 +770,10 @@ def main():
                 pickle.dump(metadata, f)
             # Check if no plot arg is used
             if args.no_plot:
-                print(f"Saved matrices to {folder_path}. Thank you for using ModDotPlot!\n")
+                print(
+                    f"Saved matrices to {folder_path}. Thank you for using ModDotPlot!\n"
+                )
                 sys.exit(0)
-
 
         # Before running dash, change into intervals...
         axes = []
@@ -799,7 +798,7 @@ def main():
     # -----------SETUP STATIC MODE-----------
     elif args.command == "static":
         # -----------SET SPARSITY VALUE-----------
-        #TODO: this is not sorting correctly
+        # TODO: this is not sorting correctly
         sequences = list(zip(seq_list, k_list))
 
         # Create output directory, if doesn't exist:
@@ -819,9 +818,9 @@ def main():
 
                 if win < args.modimizer:
                     args.modimizer = win
-                    '''raise ValueError(
+                    """raise ValueError(
                         "Window size must be greater than or equal to the modimizer sketch size"
-                    )'''
+                    )"""
 
                 seq_sparsity = round(win / args.modimizer)
                 if seq_sparsity <= args.modimizer:

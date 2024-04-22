@@ -208,7 +208,7 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors):
             axis_ticks_major=element_line(),
             title=element_text(
                 family=["DejaVu Sans"],  # Change title font family
-            )
+            ),
         )
         + scale_x_continuous(labels=make_scale, limits=[0, max_val])
         + scale_y_continuous(labels=make_scale, limits=[0, max_val])
@@ -218,9 +218,10 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors):
     )
 
     # Adjust x-axis label size
-    #p += theme(axis_title_x=element_text())
+    # p += theme(axis_title_x=element_text())
 
     return p
+
 
 def make_tri(sdf, title_name, palette, palette_orientation, colors):
     hexcodes = []
@@ -274,7 +275,7 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors):
             axis_ticks_major=element_line(),
             title=element_text(
                 family=["DejaVu Sans"],  # Change title font family
-            )
+            ),
         )
         + scale_x_continuous(labels=make_scale, limits=[0, max_val])
         + scale_y_continuous(labels=make_scale, limits=[0, max_val])
@@ -287,6 +288,7 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors):
     p += theme(axis_title_x=element_text())
 
     return p
+
 
 def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints):
     hexcodes = []
@@ -329,9 +331,7 @@ def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoin
         + scale_color_cmap(cmap_name="plasma")
         + scale_fill_manual(new_hexcodes)
         + theme_light()
-        + theme( 
-            text=element_text(family=["DejaVu Sans"])
-        )
+        + theme(text=element_text(family=["DejaVu Sans"]))
         + theme(legend_position="none")
         + coord_cartesian(xlim=(bot, 100))
         + xlab("% Identity Estimate")
@@ -378,7 +378,9 @@ def create_plots(
 
     if is_pairwise:
         print(width)
-        heatmap = make_dot(sdf, plot_filename, palette, palette_orientation, custom_colors)
+        heatmap = make_dot(
+            sdf, plot_filename, palette, palette_orientation, custom_colors
+        )
         print(f"Creating plots and saving to {plot_filename}...\n")
         ggsave(
             heatmap,
@@ -425,7 +427,9 @@ def create_plots(
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
         print(width)
-        tri_plot = make_tri(sdf, plot_filename, palette, palette_orientation, custom_colors)
+        tri_plot = make_tri(
+            sdf, plot_filename, palette, palette_orientation, custom_colors
+        )
         full_plot = make_dot(
             check_st_en_equality(sdf),
             plot_filename,

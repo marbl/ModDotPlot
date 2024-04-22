@@ -10,26 +10,36 @@ import numpy as np
 
 tab_b = bytes.maketrans(b"ACTG", b"TGAC")
 
+
 def generateKmersFromFasta(seq: Sequence[str], k: int, quiet: bool) -> Iterable[int]:
     n = len(seq)
     if not quiet:
         progress_thresholds = round(n / 77)
-        printProgressBar(0, n - k + 1, prefix='Progress:', suffix='Complete', length=40)
+        printProgressBar(0, n - k + 1, prefix="Progress:", suffix="Complete", length=40)
 
     for i in range(n - k + 1):
         if not quiet:
             if i % progress_thresholds == 0:
-                printProgressBar(i, n - k + 1, prefix='Progress:', suffix='Complete', length=40)
+                printProgressBar(
+                    i, n - k + 1, prefix="Progress:", suffix="Complete", length=40
+                )
             if i == n - k:
-                printProgressBar(n - k + 1, n - k + 1, prefix='Progress:', suffix='Completed', length=40)
+                printProgressBar(
+                    n - k + 1,
+                    n - k + 1,
+                    prefix="Progress:",
+                    suffix="Completed",
+                    length=40,
+                )
 
-        kmer = seq[i:i + k]
+        kmer = seq[i : i + k]
         fh = mmh3.hash(kmer)
 
         # Calculate reverse complement hash directly without the need for translation
         rc = mmh3.hash(kmer[::-1].translate(tab_b))
-        
+
         yield fh if fh < rc else rc
+
 
 def isValidFasta(file_path):
     try:
@@ -52,6 +62,7 @@ def isValidFasta(file_path):
         print(f"An error occurred: {str(e)}")
         sys.exit(6)
 
+
 def extractFiles(folder_path):
     # Check to see at least one compressed numpy matrix, and one metadata pickle are included
     metadata = []
@@ -61,15 +72,15 @@ def extractFiles(folder_path):
         file_path = os.path.join(folder_path, filename)  # Full path to the file
         if filename.endswith(".pkl"):
             with open(file_path, "rb") as f:
-                metadata = pickle.load(f) # Append loaded data to the metadata list
+                metadata = pickle.load(f)  # Append loaded data to the metadata list
 
     for filename in os.listdir(folder_path):
         file_path = os.path.join(folder_path, filename)
         if filename.endswith(".npz"):
-            pattern = rf'_(\d+)\.npz'  # Using f-string to include the value of i in the regex pattern
+            pattern = rf"_(\d+)\.npz"  # Using f-string to include the value of i in the regex pattern
             tmp2 = re.split(pattern, filename, maxsplit=1)
-            ff = np.load(file_path,allow_pickle=True)
-            tmp.append((tmp2[0],tmp2[1], ff))
+            ff = np.load(file_path, allow_pickle=True)
+            tmp.append((tmp2[0], tmp2[1], ff))
     sorted_list = sorted(tmp, key=lambda x: (x[0], x[1]))
 
     unique_lists = {}
@@ -84,13 +95,14 @@ def extractFiles(folder_path):
 
     # Convert dictionary values to lists
     result_lists = list(unique_lists.values())
-    sorted_result_lists = [lst for title in metadata for lst in result_lists if lst[0][0] == title['title']]
+    sorted_result_lists = [
+        lst for title in metadata for lst in result_lists if lst[0][0] == title["title"]
+    ]
     for unique_list in sorted_result_lists:
         matrices.append([])
         for val in unique_list:
             matrices[-1].append(val[-1]["data"])
     return matrices, metadata
-
 
 
 def printProgressBar(
