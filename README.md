@@ -123,8 +123,7 @@ Each partition takes into account a fraction of its neighboring partitions k-mer
 
 `-m / --modimizer <int>`
 
-Modimizer sketch size. Must be higher than window size `w`. A lower sketch size means less k-mers to compare (and faster runtime), at the expense of lower accuracy. Recommended to be kept > 1000.
-
+Modimizer sketch size. Must be lower than window size `w`. A lower sketch size means less k-mers to compare (and faster runtime), at the expense of lower accuracy. Recommended to be kept > 1000.
 
 `-r / --resolution <int>`
 
@@ -139,9 +138,11 @@ If set when 2 or more sequences are input into ModDotPlot, this will show an a v
 If set when 2 or more sequences are input into ModDotPlot, this will show an a vs. b style plot, without showing self-identity plots.
 
 `--ambiguous <bool>`
+
 By default, k-mers that are homopolymers of ambiguous IUPAC codes (eg. NNNNNNNNNNN’s) are excluded from identity estimation. This results in gaps along the central diagonal for these regions.  If desired, these can be kept by setting the `—-ambiguous` flag in both interactive and static mode. 
 
 `--no-plot <bool>`
+
 Save matrix to file, but skip rendering of plots. In interactive mode, this must be used alongside the `--save` flag
 
 --- 
