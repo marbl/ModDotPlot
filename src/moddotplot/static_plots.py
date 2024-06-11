@@ -48,8 +48,10 @@ def check_st_en_equality(df):
 def make_k(vals):
     return [number / 1000 for number in vals]
 
+
 def make_m(vals):
     return [number / 1e6 for number in vals]
+
 
 def make_g(vals):
     return [number / 1e9 for number in vals]
@@ -381,7 +383,7 @@ def create_plots(
     custom_breakpoints,
     from_file,
     is_pairwise,
-    axes_labels
+    axes_labels,
 ):
     # TODO: Implement xlim
     df = read_df(
@@ -405,7 +407,13 @@ def create_plots(
     print(xlim)
     if is_pairwise:
         heatmap = make_dot(
-            sdf, plot_filename, palette, palette_orientation, custom_colors, axes_labels, xlim
+            sdf,
+            plot_filename,
+            palette,
+            palette_orientation,
+            custom_colors,
+            axes_labels,
+            xlim,
         )
         print(f"Creating plots and saving to {plot_filename}...\n")
         ggsave(
@@ -453,7 +461,13 @@ def create_plots(
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
         tri_plot = make_tri(
-            sdf, plot_filename, palette, palette_orientation, custom_colors, axes_labels, xlim
+            sdf,
+            plot_filename,
+            palette,
+            palette_orientation,
+            custom_colors,
+            axes_labels,
+            xlim,
         )
         full_plot = make_dot(
             check_st_en_equality(sdf),
@@ -462,7 +476,7 @@ def create_plots(
             palette_orientation,
             custom_colors,
             axes_labels,
-            xlim
+            xlim,
         )
 
         print(f"Creating plots and saving to {plot_filename}...\n")

@@ -477,7 +477,7 @@ def main():
                             custom_breakpoints=args.breakpoints,
                             from_file=df,
                             is_pairwise=False,
-                            axes_labels=args.axes_ticks
+                            axes_labels=args.axes_ticks,
                         )
                     # Case 2: Pairwise bed file
                     if len(pairwise_id_scores) > 1:
@@ -497,7 +497,7 @@ def main():
                             custom_breakpoints=args.breakpoints,
                             from_file=df,
                             is_pairwise=True,
-                            axes_labels=args.axes_ticks
+                            axes_labels=args.axes_ticks,
                         )
                 # Exit once all bed files have been iterated through
                 sys.exit(0)
@@ -844,11 +844,11 @@ def main():
                 expectation = round(win / seq_sparsity)
                 xaxis = 0
                 width = 0
-                '''if isinstance(args.xaxis, int) or args.xaxis == None:
+                """if isinstance(args.xaxis, int) or args.xaxis == None:
                     xaxis = args.xaxis
                 else:
                     assert len(args.xaxis) == len(sequences)
-                    xaxis = args.xaxis[i]'''
+                    xaxis = args.xaxis[i]"""
                 if isinstance(args.width, int):
                     width = args.width
                 else:
@@ -907,7 +907,7 @@ def main():
                         custom_breakpoints=args.breakpoints,
                         from_file=None,
                         is_pairwise=False,
-                        axes_labels=args.axes_ticks
+                        axes_labels=args.axes_ticks,
                     )
 
         # -----------COMPUTE COMAPRATIVE PLOTS-----------
@@ -1011,7 +1011,7 @@ def main():
                                 custom_breakpoints=args.breakpoints,
                                 from_file=None,
                                 is_pairwise=True,
-                                axes_labels=args.axes_ticks
+                                axes_labels=args.axes_ticks,
                             )
 
 
