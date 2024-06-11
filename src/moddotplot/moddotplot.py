@@ -818,9 +818,12 @@ def main():
 
                 if win < args.modimizer:
                     args.modimizer = win
-                    """raise ValueError(
-                        "Window size must be greater than or equal to the modimizer sketch size"
-                    )"""
+                if win < 10:
+                    print(f"Error: sequence too small for analysis.\n")
+                    print(
+                        f"ModDotPlot requires a minimum window size of 10. Sequences less than 10Kbp will not work with ModDotPlot under normal resolution. We recommend rerunning ModDotPlot with --r {math.ceil(seq_length / 10)}.\n"
+                    )
+                    sys.exit(0)
 
                 seq_sparsity = round(win / args.modimizer)
                 if seq_sparsity <= args.modimizer:
