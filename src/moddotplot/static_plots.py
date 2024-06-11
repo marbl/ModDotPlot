@@ -46,12 +46,23 @@ def check_st_en_equality(df):
 
 
 def make_k(vals):
-    return format(vals / 1e3, ",")
+    return [number / 1000 for number in vals]
+
+def make_m(vals):
+    return [number / 1e6 for number in vals]
+
+def make_g(vals):
+    return [number / 1e9 for number in vals]
 
 
-def make_scale(vals: list) -> str:
-    scaled = [number / 1000000 for number in vals]
-    return scaled
+def make_scale(vals: list) -> list:
+    scaled = [number for number in vals]
+    if scaled[-1] < 100000:
+        return make_k(scaled)
+    elif scaled[-1] > 100000000:
+        return make_g(scaled)
+    else:
+        return make_m(scaled)
 
 
 def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
@@ -155,7 +166,15 @@ def read_df(
     return df
 
 
-def make_dot(sdf, title_name, palette, palette_orientation, colors):
+def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
+    if not breaks:
+        breaks = True
+    else:
+        breaks = [float(number) for number in breaks]
+    if not xlim:
+        xlim = 0
+    else:
+        breaks = [float(number) for number in breaks]
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -182,9 +201,9 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors):
         new_hexcodes = hexcodes
     if colors:
         new_hexcodes = colors
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
+    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
     window = max(sdf["q_en"] - sdf["q_st"])
-    print(window)
+    print(max_val)
     p = (
         ggplot(sdf)
         + geom_tile(
@@ -203,15 +222,15 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors):
             panel_background=element_blank(),
             axis_line=element_line(color="black"),  # Adjust axis line size
             axis_text=element_text(
-                family=["DejaVu Sans"]
+                family=["Dejavu Sans"]
             ),  # Change axis text font and size
             axis_ticks_major=element_line(),
             title=element_text(
-                family=["DejaVu Sans"],  # Change title font family
+                family=["Dejavu Sans"],  # Change title font family
             ),
         )
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val])
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val])
+        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
         + labs(x="Genomic Position (Mbp)", y="", title=title_name)
@@ -223,7 +242,13 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors):
     return p
 
 
-def make_tri(sdf, title_name, palette, palette_orientation, colors):
+def make_tri(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
+    if not breaks:
+        breaks = True
+    else:
+        breaks = [float(number) for number in breaks]
+    if not xlim:
+        xlim = 0
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -250,7 +275,7 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors):
         new_hexcodes = hexcodes
     if colors:
         new_hexcodes = colors
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
+    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
     window = max(sdf["q_en"] - sdf["q_st"])
     p = (
         ggplot(sdf)
@@ -277,8 +302,8 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors):
                 family=["DejaVu Sans"],  # Change title font family
             ),
         )
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val])
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val])
+        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
         + labs(x="Genomic Position (Mbp)", y="", title=title_name)
@@ -356,6 +381,7 @@ def create_plots(
     custom_breakpoints,
     from_file,
     is_pairwise,
+    axes_labels
 ):
     # TODO: Implement xlim
     df = read_df(
@@ -376,10 +402,10 @@ def create_plots(
         sdf, palette, palette_orientation, custom_colors, custom_breakpoints
     )
 
+    print(xlim)
     if is_pairwise:
-        print(width)
         heatmap = make_dot(
-            sdf, plot_filename, palette, palette_orientation, custom_colors
+            sdf, plot_filename, palette, palette_orientation, custom_colors, axes_labels, xlim
         )
         print(f"Creating plots and saving to {plot_filename}...\n")
         ggsave(
@@ -426,9 +452,8 @@ def create_plots(
             )
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
-        print(width)
         tri_plot = make_tri(
-            sdf, plot_filename, palette, palette_orientation, custom_colors
+            sdf, plot_filename, palette, palette_orientation, custom_colors, axes_labels, xlim
         )
         full_plot = make_dot(
             check_st_en_equality(sdf),
@@ -436,6 +461,8 @@ def create_plots(
             palette,
             palette_orientation,
             custom_colors,
+            axes_labels,
+            xlim
         )
 
         print(f"Creating plots and saving to {plot_filename}...\n")
