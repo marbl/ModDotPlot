@@ -28,7 +28,7 @@ If you use ModDotPlot for your research, please cite our software!
 
 ## About
 
-ModDotPlot is a dot plot visualization tool meant for large sequences, and outputs a identity heatmap to [StainedGlass](https://mrvollger.github.io/StainedGlass/). ModDotPlot utilizes modimizers to compute the [Containment Index](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1841-x) between pairwise combinations of genomic intervals, and rapidly approximates their Average Nucleotide Identity. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
+ModDotPlot is a dot plot visualization tool designed for large sequences and whole genomes. ModDotPlot outputs an identity heatmap similar to [StainedGlass](https://mrvollger.github.io/StainedGlass/) by rapidly approximating the Average Nucleotide Identity between pairwise combinations of genomic intervals. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
 
 ![](images/demo.gif)
 
