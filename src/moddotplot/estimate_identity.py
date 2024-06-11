@@ -128,6 +128,7 @@ def partitionOverlaps(
         try:
             kmer_list.append(lst[delta_start_index:delta_end_index])
         except Exception as e:
+            print("test")
             print(e)
             kmer_list.append(lst[delta_start_index:seq_len])
         counter += win
@@ -369,8 +370,7 @@ def pairwiseContainmentMatrix(
     Returns:
         np.ndarray: An identity matrix containing containment values.
     """
-    # X is the larger, y is the smaller
-    n = len(mod_set_x)
+    n = max(len(mod_set_y), len(mod_set_x))
     progress_thresholds = round(n / 77)
 
     if not supress_progress:
@@ -382,20 +382,24 @@ def pairwiseContainmentMatrix(
             if w % progress_thresholds == 0:
                 printProgressBar(w, n, prefix="Progress:", suffix="Complete", length=40)
         for q in range(n):
-            containment_matrix[w, q] = (
-                binomial_distance(
-                    containment_neighbors(
-                        mod_set_x[q],
-                        mod_set_y[w],
-                        mod_set_x_neighbors[q],
-                        mod_set_y_neighbors[w],
-                        identity,
+            try:
+                containment_matrix[w, q] = (
+                    binomial_distance(
+                        containment_neighbors(
+                            mod_set_x[q],
+                            mod_set_y[w],
+                            mod_set_x_neighbors[q],
+                            mod_set_y_neighbors[w],
+                            identity,
+                            k,
+                        ),
                         k,
-                    ),
-                    k,
+                    )
+                    * 100.0
                 )
-                * 100.0
-            )
+            # Bandaid solution for too sequences that are too small.
+            except IndexError as e:
+                pass
 
     if not supress_progress:
         printProgressBar(

@@ -276,14 +276,6 @@ def get_parser():
         "--width", default=9, type=float, nargs="+", help="Plot width."
     )
 
-    static_parser.add_argument(
-        "--xaxis",
-        default=None,
-        type=float,
-        nargs="+",
-        help="Change x axis for self identity plots. Default is length of the sequence, in mbp.",
-    )
-
     static_parser.add_argument("--dpi", default=600, type=int, help="Plot dpi.")
 
     # TODO: Create list of accepted colors.
@@ -314,6 +306,22 @@ def get_parser():
         default=None,
         nargs="+",
         help="Introduce custom color thresholds. Must be between identity threshold and 100.",
+    )
+
+    static_parser.add_argument(
+        "-a",
+        "--axes-limits",
+        default=None,
+        type=float,
+        help="Change x and y axis limits for self identity plots. Default is length of the sequence. Can't be shorter than length of sequence.",
+    )
+
+    static_parser.add_argument(
+        "-t",
+        "--axes-ticks",
+        default=None,
+        nargs="+",
+        help="Tick labels to include in x and y axis for custom plots.",
     )
 
     static_parser.add_argument(
@@ -402,13 +410,14 @@ def main():
                 args.no_plot = config.get("no_plot", args.no_plot)
                 args.no_hist = config.get("no_hist", args.no_hist)
                 args.width = config.get("width", args.width)
-                args.xaxis = config.get("xaxis", args.xaxis)
+                args.axes_limits = config.get("axes_limits", args.axes_limits)
                 args.dpi = config.get("dpi", args.dpi)
                 args.palette = config.get("palette", args.palette)
                 args.palette_orientation = config.get(
                     "palette_orientation", args.palette_orientation
                 )
                 args.colors = config.get("color", args.colors)
+                args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
                 args.breakpoints = config.get("breakpoints", args.breakpoints)
                 args.bin_freq = config.get("bin_freq", args.bin_freq)
 
@@ -463,11 +472,12 @@ def main():
                             width=args.width,
                             dpi=args.dpi,
                             is_freq=args.bin_freq,
-                            xlim=None,  # TODO: Get xlim working
+                            xlim=args.axes_limits,
                             custom_colors=args.colors,
                             custom_breakpoints=args.breakpoints,
                             from_file=df,
                             is_pairwise=False,
+                            axes_labels=args.axes_ticks,
                         )
                     # Case 2: Pairwise bed file
                     if len(pairwise_id_scores) > 1:
@@ -482,11 +492,12 @@ def main():
                             width=args.width,
                             dpi=args.dpi,
                             is_freq=args.bin_freq,
-                            xlim=None,  # TODO: Get xlim working
+                            xlim=args.axes_limits,  # TODO: Get xlim working
                             custom_colors=args.colors,
                             custom_breakpoints=args.breakpoints,
                             from_file=df,
                             is_pairwise=True,
+                            axes_labels=args.axes_ticks,
                         )
                 # Exit once all bed files have been iterated through
                 sys.exit(0)
@@ -818,9 +829,12 @@ def main():
 
                 if win < args.modimizer:
                     args.modimizer = win
-                    """raise ValueError(
-                        "Window size must be greater than or equal to the modimizer sketch size"
-                    )"""
+                if win < 10:
+                    print(f"Error: sequence too small for analysis.\n")
+                    print(
+                        f"ModDotPlot requires a minimum window size of 10. Sequences less than 10Kbp will not work with ModDotPlot under normal resolution. We recommend rerunning ModDotPlot with --r {math.ceil(seq_length / 10)}.\n"
+                    )
+                    sys.exit(0)
 
                 seq_sparsity = round(win / args.modimizer)
                 if seq_sparsity <= args.modimizer:
@@ -830,11 +844,11 @@ def main():
                 expectation = round(win / seq_sparsity)
                 xaxis = 0
                 width = 0
-                if isinstance(args.xaxis, int) or args.xaxis == None:
+                """if isinstance(args.xaxis, int) or args.xaxis == None:
                     xaxis = args.xaxis
                 else:
                     assert len(args.xaxis) == len(sequences)
-                    xaxis = args.xaxis[i]
+                    xaxis = args.xaxis[i]"""
                 if isinstance(args.width, int):
                     width = args.width
                 else:
@@ -888,11 +902,12 @@ def main():
                         width=width,
                         dpi=args.dpi,
                         is_freq=args.bin_freq,
-                        xlim=xaxis,
+                        xlim=args.axes_limits,
                         custom_colors=args.colors,
                         custom_breakpoints=args.breakpoints,
                         from_file=None,
                         is_pairwise=False,
+                        axes_labels=args.axes_ticks,
                     )
 
         # -----------COMPUTE COMAPRATIVE PLOTS-----------
@@ -991,11 +1006,12 @@ def main():
                                 width=None,
                                 dpi=args.dpi,
                                 is_freq=args.bin_freq,
-                                xlim=None,
+                                xlim=args.axes_limits,
                                 custom_colors=args.colors,
                                 custom_breakpoints=args.breakpoints,
                                 from_file=None,
                                 is_pairwise=True,
+                                axes_labels=args.axes_ticks,
                             )
 
 

@@ -1,5 +1,6 @@
 ![](images/logo.png)
 
+- [Cite](#cite)
 - [About](#about)
 - [Installation](#installation)
 - [Usage](#usage)
@@ -14,11 +15,20 @@
   - [Sample run - comparing two sequences](#sample-run---comparing-two-sequences)
 - [Questions](#questions)
 - [Known Issues](#known-issues)
-- [Cite](#cite)
+
+
+## Cite
+
+Alexander P. Sweeten, Michael C. Schatz, Adam M. Phillippy, ModDotPlot - Rapid and interactive visualization of complex repeats
+bioRxiv 2024.04.15.589623; doi: https://doi.org/10.1101/2024.04.15.589623
+
+If you use ModDotPlot for your research, please cite our software!
+
+---
 
 ## About
 
-ModDotPlot is a novel dot plot visualization tool, similar to [StainedGlass](https://mrvollger.github.io/StainedGlass/). ModDotPlot utilizes modimizers to compute the [Containment Index](https://genomebiology.biomedcentral.com/articles/10.1186/s13059-019-1841-x) between pairwise combinations of genomic intervals, and rapidly approximates their Average Nucleotide Identity. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
+ModDotPlot is a dot plot visualization tool designed for large sequences and whole genomes. ModDotPlot outputs an identity heatmap similar to [StainedGlass](https://mrvollger.github.io/StainedGlass/) by rapidly approximating the Average Nucleotide Identity between pairwise combinations of genomic intervals. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
 
 ![](images/demo.gif)
 
@@ -53,8 +63,6 @@ Finally, confirm that the installation was installed correctly by running `moddo
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.2
-
 usage: moddotplot [-h] {interactive,static} ...
 
 ModDotPlot: Visualization of Complex Repeat Structures
@@ -79,7 +87,7 @@ ModDotPlot must be run either in `interactive` mode, or `static` mode:
 moddotplot interactive <ARGS>
 ```
 
-This will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot. Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info).
+This will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot (this should happen automatically, but depending on your environment you might need to copy and paste this URL into your web browser). Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info).
 
 ### Static Mode
 
@@ -217,6 +225,14 @@ List of custom colors in hexcode format can be entered sequentially, mapped from
 
 Add custom identity threshold breakpoints. Note that the number of breakpoints must be equal to the number of colors + 1.
 
+`-t / --axes-ticks <list of ints>`
+
+Custom tickmarks for x and y axis. Values outside of the axes-limits will not be shown. 
+
+`-a / --axes-limits <int>`
+
+Change axis limits for x and y axis. Useful for comparing multiple plots, allowing them to stay in scale. 
+
 `--bin-freq <bool>`
 
 By default, histograms are evenly spaced based on the number of colors and the identity threshold. Select this argument to bin based on the frequency of observed identity values.
@@ -234,8 +250,6 @@ $ moddotplot interactive -f sequences/Chr1_cen.fa
  | |\/| |/ _ \ / _` | | |  | |/ _ \| __| |  ___/| |/ _ \| __|
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
-
-v0.8.2
 
 Running ModDotPlot in interactive mode
 
@@ -323,8 +337,6 @@ $ moddotplot static -c config/config.json
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.2
-
 Running ModDotPlot in static mode
 
 Retrieving k-mers from Chr1:14M-18M.... 
@@ -362,7 +374,7 @@ Chr1_cen_plots/Chr1:14M-18M_TRI.png, Chr1_cen_plots/Chr1:14M-18M_TRI.pdf, Chr1_c
 ModDotPlot can produce an a vs. b style dotplot for each pairwise combination of input sequences. Use the `--compare` command line argument to include these plots. When running `--compare` in interactive mode, a dropdown menu will appear, allowing the user to switch between self-identity and pairwise plots. Note that a maximum of two sequences are allowed in interactive mode. If you want to skip the creation of self-identity plots, you can use `--compare-only`:
 
 ```
-moddotplot interactive -f sequences/chr14_segment.fa sequences/chr21_segment.fa --compare-only
+moddotplot interactive -f sequences/chr15_segment.fa sequences/chr21_segment.fa --compare-only
 ```
 
 --- 
@@ -382,12 +394,3 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 - If you encounter an error with the following traceback: `rv = reductor(4) TypeError: cannot pickle 'generator' object`, ths means that you have a newer version of Plotnine that is incompatible with ModDotPlot. Please uninstall plotnine and reinstall version 0.12.4 `pip install plotnine==0.12.4`. 
 
 - In interactive mode, comparing sequences of two sizes will lead to errors in zooming for the larger sequence. I plan to fix this in v0.9.0.
-  
----
-
-
-## Cite
-
-Alexander P. Sweeten, Michael C. Schatz, Adam M. Phillippy, ModDotPlot - Rapid and interactive visualization of complex repeats
-bioRxiv 2024.04.15.589623; doi: https://doi.org/10.1101/2024.04.15.589623
-
