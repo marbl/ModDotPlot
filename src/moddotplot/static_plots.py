@@ -205,7 +205,6 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
         new_hexcodes = colors
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
     window = max(sdf["q_en"] - sdf["q_st"])
-    print(max_val)
     p = (
         ggplot(sdf)
         + geom_tile(
