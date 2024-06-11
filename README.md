@@ -337,8 +337,6 @@ $ moddotplot static -c config/config.json
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
-v0.8.2
-
 Running ModDotPlot in static mode
 
 Retrieving k-mers from Chr1:14M-18M.... 
@@ -396,6 +394,3 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 - If you encounter an error with the following traceback: `rv = reductor(4) TypeError: cannot pickle 'generator' object`, ths means that you have a newer version of Plotnine that is incompatible with ModDotPlot. Please uninstall plotnine and reinstall version 0.12.4 `pip install plotnine==0.12.4`. 
 
 - In interactive mode, comparing sequences of two sizes will lead to errors in zooming for the larger sequence. I plan to fix this in v0.9.0.
-  
----
-
