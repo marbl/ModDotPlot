@@ -203,6 +203,12 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
         new_hexcodes = colors
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
     window = max(sdf["q_en"] - sdf["q_st"])
+    if max_val < 100000:
+        x_label = "Genomic Position (Kbp)"
+    elif max_val < 100000000:
+        x_label = "Genomic Position (Mbp)"
+    else:
+        x_label = "Genomic Position (Gbp)"
     p = (
         ggplot(sdf)
         + geom_tile(
@@ -232,7 +238,7 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
         + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
-        + labs(x="Genomic Position (Mbp)", y="", title=title_name)
+        + labs(x=max_val, y="", title=title_name)
     )
 
     # Adjust x-axis label size
@@ -276,6 +282,12 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
         new_hexcodes = colors
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
     window = max(sdf["q_en"] - sdf["q_st"])
+    if max_val < 100000:
+        x_label = "Genomic Position (Kbp)"
+    elif max_val < 100000000:
+        x_label = "Genomic Position (Mbp)"
+    else:
+        x_label = "Genomic Position (Gbp)"
     p = (
         ggplot(sdf)
         + geom_tile(
@@ -305,7 +317,7 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
         + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
-        + labs(x="Genomic Position (Mbp)", y="", title=title_name)
+        + labs(x=max_val, y="", title=title_name)
     )
 
     # Adjust x-axis label size
