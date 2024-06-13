@@ -528,7 +528,9 @@ def main():
 
     # Throw error if compare only selected with one sequence.
     if len(k_list) < 2 and args.compare_only:
-        print(f"Error: Can't create a comparative plot with only one sequence")
+        print(
+            f"Error: Can't create a comparative plot with only one sequence. Please re-run without --compare-only."
+        )
         sys.exit(2)
 
     # -----------LAUNCH INTERACTIVE MODE-----------
@@ -910,7 +912,7 @@ def main():
                         axes_labels=args.axes_ticks,
                     )
 
-        # -----------COMPUTE COMAPRATIVE PLOTS-----------
+        # -----------COMPUTE COMPARATIVE PLOTS-----------
         # TODO: Optimize computations so that largest sequence doesn't need to be redone all the time
         if (args.compare or args.compare_only) and len(sequences) > 1:
             # Set window size to args.window. Otherwise, set it to n/resolution
@@ -937,16 +939,26 @@ def main():
                     smaller_seq = sequences[j][1]
                     larger_length = len(larger_seq)
                     smaller_length = len(smaller_seq)
+                    larger_seq_name = sequences[i][0]
+                    smaller_seq_name = sequences[j][0]
+                    # Houston we have a problem
+                    if larger_length < smaller_length:
+                        smaller_seq = sequences[i][1]
+                        larger_seq = sequences[j][1]
+                        larger_length = len(larger_seq)
+                        smaller_length = len(smaller_seq)
+                        larger_seq_name = sequences[j][0]
+                        smaller_seq_name = sequences[i][0]
                     print(
-                        f"Computing pairwise identity matrix for {sequences[i][0]} and {sequences[j][0]}... \n"
+                        f"Computing pairwise identity matrix for {larger_seq_name} and {smaller_seq_name}... \n"
                     )
                     # TODO: Logging here
                     # print(f"\tSparsity value s: {seq_sparsity}\n")
                     print(
-                        f"\tSequence length {sequences[i][0]}: {larger_length + args.kmer - 1}\n"
+                        f"\tSequence length {larger_seq_name}: {larger_length + args.kmer - 1}\n"
                     )
                     print(
-                        f"\tSequence length {sequences[j][0]}: {smaller_length + args.kmer - 1}\n"
+                        f"\tSequence length {smaller_seq_name}: {smaller_length + args.kmer - 1}\n"
                     )
                     print(f"\tWindow size w: {win}\n")
                     print(f"\tModimizer sketch size: {expectation}\n")
@@ -955,8 +967,8 @@ def main():
                     pair_mat = createPairwiseMatrix(
                         larger_length,
                         smaller_length,
-                        sequences[i][1],
-                        sequences[j][1],
+                        larger_seq,
+                        smaller_seq,
                         win,
                         seq_sparsity,
                         args.delta,
