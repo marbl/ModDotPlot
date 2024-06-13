@@ -175,8 +175,6 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
         breaks = [float(number) for number in breaks]
     if not xlim:
         xlim = 0
-    else:
-        breaks = [float(number) for number in breaks]
     hexcodes = []
     new_hexcodes = []
     if palette in DIVERGING_PALETTES:
@@ -403,7 +401,6 @@ def create_plots(
         sdf, palette, palette_orientation, custom_colors, custom_breakpoints
     )
 
-    print(xlim)
     if is_pairwise:
         heatmap = make_dot(
             sdf,
