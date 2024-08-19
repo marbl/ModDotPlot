@@ -238,7 +238,7 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
         + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
-        + labs(x=max_val, y="", title=title_name)
+        + labs(x="", y="", title=title_name)
     )
 
     # Adjust x-axis label size
@@ -317,7 +317,7 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
         + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
-        + labs(x=max_val, y="", title=title_name)
+        + labs(x="", y="", title=title_name)
     )
 
     # Adjust x-axis label size
