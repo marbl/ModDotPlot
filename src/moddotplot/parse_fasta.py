@@ -31,8 +31,8 @@ def generateKmersFromFasta(seq: Sequence[str], k: int, quiet: bool) -> Iterable[
                     suffix="Completed",
                     length=40,
                 )
-
-        kmer = seq[i : i + k]
+        # Remove case sensitivity
+        kmer = seq[i : i + k].upper()
         fh = mmh3.hash(kmer)
 
         # Calculate reverse complement hash directly without the need for translation

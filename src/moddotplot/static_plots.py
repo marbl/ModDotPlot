@@ -654,49 +654,22 @@ def create_plots(
             panel_grid_minor=element_blank(),
             plot_title=element_blank(),
         )
-        """ggsave(
-            tri_plot,
-            width=9,
-            height=9,
-            dpi=dpi,
-            format="pdf",
-            filename=f"{plot_filename}_TRI.pdf",
-            verbose=False,
-        )"""
         ggsave(
             triplot_no_axis,
             width=9,
             height=9,
-            dpi=dpi,
+            dpi=600,
             format="png",
             filename=f"{plot_filename}_TRI_NOAXIS.png",
             verbose=False,
         )
         ggsave(
-            triplot_no_axis,
-            width=9,
-            height=9,
-            dpi=dpi,
-            format="pdf",
-            filename=f"{plot_filename}_TRI_NOAXIS.pdf",
-            verbose=False,
-        )
-        ggsave(
             tri_plot_axis_only,
             width=9,
             height=9,
-            dpi=dpi,
+            dpi=600,
             format="png",
             filename=f"{plot_filename}_AXIS.png",
-            verbose=False,
-        )
-        ggsave(
-            tri_plot_axis_only,
-            width=9,
-            height=9,
-            dpi=dpi,
-            format="pdf",
-            filename=f"{plot_filename}_AXIS.pdf",
             verbose=False,
         )
 
