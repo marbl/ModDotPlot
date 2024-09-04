@@ -336,6 +336,12 @@ def get_parser():
         help="Preserve diagonal when handling strings of ambiguous homopolymers (eg. long runs of N's).",
     )
 
+    static_parser.add_argument(
+        "--grid",
+        action="store_true",
+        help="Plot comparative plots in an NxN grid like format.",
+    )
+
     # TODO: Implement static mode logging options
 
     return parser
@@ -931,6 +937,9 @@ def main():
             else:
                 seq_sparsity = 2 ** (int(math.log2(seq_sparsity - 1)) + 1)
             expectation = round(win / seq_sparsity)
+
+            if args.grid:
+                grid_vals = []
 
             for i in range(len(sequences)):
                 larger_seq = sequences[i][1]

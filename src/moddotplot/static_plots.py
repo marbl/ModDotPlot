@@ -27,6 +27,7 @@ import numpy as np
 from PIL import Image
 import patchworklib as pw
 import math
+import os
 
 from moddotplot.const import (
     DIVERGING_PALETTES,
@@ -69,7 +70,8 @@ def make_scale(vals: list) -> list:
     else:
         return make_m(scaled)
 
-def overlap_axis(rotated_plot, filename):
+
+def overlap_axis(rotated_plot, filename, prefix):
     scale_factor = math.sqrt(2) + 0.04
     new_width = int(rotated_plot.width / scale_factor)
     new_height = int(rotated_plot.height / scale_factor)
@@ -95,13 +97,15 @@ def overlap_axis(rotated_plot, filename):
     # Paste the resized rotated plot onto the final image
     final_image.paste(resized_rotated_plot, (x_offset, y_offset), resized_rotated_plot)
     width, height = final_image.size
-    cropped_image = final_image.crop((0, height // 2.3, width, height))
+    cropped_image = final_image.crop((0, height // 2.6, width, height))
 
     # Save or show the final image
-    cropped_image.save(f"{filename}_yes.png")
+    cropped_image.save(f"{prefix}_TRI.png")
+    cropped_image.save(f"{prefix}_TRI.pdf", "PDF", resolution=100.0)
 
-    #Remove temp files
-
+    # Remove temp files
+    if os.path.exists(filename):
+        os.remove(filename)
 
 
 def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
@@ -361,6 +365,7 @@ def make_tri(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
 
     return p
 
+
 def make_tri2(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
     if not breaks:
         breaks = True
@@ -406,7 +411,7 @@ def make_tri2(sdf, title_name, palette, palette_orientation, colors, breaks, xli
         ggplot(sdf)
         + geom_tile(
             aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-            alpha=0
+            alpha=0,
         )
         + scale_color_discrete(guide=False)
         + scale_fill_manual(
@@ -424,13 +429,13 @@ def make_tri2(sdf, title_name, palette, palette_orientation, colors, breaks, xli
                 family=["DejaVu Sans"]
             ),  # Change axis text font and size
             axis_ticks_major=element_line(),
-            axis_line_x=element_line(),           # Keep the x-axis line
-            axis_line_y=element_blank(),          # Remove the y-axis line
-            axis_ticks_major_x=element_line(),    # Keep x-axis ticks
-            axis_ticks_major_y=element_blank(),   # Remove y-axis ticks
-            axis_text_x=element_line(),           # Keep x-axis text
-            axis_text_y=element_blank(), 
-            plot_title=element_blank()
+            axis_line_x=element_line(),  # Keep the x-axis line
+            axis_line_y=element_blank(),  # Remove the y-axis line
+            axis_ticks_major_x=element_line(),  # Keep x-axis ticks
+            axis_ticks_major_y=element_blank(),  # Remove y-axis ticks
+            axis_text_x=element_line(),  # Keep x-axis text
+            axis_text_y=element_blank(),
+            plot_title=element_blank(),
         )
         + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
@@ -494,6 +499,28 @@ def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoin
     return p
 
 
+def create_grid(
+    singles,
+    doubles,
+    directory,
+    name_x,
+    name_y,
+    palette,
+    palette_orientation,
+    no_hist,
+    width,
+    dpi,
+    is_freq,
+    xlim,
+    custom_colors,
+    custom_breakpoints,
+    from_file,
+    is_pairwise,
+    axes_label,
+):
+    print(singles)
+
+
 def create_plots(
     sdf,
     directory,
@@ -512,7 +539,6 @@ def create_plots(
     is_pairwise,
     axes_labels,
 ):
-    # TODO: Implement xlim
     df = read_df(
         sdf,
         palette,
@@ -614,24 +640,21 @@ def create_plots(
             xlim,
         )
         print(f"Creating plots and saving to {plot_filename}...\n")
-        triplot_no_axis = (
-            tri_plot + 
-                theme(
-                    axis_text_x=element_blank(),
-                    axis_text_y=element_blank(),
-                    axis_title_x=element_blank(),
-                    axis_title_y=element_blank(),
-                    axis_line_x=element_blank(),
-                    axis_line_y=element_blank(),
-                    axis_ticks_major=element_blank(),
-                    axis_ticks_minor=element_blank(),
-                    panel_background=element_blank(),
-                    panel_grid_major=element_blank(),
-                    panel_grid_minor=element_blank(),
-                    plot_title=element_blank()
-                )
-            )
-        ggsave(
+        triplot_no_axis = tri_plot + theme(
+            axis_text_x=element_blank(),
+            axis_text_y=element_blank(),
+            axis_title_x=element_blank(),
+            axis_title_y=element_blank(),
+            axis_line_x=element_blank(),
+            axis_line_y=element_blank(),
+            axis_ticks_major=element_blank(),
+            axis_ticks_minor=element_blank(),
+            panel_background=element_blank(),
+            panel_grid_major=element_blank(),
+            panel_grid_minor=element_blank(),
+            plot_title=element_blank(),
+        )
+        """ggsave(
             tri_plot,
             width=9,
             height=9,
@@ -639,7 +662,7 @@ def create_plots(
             format="pdf",
             filename=f"{plot_filename}_TRI.pdf",
             verbose=False,
-        )
+        )"""
         ggsave(
             triplot_no_axis,
             width=9,
@@ -647,6 +670,15 @@ def create_plots(
             dpi=dpi,
             format="png",
             filename=f"{plot_filename}_TRI_NOAXIS.png",
+            verbose=False,
+        )
+        ggsave(
+            triplot_no_axis,
+            width=9,
+            height=9,
+            dpi=dpi,
+            format="pdf",
+            filename=f"{plot_filename}_TRI_NOAXIS.pdf",
             verbose=False,
         )
         ggsave(
@@ -658,12 +690,27 @@ def create_plots(
             filename=f"{plot_filename}_AXIS.png",
             verbose=False,
         )
+        ggsave(
+            tri_plot_axis_only,
+            width=9,
+            height=9,
+            dpi=dpi,
+            format="pdf",
+            filename=f"{plot_filename}_AXIS.pdf",
+            verbose=False,
+        )
 
-        image_no_axes = Image.open(f"{plot_filename}_TRI_NOAXIS.png")
-        rotated_plot = image_no_axes.rotate(315, expand=True)
-        # Save or display the rotated heatmap
-        rotated_plot.save(f"{plot_filename}_ROTATED_TRI.png")
-        overlap_axis(rotated_plot, f"{plot_filename}_AXIS.png")
+        png_no_axes = Image.open(f"{plot_filename}_TRI_NOAXIS.png")
+        rotated_png = png_no_axes.rotate(315, expand=True)
+
+        rotated_png.save(f"{plot_filename}_ROTATED_TRI_NOAXIS.png")
+        overlap_axis(rotated_png, f"{plot_filename}_AXIS.png", plot_filename)
+
+        if os.path.exists(f"{plot_filename}_ROTATED_TRI_NOAXIS.png"):
+            os.remove(f"{plot_filename}_ROTATED_TRI_NOAXIS.png")
+        if os.path.exists(f"{plot_filename}_TRI_NOAXIS.png"):
+            os.remove(f"{plot_filename}_TRI_NOAXIS.png")
+
         ggsave(
             full_plot,
             width=9,
@@ -682,10 +729,9 @@ def create_plots(
             filename=f"{plot_filename}_FULL.png",
             verbose=False,
         )
-
         if no_hist:
             print(
-                f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_FULL.png and {plot_filename}_FULL.png saved sucessfully. \n"
+                f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_FULL.png and {plot_filename}_FULL.pdf saved sucessfully. \n"
             )
         else:
             ggsave(
@@ -707,5 +753,5 @@ def create_plots(
                 verbose=False,
             )
             print(
-                f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_FULL.png, {plot_filename}_FULL.png, {plot_filename}_HIST.png and {plot_filename}_HIST.pdf, saved sucessfully. \n"
+                f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_FULL.png, {plot_filename}_FULL.pdf, {plot_filename}_HIST.png and {plot_filename}_HIST.pdf, saved sucessfully. \n"
             )
