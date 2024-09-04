@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ModDotPlot"
-version = "0.8.4"
+version = "0.8.5"
 requires-python = ">= 3.7"
 dependencies = [
   "pysam",
@@ -16,7 +16,9 @@ dependencies = [
   "mmh3",
   "tk",
   "setproctitle",
-  "numpy"
+  "numpy",
+  "PIL",
+  "patchworklib"
 ]
 authors = [
   {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"},
