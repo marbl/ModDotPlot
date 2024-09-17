@@ -574,7 +574,7 @@ def create_plots(
             height=9,
             dpi=dpi,
             format="pdf",
-            filename=f"{plot_filename}.pdf",
+            filename=f"{plot_filename}_COMPARE.pdf",
             verbose=False,
         )
         ggsave(
@@ -583,11 +583,13 @@ def create_plots(
             height=9,
             dpi=dpi,
             format="png",
-            filename=f"{plot_filename}.png",
+            filename=f"{plot_filename}_COMPARE.png",
             verbose=False,
         )
         if no_hist:
-            print(f"{plot_filename}.pdf and {plot_filename}.png saved sucessfully. \n")
+            print(
+                f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n"
+            )
         else:
             ggsave(
                 histy,
@@ -608,7 +610,7 @@ def create_plots(
                 verbose=False,
             )
             print(
-                f"{plot_filename}.pdf, {plot_filename}.png, {plot_filename}_HIST.pdf and {plot_filename}_HIST.png saved sucessfully. \n"
+                f"{plot_filename}_COMPARE.pdf, {plot_filename}_COMPARE.png, {plot_filename}_HIST.pdf and {plot_filename}_HIST.png saved sucessfully. \n"
             )
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
