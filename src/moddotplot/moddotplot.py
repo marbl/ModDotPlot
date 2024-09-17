@@ -950,7 +950,7 @@ def main():
                     smaller_length = len(smaller_seq)
                     larger_seq_name = sequences[i][0]
                     smaller_seq_name = sequences[j][0]
-                    # Houston we have a problem
+
                     if larger_length < smaller_length:
                         smaller_seq = sequences[i][1]
                         larger_seq = sequences[j][1]
@@ -1000,15 +1000,17 @@ def main():
                             seq_list[j],
                             False,
                         )
+                        if args.grid:
+                            grid_vals.append(bed)
 
                         if not args.no_bed:
                             # Log saving bed file
                             if not args.output_dir:
-                                bedfile_output = sequences[i][0] + ".bed"
+                                bedfile_output = smaller_seq_name + "_" + larger_seq_name + "_COMPARE.bed"
                             else:
                                 bedfile_output = os.path.join(
                                     args.output_dir,
-                                    sequences[i][0] + "_" + sequences[j][0] + ".bed",
+                                    smaller_seq_name + "_" + larger_seq_name + "_COMPARE.bed",
                                 )
                             with open(bedfile_output, "w") as bedfile:
                                 for row in bed:
@@ -1019,8 +1021,8 @@ def main():
                             create_plots(
                                 sdf=[bed],
                                 directory=args.output_dir if args.output_dir else ".",
-                                name_x=sequences[i][0],
-                                name_y=sequences[j][0],
+                                name_x=smaller_seq_name,
+                                name_y=larger_seq_name,
                                 palette=args.palette,
                                 palette_orientation=args.palette_orientation,
                                 no_hist=args.no_hist,
@@ -1035,6 +1037,8 @@ def main():
                                 axes_labels=args.axes_ticks,
                             )
 
+            '''if args.grid:
+                print(grid_vals)'''
 
 if __name__ == "__main__":
     main()
