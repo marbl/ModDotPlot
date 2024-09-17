@@ -587,7 +587,9 @@ def create_plots(
             verbose=False,
         )
         if no_hist:
-            print(f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n")
+            print(
+                f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n"
+            )
         else:
             ggsave(
                 histy,

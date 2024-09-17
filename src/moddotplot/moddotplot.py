@@ -1006,11 +1006,19 @@ def main():
                         if not args.no_bed:
                             # Log saving bed file
                             if not args.output_dir:
-                                bedfile_output = smaller_seq_name + "_" + larger_seq_name + "_COMPARE.bed"
+                                bedfile_output = (
+                                    smaller_seq_name
+                                    + "_"
+                                    + larger_seq_name
+                                    + "_COMPARE.bed"
+                                )
                             else:
                                 bedfile_output = os.path.join(
                                     args.output_dir,
-                                    smaller_seq_name + "_" + larger_seq_name + "_COMPARE.bed",
+                                    smaller_seq_name
+                                    + "_"
+                                    + larger_seq_name
+                                    + "_COMPARE.bed",
                                 )
                             with open(bedfile_output, "w") as bedfile:
                                 for row in bed:
@@ -1037,8 +1045,9 @@ def main():
                                 axes_labels=args.axes_ticks,
                             )
 
-            '''if args.grid:
-                print(grid_vals)'''
+            """if args.grid:
+                print(grid_vals)"""
+
 
 if __name__ == "__main__":
     main()
