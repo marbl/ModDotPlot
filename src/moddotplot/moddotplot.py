@@ -921,9 +921,6 @@ def main():
         # -----------COMPUTE COMPARATIVE PLOTS-----------
         # TODO: Optimize computations so that largest sequence doesn't need to be redone all the time
         if (args.compare or args.compare_only) and len(sequences) > 1:
-            print("HIYA")
-            for i in range(len(sequences)):
-                print(sequences[i][0])
             # Set window size to args.window. Otherwise, set it to n/resolution
 
             if args.grid:
