@@ -922,29 +922,13 @@ def main():
         # TODO: Optimize computations so that largest sequence doesn't need to be redone all the time
         if (args.compare or args.compare_only) and len(sequences) > 1:
             # Set window size to args.window. Otherwise, set it to n/resolution
-            win = args.window
-            res = args.resolution
-            if args.window:
-                res = math.ceil(len(sequences[0][1]) / args.window)
-            else:
-                win = math.ceil(len(sequences[0][1]) / args.resolution)
-            if win < args.modimizer:
-                args.modimizer = win
-
-            seq_sparsity = round(win / args.modimizer)
-            if seq_sparsity <= args.modimizer:
-                seq_sparsity = 2 ** int(math.log2(seq_sparsity))
-            else:
-                seq_sparsity = 2 ** (int(math.log2(seq_sparsity - 1)) + 1)
-            expectation = round(win / seq_sparsity)
 
             if args.grid:
                 grid_vals = []
 
             for i in range(len(sequences)):
-                larger_seq = sequences[i][1]
-
                 for j in range(i + 1, len(sequences)):
+                    larger_seq = sequences[i][1]
                     smaller_seq = sequences[j][1]
                     larger_length = len(larger_seq)
                     smaller_length = len(smaller_seq)
@@ -958,6 +942,22 @@ def main():
                         smaller_length = len(smaller_seq)
                         larger_seq_name = sequences[j][0]
                         smaller_seq_name = sequences[i][0]
+
+                    win = args.window
+                    res = args.resolution
+                    if args.window:
+                        res = math.ceil(smaller_length / args.window)
+                    else:
+                        win = math.ceil(smaller_length / args.resolution)
+                    if win < args.modimizer:
+                        args.modimizer = win
+
+                    seq_sparsity = round(win / args.modimizer)
+                    if seq_sparsity <= args.modimizer:
+                        seq_sparsity = 2 ** int(math.log2(seq_sparsity))
+                    else:
+                        seq_sparsity = 2 ** (int(math.log2(seq_sparsity - 1)) + 1)
+                    expectation = round(win / seq_sparsity)
                     print(
                         f"Computing pairwise identity matrix for {larger_seq_name} and {smaller_seq_name}... \n"
                     )
