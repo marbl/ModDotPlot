@@ -535,6 +535,9 @@ def main():
                             double_val_name.append([unique_query_names[0],unique_reference_names[0]])
                 # Exit once all bed files have been iterated through
                 if args.grid or args.grid_only:
+                    print(
+                        f"Creating a {len(sequences)}x{len(sequences)} grid.\n"
+                    )
                     create_grid(
                         singles=single_vals,
                         doubles=double_vals,
@@ -1101,6 +1104,9 @@ def main():
                             )
 
             if args.grid or args.grid_only:
+                print(
+                    f"Creating a {len(sequences)}x{len(sequences)} grid.\n"
+                )
                 create_grid(
                     singles=grid_val_singles,
                     doubles=grid_val_doubles,

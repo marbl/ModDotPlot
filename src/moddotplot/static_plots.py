@@ -85,13 +85,13 @@ def transpose_order(double_vals):
     if len(double_vals) == 1:
         return [0]
     elif len(double_vals) == 3:
-        return [2,0,1]
+        return [0,1,2]
     elif len(double_vals) == 6:
-        return [5,2,0,4,1,3]
+        return [0,1,3,2,4,5]
     elif len(double_vals) == 10:
-        return [9,5,2,0,8,4,1,7,3,6]
+        return [0,1,4,2,5,7,3,6,8,9]
     elif len(double_vals) == 15:
-        return [14,9,5,2,0,13,8,4,1,12,7,3,11,6,10]
+        return [0,1,5,2,6,9,3,7,10,12,4,8,11,13,14]
 
 
 def check_st_en_equality(df):
@@ -890,8 +890,12 @@ def create_grid(
     
     normal_counter = 0
     trans_counter = 0
+    trans_to_use = transpose_order(normal_heatmap_list)
     start_grid = pw.Brick(figsize=(9,9))
     n = single_length * single_length
+
+    if n > 4:
+        print(f"This might take a while\n...\n")
 
     printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     tots = 0
@@ -910,7 +914,7 @@ def create_grid(
                 g1 = pw.load_ggplot(normal_heatmap_list[normal_counter], figsize=(9,9))
                 normal_counter += 1
             elif i > j:
-                g1 = pw.load_ggplot(transpose_heatmap_list[trans_counter], figsize=(9,9))
+                g1 = pw.load_ggplot(transpose_heatmap_list[trans_to_use[trans_counter]], figsize=(9,9))
                 trans_counter += 1
             if j == 0:
                 row_grid = g1
