@@ -25,7 +25,7 @@ from plotnine import (
     annotate,
     element_rect,
     coord_flip,
-    theme_minimal
+    theme_minimal,
 )
 import pandas as pd
 import numpy as np
@@ -44,9 +44,11 @@ from moddotplot.const import (
 from typing import List
 from palettable.colorbrewer import qualitative, sequential, diverging
 
+
 def is_plot_empty(p):
     # Check if the plot has data or any layers
     return len(p.layers) == 0 and p.data.empty
+
 
 def check_pascal(single_val, double_val):
     try:
@@ -63,8 +65,11 @@ def check_pascal(single_val, double_val):
         elif len(single_val) == 0:
             assert len(double_val) == (1 or 3 or 6 or 10 or 15)
     except AssertionError as e:
-        print(f"Missing bed files required to create grid. Please verify all bed files are included.")
+        print(
+            f"Missing bed files required to create grid. Please verify all bed files are included."
+        )
         sys.exit(8)
+
 
 def reverse_pascal(double_vals):
     if len(double_vals) == 1:
@@ -80,18 +85,19 @@ def reverse_pascal(double_vals):
     else:
         sys.exit(9)
 
+
 # Hardcoding for now, I have the formula just lazy
 def transpose_order(double_vals):
     if len(double_vals) == 1:
         return [0]
     elif len(double_vals) == 3:
-        return [0,1,2]
+        return [0, 1, 2]
     elif len(double_vals) == 6:
-        return [0,1,3,2,4,5]
+        return [0, 1, 3, 2, 4, 5]
     elif len(double_vals) == 10:
-        return [0,1,4,2,5,7,3,6,8,9]
+        return [0, 1, 4, 2, 5, 7, 3, 6, 8, 9]
     elif len(double_vals) == 15:
-        return [0,1,5,2,6,9,3,7,10,12,4,8,11,13,14]
+        return [0, 1, 5, 2, 6, 9, 3, 7, 10, 12, 4, 8, 11, 13, 14]
 
 
 def check_st_en_equality(df):
@@ -308,11 +314,14 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
     try:
         window = max(sdf["q_en"] - sdf["q_st"])
     except:
-        p = (ggplot(aes(x=[], y=[])) 
+        p = (
+            ggplot(aes(x=[], y=[]))
             + theme_minimal()  # Use a minimal theme with gridlines
-            + theme(panel_grid_major=element_blank(),  # Remove major gridlines (optional)
-                    panel_grid_minor=element_blank())  # Remove minor gridlines (optional)
-            )
+            + theme(
+                panel_grid_major=element_blank(),  # Remove major gridlines (optional)
+                panel_grid_minor=element_blank(),
+            )  # Remove minor gridlines (optional)
+        )
         return p
     if max_val < 100000:
         x_label = "Genomic Position (Kbp)"
@@ -357,6 +366,7 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
 
     return p
 
+
 def make_dot2(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
     if not breaks:
         breaks = True
@@ -394,11 +404,14 @@ def make_dot2(sdf, title_name, palette, palette_orientation, colors, breaks, xli
     try:
         window = max(sdf["q_en"] - sdf["q_st"])
     except:
-        p = (ggplot(aes(x=[], y=[])) 
+        p = (
+            ggplot(aes(x=[], y=[]))
             + theme_minimal()  # Use a minimal theme with gridlines
-            + theme(panel_grid_major=element_blank(),  # Remove major gridlines (optional)
-                    panel_grid_minor=element_blank())  # Remove minor gridlines (optional)
-            )
+            + theme(
+                panel_grid_major=element_blank(),  # Remove major gridlines (optional)
+                panel_grid_minor=element_blank(),
+            )  # Remove minor gridlines (optional)
+        )
         return p
     if max_val < 100000:
         x_label = "Genomic Position (Kbp)"
@@ -440,12 +453,13 @@ def make_dot2(sdf, title_name, palette, palette_orientation, colors, breaks, xli
     # Adjust x-axis label size
     p += theme(axis_title_x=element_blank())
     p += theme(axis_title_y=element_blank())
-    #p += theme(title=element_blank())
+    # p += theme(title=element_blank())
 
     return p
 
+
 def make_dot3(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
-    #sdf = sdf.transpose()
+    # sdf = sdf.transpose()
     if not breaks:
         breaks = True
     else:
@@ -482,11 +496,14 @@ def make_dot3(sdf, title_name, palette, palette_orientation, colors, breaks, xli
     try:
         window = max(sdf["q_en"] - sdf["q_st"])
     except:
-        p = (ggplot(aes(x=[], y=[])) 
+        p = (
+            ggplot(aes(x=[], y=[]))
             + theme_minimal()  # Use a minimal theme with gridlines
-            + theme(panel_grid_major=element_blank(),  # Remove major gridlines (optional)
-                    panel_grid_minor=element_blank())  # Remove minor gridlines (optional)
-            )
+            + theme(
+                panel_grid_major=element_blank(),  # Remove major gridlines (optional)
+                panel_grid_minor=element_blank(),
+            )  # Remove minor gridlines (optional)
+        )
         return p
     if max_val < 100000:
         x_label = "Genomic Position (Kbp)"
@@ -528,7 +545,7 @@ def make_dot3(sdf, title_name, palette, palette_orientation, colors, breaks, xli
     # Adjust x-axis label size
     p += theme(axis_title_x=element_blank())
     p += theme(axis_title_y=element_blank())
-    #p += theme(title=element_blank())
+    # p += theme(title=element_blank())
 
     return p
 
@@ -761,19 +778,19 @@ def create_grid(
     custom_colors,
     custom_breakpoints,
     axes_label,
-    is_bed
+    is_bed,
 ):
     new_index = []
     transpose_index = []
-    check_pascal(singles,doubles)
-    #Singles can be empty if not selected
+    check_pascal(singles, doubles)
+    # Singles can be empty if not selected
     for i in range(len(single_names)):
-        for j in range(i+1, len(single_names)):
+        for j in range(i + 1, len(single_names)):
             try:
-                index = double_names.index([single_names[i],single_names[j]])
+                index = double_names.index([single_names[i], single_names[j]])
                 transpose_index.append(0)
             except:
-                index = double_names.index([single_names[j],single_names[i]])
+                index = double_names.index([single_names[j], single_names[i]])
                 transpose_index.append(1)
 
             new_index.append(index)
@@ -830,7 +847,7 @@ def create_grid(
     for plot in single_list:
         heatmap = make_dot2(
             plot,
-            plot['q'].iloc[1],
+            plot["q"].iloc[1],
             palette,
             palette_orientation,
             custom_colors,
@@ -887,11 +904,11 @@ def create_grid(
     single_length = len(single_heatmap_list)
     if single_length == 0:
         single_length = reverse_pascal(len(normal_heatmap_list))
-    
+
     normal_counter = 0
     trans_counter = 0
     trans_to_use = transpose_order(normal_heatmap_list)
-    start_grid = pw.Brick(figsize=(9,9))
+    start_grid = pw.Brick(figsize=(9, 9))
     n = single_length * single_length
 
     if n > 4:
@@ -899,96 +916,125 @@ def create_grid(
 
     printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     tots = 0
-    col_names = pw.Brick(figsize=(2,9))
-    row_names = pw.Brick(figsize=(9,2))
+    col_names = pw.Brick(figsize=(2, 9))
+    row_names = pw.Brick(figsize=(9, 2))
     for i in range(single_length):
-        row_grid = pw.Brick(figsize=(9,9))
+        row_grid = pw.Brick(figsize=(9, 9))
         for j in range(single_length):
             if i == j:
                 if len(single_heatmap_list) == 0:
-                    g1 = pw.Brick(figsize=(9,9))
+                    g1 = pw.Brick(figsize=(9, 9))
                 else:
-                    g1 = pw.load_ggplot(single_heatmap_list[i], figsize=(9,9))
-                
+                    g1 = pw.load_ggplot(single_heatmap_list[i], figsize=(9, 9))
+
             elif i < j:
-                g1 = pw.load_ggplot(normal_heatmap_list[normal_counter], figsize=(9,9))
+                g1 = pw.load_ggplot(normal_heatmap_list[normal_counter], figsize=(9, 9))
                 normal_counter += 1
             elif i > j:
-                g1 = pw.load_ggplot(transpose_heatmap_list[trans_to_use[trans_counter]], figsize=(9,9))
+                g1 = pw.load_ggplot(
+                    transpose_heatmap_list[trans_to_use[trans_counter]], figsize=(9, 9)
+                )
                 trans_counter += 1
             if j == 0:
                 row_grid = g1
             else:
-                row_grid = (row_grid|g1)
+                row_grid = row_grid | g1
             tots += 1
             printProgressBar(tots, n, prefix="Progress:", suffix="Complete", length=40)
         if i == 0:
             start_grid = row_grid
         else:
-            start_grid = (row_grid/start_grid)
+            start_grid = row_grid / start_grid
     for w in range(single_length):
         p1 = (
-            ggplot() +
-            geom_blank() +  # Use geom_blank to create a plot with no data
-            annotate('text', x=0, y=0, label=single_names[w], size=32, angle=90, ha='center', va='center') +
-            theme(
+            ggplot()
+            + geom_blank()
+            + annotate(  # Use geom_blank to create a plot with no data
+                "text",
+                x=0,
+                y=0,
+                label=single_names[w],
+                size=32,
+                angle=90,
+                ha="center",
+                va="center",
+            )
+            + theme(
                 # Center the plot area and make backgrounds transparent
                 axis_title_x=element_blank(),
                 axis_title_y=element_blank(),
                 axis_ticks=element_blank(),
                 axis_text=element_blank(),
-                plot_background=element_rect(fill='none'),  # Transparent plot background
-                panel_background=element_rect(fill='none'),  # Transparent panel background
+                plot_background=element_rect(
+                    fill="none"
+                ),  # Transparent plot background
+                panel_background=element_rect(
+                    fill="none"
+                ),  # Transparent panel background
                 panel_grid=element_blank(),
-                aspect_ratio=0.5  # Adjust the aspect ratio for the desired width/height
-            ) +
-            coord_flip()  # Rotate the plot 90 degrees counterclockwise
+                aspect_ratio=0.5,  # Adjust the aspect ratio for the desired width/height
+            )
+            + coord_flip()  # Rotate the plot 90 degrees counterclockwise
         )
         p2 = (
-            ggplot() +
-            geom_blank() +  # Use geom_blank to create a plot with no data
-            annotate('text', x=0, y=0, label=single_names[w], size=32, ha='center', va='center') +
-            theme(
+            ggplot()
+            + geom_blank()
+            + annotate(  # Use geom_blank to create a plot with no data
+                "text",
+                x=0,
+                y=0,
+                label=single_names[w],
+                size=32,
+                ha="center",
+                va="center",
+            )
+            + theme(
                 # Center the plot area and make backgrounds transparent
                 axis_title_x=element_blank(),
                 axis_title_y=element_blank(),
                 axis_ticks=element_blank(),
                 axis_text=element_blank(),
-                plot_background=element_rect(fill='none'),  # Transparent plot background
-                panel_background=element_rect(fill='none'),  # Transparent panel background
+                plot_background=element_rect(
+                    fill="none"
+                ),  # Transparent plot background
+                panel_background=element_rect(
+                    fill="none"
+                ),  # Transparent panel background
                 panel_grid=element_blank(),
-                aspect_ratio=0.5  # Adjust the aspect ratio for the desired width/height
+                aspect_ratio=0.5,  # Adjust the aspect ratio for the desired width/height
             )
         )
-        g1 = pw.load_ggplot(p1, figsize=(2,9))
-        g2 = pw.load_ggplot(p2, figsize=(9,2))
-        
+        g1 = pw.load_ggplot(p1, figsize=(2, 9))
+        g2 = pw.load_ggplot(p2, figsize=(9, 2))
+
         if w == 0:
             col_names = g1
             row_names = g2
         else:
-            col_names = g1/col_names
-            row_names = row_names|g2
-    #Create a ghost 2x2
+            col_names = g1 / col_names
+            row_names = row_names | g2
+    # Create a ghost 2x2
     pghost = (
-            ggplot() +
-            geom_blank() +  # Use geom_blank to create a plot with no data
-            annotate('text', x=0, y=0, label="", size=32, ha='center', va='center') +
-            theme(
-                # Center the plot area and make backgrounds transparent
-                axis_title_x=element_blank(),
-                axis_title_y=element_blank(),
-                axis_ticks=element_blank(),
-                axis_text=element_blank(),
-                plot_background=element_rect(fill='none'),  # Transparent plot background
-                panel_background=element_rect(fill='none'),  # Transparent panel background
-                panel_grid=element_blank(),
-                aspect_ratio=0.5  # Adjust the aspect ratio for the desired width/height
-            )
+        ggplot()
+        + geom_blank()
+        + annotate(  # Use geom_blank to create a plot with no data
+            "text", x=0, y=0, label="", size=32, ha="center", va="center"
         )
-    ghosty = pw.load_ggplot(pghost, figsize=(2,2))
-    col_names = ghosty/col_names
-    start_grid = (col_names|(row_names/start_grid))
+        + theme(
+            # Center the plot area and make backgrounds transparent
+            axis_title_x=element_blank(),
+            axis_title_y=element_blank(),
+            axis_ticks=element_blank(),
+            axis_text=element_blank(),
+            plot_background=element_rect(fill="none"),  # Transparent plot background
+            panel_background=element_rect(fill="none"),  # Transparent panel background
+            panel_grid=element_blank(),
+            aspect_ratio=0.5,  # Adjust the aspect ratio for the desired width/height
+        )
+    )
+    ghosty = pw.load_ggplot(pghost, figsize=(2, 2))
+    col_names = ghosty / col_names
+    start_grid = col_names | (row_names / start_grid)
     gridname = f"{single_length}x{single_length}_GRID"
     print(f"\nGrid complete! Saving to {directory}/{gridname}...\n")
     start_grid.savefig(f"{directory}/{gridname}.png")

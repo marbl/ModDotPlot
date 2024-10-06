@@ -469,7 +469,7 @@ def main():
                 for bed in args.bed:
                     # If args.bed is provided as input, run static mode directly from the bed file. Skip counting input k-mers.
                     df = read_df_from_file(bed)
-                    
+
                     unique_query_names = df["#query_name"].unique()
                     unique_reference_names = df["reference_name"].unique()
                     assert len(unique_query_names) == len(unique_reference_names)
@@ -532,12 +532,12 @@ def main():
                             )
                         if args.grid or args.grid_only:
                             double_vals.append(df)
-                            double_val_name.append([unique_query_names[0],unique_reference_names[0]])
+                            double_val_name.append(
+                                [unique_query_names[0], unique_reference_names[0]]
+                            )
                 # Exit once all bed files have been iterated through
                 if args.grid or args.grid_only:
-                    print(
-                        f"Creating a {len(sequences)}x{len(sequences)} grid.\n"
-                    )
+                    print(f"Creating a {len(sequences)}x{len(sequences)} grid.\n")
                     create_grid(
                         singles=single_vals,
                         doubles=double_vals,
@@ -552,7 +552,7 @@ def main():
                         custom_colors=args.colors,
                         custom_breakpoints=args.axes_ticks,
                         axes_label=args.axes_ticks,
-                        is_bed=True
+                        is_bed=True,
                     )
                 sys.exit(0)
             except Exception as e:
@@ -560,7 +560,6 @@ def main():
                 # TODO: Change to logs
                 print(f"Error in bed file: {e}")
                 sys.exit(7)
-            
 
     # -----------INPUT SEQUENCE VALIDATION-----------
     seq_list = []
@@ -1059,7 +1058,9 @@ def main():
                         )
                         if args.grid or args.grid_only:
                             grid_val_doubles.append(bed)
-                            grid_val_double_names.append([larger_seq_name,smaller_seq_name])
+                            grid_val_double_names.append(
+                                [larger_seq_name, smaller_seq_name]
+                            )
 
                         if not args.no_bed:
                             # Log saving bed file
@@ -1104,9 +1105,7 @@ def main():
                             )
 
             if args.grid or args.grid_only:
-                print(
-                    f"Creating a {len(sequences)}x{len(sequences)} grid.\n"
-                )
+                print(f"Creating a {len(sequences)}x{len(sequences)} grid.\n")
                 create_grid(
                     singles=grid_val_singles,
                     doubles=grid_val_doubles,
@@ -1121,7 +1120,7 @@ def main():
                     custom_colors=args.colors,
                     custom_breakpoints=args.axes_ticks,
                     axes_label=args.axes_ticks,
-                    is_bed=False
+                    is_bed=False,
                 )
 
 
