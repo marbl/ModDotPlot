@@ -21,6 +21,11 @@ from plotnine import (
     element_text,
     theme_light,
     theme_void,
+    geom_blank,
+    annotate,
+    element_rect,
+    coord_flip,
+    theme_minimal
 )
 import pandas as pd
 import numpy as np
@@ -28,6 +33,8 @@ from PIL import Image
 import patchworklib as pw
 import math
 import os
+import sys
+from moddotplot.parse_fasta import printProgressBar
 
 from moddotplot.const import (
     DIVERGING_PALETTES,
@@ -36,6 +43,55 @@ from moddotplot.const import (
 )
 from typing import List
 from palettable.colorbrewer import qualitative, sequential, diverging
+
+def is_plot_empty(p):
+    # Check if the plot has data or any layers
+    return len(p.layers) == 0 and p.data.empty
+
+def check_pascal(single_val, double_val):
+    try:
+        if len(single_val) == 2:
+            assert len(double_val) == 1
+        elif len(single_val) == 3:
+            assert len(double_val) == 3
+        elif len(single_val) == 4:
+            assert len(double_val) == 6
+        elif len(single_val) == 5:
+            assert len(double_val) == 10
+        elif len(single_val) == 6:
+            assert len(double_val) == 15
+        elif len(single_val) == 0:
+            assert len(double_val) == (1 or 3 or 6 or 10 or 15)
+    except AssertionError as e:
+        print(f"Missing bed files required to create grid. Please verify all bed files are included.")
+        sys.exit(8)
+
+def reverse_pascal(double_vals):
+    if len(double_vals) == 1:
+        return 2
+    elif len(double_vals) == 3:
+        return 3
+    elif len(double_vals) == 6:
+        return 4
+    elif len(double_vals) == 10:
+        return 5
+    elif len(double_vals) == 15:
+        return 6
+    else:
+        sys.exit(9)
+
+# Hardcoding for now, I have the formula just lazy
+def transpose_order(double_vals):
+    if len(double_vals) == 1:
+        return [0]
+    elif len(double_vals) == 3:
+        return [2,0,1]
+    elif len(double_vals) == 6:
+        return [5,2,0,4,1,3]
+    elif len(double_vals) == 10:
+        return [9,5,2,0,8,4,1,7,3,6]
+    elif len(double_vals) == 15:
+        return [14,9,5,2,0,13,8,4,1,12,7,3,11,6,10]
 
 
 def check_st_en_equality(df):
@@ -110,7 +166,10 @@ def overlap_axis(rotated_plot, filename, prefix):
 
 def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
     assert ncolors > 2 and ncolors < 12
-    bot = math.floor(min(sdf["perID_by_events"]))
+    try:
+        bot = math.floor(min(sdf["perID_by_events"]))
+    except ValueError:
+        bot = 0
     top = 100.0
     interval = (top - bot) / ncolors
     breaks = []
@@ -200,7 +259,10 @@ def read_df(
         )
 
     # Calculate the window size
-    window = max(df["q_en"] - df["q_st"])
+    try:
+        window = max(df["q_en"] - df["q_st"])
+    except ValueError:
+        window = 0
 
     # Calculate the position of the first and second intervals
     df["first_pos"] = df["q_st"] / window
@@ -243,7 +305,15 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
     if colors:
         new_hexcodes = colors
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-    window = max(sdf["q_en"] - sdf["q_st"])
+    try:
+        window = max(sdf["q_en"] - sdf["q_st"])
+    except:
+        p = (ggplot(aes(x=[], y=[])) 
+            + theme_minimal()  # Use a minimal theme with gridlines
+            + theme(panel_grid_major=element_blank(),  # Remove major gridlines (optional)
+                    panel_grid_minor=element_blank())  # Remove minor gridlines (optional)
+            )
+        return p
     if max_val < 100000:
         x_label = "Genomic Position (Kbp)"
     elif max_val < 100000000:
@@ -284,6 +354,181 @@ def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim
 
     # Adjust x-axis label size
     # p += theme(axis_title_x=element_text())
+
+    return p
+
+def make_dot2(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
+    if not breaks:
+        breaks = True
+    else:
+        breaks = [float(number) for number in breaks]
+    if not xlim:
+        xlim = 0
+    hexcodes = []
+    new_hexcodes = []
+    if palette in DIVERGING_PALETTES:
+        function_name = getattr(diverging, palette)
+        hexcodes = function_name.hex_colors
+        if palette_orientation == "+":
+            palette_orientation = "-"
+        else:
+            palette_orientation = "+"
+    elif palette in QUALITATIVE_PALETTES:
+        function_name = getattr(qualitative, palette)
+        hexcodes = function_name.hex_colors
+    elif palette in SEQUENTIAL_PALETTES:
+        function_name = getattr(sequential, palette)
+        hexcodes = function_name.hex_colors
+    else:
+        function_name = getattr(sequential, "Spectral_11")
+        palette_orientation = "-"
+        hexcodes = function_name.hex_colors
+
+    if palette_orientation == "-":
+        new_hexcodes = hexcodes[::-1]
+    else:
+        new_hexcodes = hexcodes
+    if colors:
+        new_hexcodes = colors
+    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
+    try:
+        window = max(sdf["q_en"] - sdf["q_st"])
+    except:
+        p = (ggplot(aes(x=[], y=[])) 
+            + theme_minimal()  # Use a minimal theme with gridlines
+            + theme(panel_grid_major=element_blank(),  # Remove major gridlines (optional)
+                    panel_grid_minor=element_blank())  # Remove minor gridlines (optional)
+            )
+        return p
+    if max_val < 100000:
+        x_label = "Genomic Position (Kbp)"
+    elif max_val < 100000000:
+        x_label = "Genomic Position (Mbp)"
+    else:
+        x_label = "Genomic Position (Gbp)"
+    p = (
+        ggplot(sdf)
+        + geom_tile(
+            aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
+        )
+        + scale_color_discrete(guide=False)
+        + scale_fill_manual(
+            values=new_hexcodes,
+            guide=False,
+        )
+        + theme(
+            legend_position="none",
+            panel_grid_major=element_blank(),
+            panel_grid_minor=element_blank(),
+            plot_background=element_blank(),
+            panel_background=element_blank(),
+            axis_line=element_line(color="black"),  # Adjust axis line size
+            axis_text=element_text(
+                family=["Dejavu Sans"]
+            ),  # Change axis text font and size
+            axis_ticks_major=element_line(),
+            title=element_text(
+                family=["Dejavu Sans"],  # Change title font family
+            ),
+        )
+        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + coord_fixed(ratio=1)
+        + labs(x=None, y=None, title=title_name)
+    )
+
+    # Adjust x-axis label size
+    p += theme(axis_title_x=element_blank())
+    p += theme(axis_title_y=element_blank())
+    #p += theme(title=element_blank())
+
+    return p
+
+def make_dot3(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
+    #sdf = sdf.transpose()
+    if not breaks:
+        breaks = True
+    else:
+        breaks = [float(number) for number in breaks]
+    if not xlim:
+        xlim = 0
+    hexcodes = []
+    new_hexcodes = []
+    if palette in DIVERGING_PALETTES:
+        function_name = getattr(diverging, palette)
+        hexcodes = function_name.hex_colors
+        if palette_orientation == "+":
+            palette_orientation = "-"
+        else:
+            palette_orientation = "+"
+    elif palette in QUALITATIVE_PALETTES:
+        function_name = getattr(qualitative, palette)
+        hexcodes = function_name.hex_colors
+    elif palette in SEQUENTIAL_PALETTES:
+        function_name = getattr(sequential, palette)
+        hexcodes = function_name.hex_colors
+    else:
+        function_name = getattr(sequential, "Spectral_11")
+        palette_orientation = "-"
+        hexcodes = function_name.hex_colors
+
+    if palette_orientation == "-":
+        new_hexcodes = hexcodes[::-1]
+    else:
+        new_hexcodes = hexcodes
+    if colors:
+        new_hexcodes = colors
+    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
+    try:
+        window = max(sdf["q_en"] - sdf["q_st"])
+    except:
+        p = (ggplot(aes(x=[], y=[])) 
+            + theme_minimal()  # Use a minimal theme with gridlines
+            + theme(panel_grid_major=element_blank(),  # Remove major gridlines (optional)
+                    panel_grid_minor=element_blank())  # Remove minor gridlines (optional)
+            )
+        return p
+    if max_val < 100000:
+        x_label = "Genomic Position (Kbp)"
+    elif max_val < 100000000:
+        x_label = "Genomic Position (Mbp)"
+    else:
+        x_label = "Genomic Position (Gbp)"
+    p = (
+        ggplot(sdf)
+        + geom_tile(
+            aes(x="r_st", y="q_st", fill="discrete", height=window, width=window)
+        )
+        + scale_color_discrete(guide=False)
+        + scale_fill_manual(
+            values=new_hexcodes,
+            guide=False,
+        )
+        + theme(
+            legend_position="none",
+            panel_grid_major=element_blank(),
+            panel_grid_minor=element_blank(),
+            plot_background=element_blank(),
+            panel_background=element_blank(),
+            axis_line=element_line(color="black"),  # Adjust axis line size
+            axis_text=element_text(
+                family=["Dejavu Sans"]
+            ),  # Change axis text font and size
+            axis_ticks_major=element_line(),
+            title=element_text(
+                family=["Dejavu Sans"],  # Change title font family
+            ),
+        )
+        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + coord_fixed(ratio=1)
+        + labs(x=None, y=None, title=title_name)
+    )
+
+    # Adjust x-axis label size
+    p += theme(axis_title_x=element_blank())
+    p += theme(axis_title_y=element_blank())
+    #p += theme(title=element_blank())
 
     return p
 
@@ -477,7 +722,10 @@ def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoin
 
     if custom_colors:
         new_hexcodes = custom_colors
-    bot = np.quantile(sdf["perID_by_events"], q=0.001)
+    try:
+        bot = np.quantile(sdf["perID_by_events"], q=0.001)
+    except IndexError:
+        bot = 0
     count = sdf.shape[0]
     extra = ""
 
@@ -503,22 +751,245 @@ def create_grid(
     singles,
     doubles,
     directory,
-    name_x,
-    name_y,
     palette,
     palette_orientation,
     no_hist,
-    width,
-    dpi,
+    single_names,
+    double_names,
     is_freq,
     xlim,
     custom_colors,
     custom_breakpoints,
-    from_file,
-    is_pairwise,
     axes_label,
+    is_bed
 ):
-    print(singles)
+    new_index = []
+    transpose_index = []
+    check_pascal(singles,doubles)
+    #Singles can be empty if not selected
+    for i in range(len(single_names)):
+        for j in range(i+1, len(single_names)):
+            try:
+                index = double_names.index([single_names[i],single_names[j]])
+                transpose_index.append(0)
+            except:
+                index = double_names.index([single_names[j],single_names[i]])
+                transpose_index.append(1)
+
+            new_index.append(index)
+
+    single_list = []
+    double_list = []
+    single_heatmap_list = []
+    normal_heatmap_list = []
+    transpose_heatmap_list = []
+    for matrix in singles:
+        if is_bed:
+            df = read_df(
+                None,
+                palette,
+                palette_orientation,
+                is_freq,
+                custom_colors,
+                custom_breakpoints,
+                matrix,
+            )
+        else:
+            df = read_df(
+                [matrix],
+                palette,
+                palette_orientation,
+                is_freq,
+                custom_colors,
+                custom_breakpoints,
+                None,
+            )
+        single_list.append(df)
+    for matrix in doubles:
+        if is_bed:
+            df = read_df(
+                None,
+                palette,
+                palette_orientation,
+                is_freq,
+                custom_colors,
+                custom_breakpoints,
+                matrix,
+            )
+        else:
+            df = read_df(
+                [matrix],
+                palette,
+                palette_orientation,
+                is_freq,
+                custom_colors,
+                custom_breakpoints,
+                None,
+            )
+        double_list.append(df)
+    for plot in single_list:
+        heatmap = make_dot2(
+            plot,
+            plot['q'].iloc[1],
+            palette,
+            palette_orientation,
+            custom_colors,
+            axes_label,
+            xlim,
+        )
+        single_heatmap_list.append(heatmap)
+    for indie in new_index:
+        xd = new_index.index(indie)
+        if transpose_index[xd] == 0:
+            heatmap = make_dot2(
+                double_list[indie],
+                f"{double_names[indie][0]}_{double_names[indie][1]}",
+                palette,
+                palette_orientation,
+                custom_colors,
+                axes_label,
+                xlim,
+            )
+            normal_heatmap_list.append(heatmap)
+            heatmap_t = make_dot3(
+                double_list[indie],
+                f"{double_names[indie][1]}_{double_names[indie][0]}",
+                palette,
+                palette_orientation,
+                custom_colors,
+                axes_label,
+                xlim,
+            )
+            transpose_heatmap_list.append(heatmap_t)
+        else:
+            heatmap = make_dot3(
+                double_list[indie],
+                f"{double_names[indie][0]}_{double_names[indie][1]}",
+                palette,
+                palette_orientation,
+                custom_colors,
+                axes_label,
+                xlim,
+            )
+            normal_heatmap_list.append(heatmap)
+            heatmap_t = make_dot2(
+                double_list[indie],
+                f"{double_names[indie][1]}_{double_names[indie][0]}",
+                palette,
+                palette_orientation,
+                custom_colors,
+                axes_label,
+                xlim,
+            )
+            transpose_heatmap_list.append(heatmap_t)
+
+    assert len(transpose_heatmap_list) == len(normal_heatmap_list)
+    single_length = len(single_heatmap_list)
+    if single_length == 0:
+        single_length = reverse_pascal(len(normal_heatmap_list))
+    
+    normal_counter = 0
+    trans_counter = 0
+    start_grid = pw.Brick(figsize=(9,9))
+    n = single_length * single_length
+
+    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
+    tots = 0
+    col_names = pw.Brick(figsize=(2,9))
+    row_names = pw.Brick(figsize=(9,2))
+    for i in range(single_length):
+        row_grid = pw.Brick(figsize=(9,9))
+        for j in range(single_length):
+            if i == j:
+                if len(single_heatmap_list) == 0:
+                    g1 = pw.Brick(figsize=(9,9))
+                else:
+                    g1 = pw.load_ggplot(single_heatmap_list[i], figsize=(9,9))
+                
+            elif i < j:
+                g1 = pw.load_ggplot(normal_heatmap_list[normal_counter], figsize=(9,9))
+                normal_counter += 1
+            elif i > j:
+                g1 = pw.load_ggplot(transpose_heatmap_list[trans_counter], figsize=(9,9))
+                trans_counter += 1
+            if j == 0:
+                row_grid = g1
+            else:
+                row_grid = (row_grid|g1)
+            tots += 1
+            printProgressBar(tots, n, prefix="Progress:", suffix="Complete", length=40)
+        if i == 0:
+            start_grid = row_grid
+        else:
+            start_grid = (row_grid/start_grid)
+    for w in range(single_length):
+        p1 = (
+            ggplot() +
+            geom_blank() +  # Use geom_blank to create a plot with no data
+            annotate('text', x=0, y=0, label=single_names[w], size=32, angle=90, ha='center', va='center') +
+            theme(
+                # Center the plot area and make backgrounds transparent
+                axis_title_x=element_blank(),
+                axis_title_y=element_blank(),
+                axis_ticks=element_blank(),
+                axis_text=element_blank(),
+                plot_background=element_rect(fill='none'),  # Transparent plot background
+                panel_background=element_rect(fill='none'),  # Transparent panel background
+                panel_grid=element_blank(),
+                aspect_ratio=0.5  # Adjust the aspect ratio for the desired width/height
+            ) +
+            coord_flip()  # Rotate the plot 90 degrees counterclockwise
+        )
+        p2 = (
+            ggplot() +
+            geom_blank() +  # Use geom_blank to create a plot with no data
+            annotate('text', x=0, y=0, label=single_names[w], size=32, ha='center', va='center') +
+            theme(
+                # Center the plot area and make backgrounds transparent
+                axis_title_x=element_blank(),
+                axis_title_y=element_blank(),
+                axis_ticks=element_blank(),
+                axis_text=element_blank(),
+                plot_background=element_rect(fill='none'),  # Transparent plot background
+                panel_background=element_rect(fill='none'),  # Transparent panel background
+                panel_grid=element_blank(),
+                aspect_ratio=0.5  # Adjust the aspect ratio for the desired width/height
+            )
+        )
+        g1 = pw.load_ggplot(p1, figsize=(2,9))
+        g2 = pw.load_ggplot(p2, figsize=(9,2))
+        
+        if w == 0:
+            col_names = g1
+            row_names = g2
+        else:
+            col_names = g1/col_names
+            row_names = row_names|g2
+    #Create a ghost 2x2
+    pghost = (
+            ggplot() +
+            geom_blank() +  # Use geom_blank to create a plot with no data
+            annotate('text', x=0, y=0, label="", size=32, ha='center', va='center') +
+            theme(
+                # Center the plot area and make backgrounds transparent
+                axis_title_x=element_blank(),
+                axis_title_y=element_blank(),
+                axis_ticks=element_blank(),
+                axis_text=element_blank(),
+                plot_background=element_rect(fill='none'),  # Transparent plot background
+                panel_background=element_rect(fill='none'),  # Transparent panel background
+                panel_grid=element_blank(),
+                aspect_ratio=0.5  # Adjust the aspect ratio for the desired width/height
+            )
+        )
+    ghosty = pw.load_ggplot(pghost, figsize=(2,2))
+    col_names = ghosty/col_names
+    start_grid = (col_names|(row_names/start_grid))
+    gridname = f"{single_length}x{single_length}_GRID"
+    print(f"\nGrid complete! Saving to {directory}/{gridname}...\n")
+    start_grid.savefig(f"{directory}/{gridname}.png")
+    start_grid.savefig(f"{directory}/{gridname}.pdf", format="pdf")
+    print(f"Grid saved successfully!\n")
 
 
 def create_plots(
@@ -586,6 +1057,17 @@ def create_plots(
             filename=f"{plot_filename}_COMPARE.png",
             verbose=False,
         )
+        try:
+            if not heatmap.data:
+                print(
+                    f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n"
+                )
+                return 0
+        except ValueError:
+            print(
+                f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n"
+            )
+            return 0
         if no_hist:
             print(
                 f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n"

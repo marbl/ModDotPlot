@@ -21,7 +21,7 @@ from moddotplot.const import ASCII_ART, VERSION
 
 import argparse
 import math
-from moddotplot.static_plots import read_df_from_file, create_plots
+from moddotplot.static_plots import read_df_from_file, create_plots, create_grid
 import json
 import numpy as np
 import pickle
@@ -342,6 +342,12 @@ def get_parser():
         help="Plot comparative plots in an NxN grid like format.",
     )
 
+    static_parser.add_argument(
+        "--grid-only",
+        action="store_true",
+        help="Plot comparative plots in an NxN grid like format, skipping individual plots",
+    )
+
     # TODO: Implement static mode logging options
 
     return parser
@@ -428,6 +434,13 @@ def main():
                 args.bin_freq = config.get("bin_freq", args.bin_freq)
 
             # TODO: Include logging options here
+        # Check if conflicitng command line args
+        if args.grid or args.grid_only:
+            if not (args.compare or args.compare_only) and not args.bed:
+                print(
+                    f"Option --grid was selected, but no comparative plots will be produced. Please rerun ModDotPlot with the `--compare` or `--compare-only` option.\n"
+                )
+                sys.exit(10)
 
         # -----------INPUT COMMAND VALIDATION-----------
         # TODO: More tests!
@@ -447,10 +460,16 @@ def main():
 
         # -----------BEDFILE INPUT FOR STATIC MODE-----------
         if hasattr(args, "bed") and args.bed:
+            if args.grid or args.grid_only:
+                single_vals = []
+                double_vals = []
+                single_val_name = []
+                double_val_name = []
             try:
                 for bed in args.bed:
                     # If args.bed is provided as input, run static mode directly from the bed file. Skip counting input k-mers.
                     df = read_df_from_file(bed)
+                    
                     unique_query_names = df["#query_name"].unique()
                     unique_reference_names = df["reference_name"].unique()
                     assert len(unique_query_names) == len(unique_reference_names)
@@ -458,60 +477,87 @@ def main():
                     assert len(unique_reference_names) == 1
                     self_id_scores = df[df["#query_name"] == df["reference_name"]]
                     pairwise_id_scores = df[df["#query_name"] != df["reference_name"]]
-                    print(
-                        f"Input bed file {bed} read successfully! Creating plots... \n"
-                    )
+                    if not args.grid_only:
+                        print(
+                            f"Input bed file {bed} read successfully! Creating plots... \n"
+                        )
                     # Create directory
                     if not args.output_dir:
                         args.output_dir = os.getcwd()
                     if not os.path.exists(args.output_dir):
                         os.makedirs(args.output_dir)
                     if len(self_id_scores) > 1:
-                        create_plots(
-                            sdf=None,
-                            directory=args.output_dir if args.output_dir else ".",
-                            name_x=unique_query_names[0],
-                            name_y=unique_query_names[0],
-                            palette=args.palette,
-                            palette_orientation=args.palette_orientation,
-                            no_hist=args.no_hist,
-                            width=args.width,
-                            dpi=args.dpi,
-                            is_freq=args.bin_freq,
-                            xlim=args.axes_limits,
-                            custom_colors=args.colors,
-                            custom_breakpoints=args.breakpoints,
-                            from_file=df,
-                            is_pairwise=False,
-                            axes_labels=args.axes_ticks,
-                        )
+                        if not args.grid_only:
+                            create_plots(
+                                sdf=None,
+                                directory=args.output_dir if args.output_dir else ".",
+                                name_x=unique_query_names[0],
+                                name_y=unique_query_names[0],
+                                palette=args.palette,
+                                palette_orientation=args.palette_orientation,
+                                no_hist=args.no_hist,
+                                width=args.width,
+                                dpi=args.dpi,
+                                is_freq=args.bin_freq,
+                                xlim=args.axes_limits,
+                                custom_colors=args.colors,
+                                custom_breakpoints=args.breakpoints,
+                                from_file=df,
+                                is_pairwise=False,
+                                axes_labels=args.axes_ticks,
+                            )
+                        if args.grid or args.grid_only:
+                            single_vals.append(df)
+                            single_val_name.append(unique_query_names[0])
                     # Case 2: Pairwise bed file
                     if len(pairwise_id_scores) > 1:
-                        create_plots(
-                            sdf=None,
-                            directory=args.output_dir if args.output_dir else ".",
-                            name_x=unique_query_names[0],
-                            name_y=unique_reference_names[0],
-                            palette=args.palette,
-                            palette_orientation=args.palette_orientation,
-                            no_hist=args.no_hist,
-                            width=args.width,
-                            dpi=args.dpi,
-                            is_freq=args.bin_freq,
-                            xlim=args.axes_limits,  # TODO: Get xlim working
-                            custom_colors=args.colors,
-                            custom_breakpoints=args.breakpoints,
-                            from_file=df,
-                            is_pairwise=True,
-                            axes_labels=args.axes_ticks,
-                        )
+                        if not args.grid_only:
+                            create_plots(
+                                sdf=None,
+                                directory=args.output_dir if args.output_dir else ".",
+                                name_x=unique_query_names[0],
+                                name_y=unique_reference_names[0],
+                                palette=args.palette,
+                                palette_orientation=args.palette_orientation,
+                                no_hist=args.no_hist,
+                                width=args.width,
+                                dpi=args.dpi,
+                                is_freq=args.bin_freq,
+                                xlim=args.axes_limits,
+                                custom_colors=args.colors,
+                                custom_breakpoints=args.axes_ticks,
+                                from_file=df,
+                                is_pairwise=True,
+                                axes_labels=args.axes_ticks,
+                            )
+                        if args.grid or args.grid_only:
+                            double_vals.append(df)
+                            double_val_name.append([unique_query_names[0],unique_reference_names[0]])
                 # Exit once all bed files have been iterated through
+                if args.grid or args.grid_only:
+                    create_grid(
+                        singles=single_vals,
+                        doubles=double_vals,
+                        directory=args.output_dir if args.output_dir else ".",
+                        palette=args.palette,
+                        palette_orientation=args.palette_orientation,
+                        no_hist=args.no_hist,
+                        single_names=single_val_name,
+                        double_names=double_val_name,
+                        is_freq=args.bin_freq,
+                        xlim=args.axes_limits,
+                        custom_colors=args.colors,
+                        custom_breakpoints=args.axes_ticks,
+                        axes_label=args.axes_ticks,
+                        is_bed=True
+                    )
                 sys.exit(0)
             except Exception as e:
                 # Exit code 7: Error getting info from bed file:
                 # TODO: Change to logs
                 print(f"Error in bed file: {e}")
                 sys.exit(7)
+            
 
     # -----------INPUT SEQUENCE VALIDATION-----------
     seq_list = []
@@ -531,7 +577,6 @@ def main():
     for i in args.fasta:
         kmer_list.append(readKmersFromFile(i, args.kmer, False))
     k_list = [item for sublist in kmer_list for item in sublist]
-
     # Throw error if compare only selected with one sequence.
     if len(k_list) < 2 and args.compare_only:
         print(
@@ -817,8 +862,12 @@ def main():
     # -----------SETUP STATIC MODE-----------
     elif args.command == "static":
         # -----------SET SPARSITY VALUE-----------
-        # TODO: this is not sorting correctly
+        if args.grid or args.grid_only:
+            grid_val_singles = []
+            grid_val_single_names = []
         sequences = list(zip(seq_list, k_list))
+        if len(sequences) > 6 and (args.grid or args.grid_only):
+            print("Too many sequences to create a grid. Skipping. \n")
 
         # Create output directory, if doesn't exist:
         if (args.output_dir) and not os.path.exists(args.output_dir):
@@ -835,6 +884,7 @@ def main():
                 else:
                     win = math.ceil(seq_length / args.resolution)
 
+                print(win)
                 if win < args.modimizer:
                     args.modimizer = win
                 if win < 10:
@@ -884,6 +934,9 @@ def main():
                 bed = convertMatrixToBed(
                     self_mat, win, args.identity, seq_list[i], seq_list[i], True
                 )
+                if args.grid or args.grid_only:
+                    grid_val_singles.append(bed)
+                    grid_val_single_names.append(sequences[i][0])
 
                 if not args.no_bed:
                     # Log saving bed file
@@ -938,8 +991,9 @@ def main():
                 seq_sparsity = 2 ** (int(math.log2(seq_sparsity - 1)) + 1)
             expectation = round(win / seq_sparsity)
 
-            if args.grid:
-                grid_vals = []
+            if args.grid or args.grid_only:
+                grid_val_doubles = []
+                grid_val_double_names = []
 
             for i in range(len(sequences)):
                 larger_seq = sequences[i][1]
@@ -987,7 +1041,7 @@ def main():
                         expectation,
                     )
                     # Throw error if the matrix is empty
-                    if np.all(pair_mat == 0):
+                    if np.all(pair_mat == 0) and (not (args.grid or args.grid_only)):
                         print(
                             f"The pairwise identity matrix for {sequences[i][0]} and {sequences[j][0]} is empty. Skipping.\n"
                         )
@@ -1000,8 +1054,9 @@ def main():
                             seq_list[j],
                             False,
                         )
-                        if args.grid:
-                            grid_vals.append(bed)
+                        if args.grid or args.grid_only:
+                            grid_val_doubles.append(bed)
+                            grid_val_double_names.append([larger_seq_name,smaller_seq_name])
 
                         if not args.no_bed:
                             # Log saving bed file
@@ -1045,8 +1100,23 @@ def main():
                                 axes_labels=args.axes_ticks,
                             )
 
-            """if args.grid:
-                print(grid_vals)"""
+            if args.grid or args.grid_only:
+                create_grid(
+                    singles=grid_val_singles,
+                    doubles=grid_val_doubles,
+                    directory=args.output_dir if args.output_dir else ".",
+                    palette=args.palette,
+                    palette_orientation=args.palette_orientation,
+                    no_hist=args.no_hist,
+                    single_names=grid_val_single_names,
+                    double_names=grid_val_double_names,
+                    is_freq=args.bin_freq,
+                    xlim=args.axes_limits,
+                    custom_colors=args.colors,
+                    custom_breakpoints=args.axes_ticks,
+                    axes_label=args.axes_ticks,
+                    is_bed=False
+                )
 
 
 if __name__ == "__main__":
