@@ -886,7 +886,6 @@ def main():
                 else:
                     win = math.ceil(seq_length / args.resolution)
 
-                print(win)
                 if win < args.modimizer:
                     args.modimizer = win
                 if win < 10:
