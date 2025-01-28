@@ -19,7 +19,7 @@
 
 ## Cite
 
-Alexander P Sweeten, Michael C Schatz, Adam M Phillippy, ModDotPlot—rapid and interactive visualization of tandem repeats, Bioinformatics, Volume 40, Issue 8, August 2024, btae493, https://doi.org/10.1093/bioinformatics/btae493
+Alexander P Sweeten, Michael C Schatz, Adam M Phillippy, ModDotPlot—rapid and interactive visualization of tandem repeats, Bioinformatics, Volume 40, Issue 8, August 2024, btae493, [https://doi.org/10.1093/bioinformatics/btae493](https://pmc.ncbi.nlm.nih.gov/articles/PMC11321072/)
 
 If you use ModDotPlot for your research, please cite our software!
 
