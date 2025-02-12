@@ -273,7 +273,7 @@ def get_parser():
     )
 
     static_parser.add_argument(
-        "--width", default=9, type=float, nargs="+", help="Plot width."
+        "--width", default=18, type=float, nargs="+", help="Plot width (also height for _FULL)."
     )
 
     static_parser.add_argument("--dpi", default=600, type=int, help="Plot dpi.")
@@ -351,7 +351,7 @@ def get_parser():
     static_parser.add_argument(
         "--vector",
         choices=["svg", "pdf", "eps"],
-        default="pdf",
+        default="svg",
         help="Output format for vector format."
     )
 
@@ -916,18 +916,6 @@ def main():
                 else:
                     seq_sparsity = 2 ** (int(math.log2(seq_sparsity - 1)) + 1)
                 expectation = round(win / seq_sparsity)
-                xaxis = 0
-                width = 0
-                """if isinstance(args.xaxis, int) or args.xaxis == None:
-                    xaxis = args.xaxis
-                else:
-                    assert len(args.xaxis) == len(sequences)
-                    xaxis = args.xaxis[i]"""
-                if isinstance(args.width, int):
-                    width = args.width
-                else:
-                    assert len(args.width) == len(sequences)
-                    width = args.width[i]
 
                 print(f"Computing self identity matrix for {sequences[i][0]}... \n")
                 # TODO: Logging here
@@ -976,7 +964,7 @@ def main():
                         palette=args.palette,
                         palette_orientation=args.palette_orientation,
                         no_hist=args.no_hist,
-                        width=width,
+                        width=args.width,
                         dpi=args.dpi,
                         is_freq=args.bin_freq,
                         xlim=args.axes_limits,
