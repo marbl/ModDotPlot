@@ -345,13 +345,20 @@ def get_parser():
     static_parser.add_argument(
         "--grid-only",
         action="store_true",
-        help="Plot comparative plots in an NxN grid like format, skipping individual plots",
+        help="Plot comparative plots in an NxN grid like format, skipping individual plots.",
     )
 
     static_parser.add_argument(
         "--vector",
         choices=["svg", "pdf", "eps"],
         default="pdf",
+        help="Output format for vector format."
+    )
+
+    static_parser.add_argument(
+        "--rasterize",
+        action="store_true",
+        help="Rasterize dotplot in vector format, making it easier to handle in graphics/image editing software."
     )
 
     return parser
@@ -509,7 +516,8 @@ def main():
                                 from_file=df,
                                 is_pairwise=False,
                                 axes_labels=args.axes_ticks,
-                                vector_format=args.vector
+                                vector_format=args.vector,
+                                rasterize=args.rasterize
                             )
                         if args.grid or args.grid_only:
                             single_vals.append(df)
@@ -534,7 +542,8 @@ def main():
                                 from_file=df,
                                 is_pairwise=True,
                                 axes_labels=args.axes_ticks,
-                                vector_format=args.vector
+                                vector_format=args.vector,
+                                rasterize=args.rasterize
                             )
                         if args.grid or args.grid_only:
                             double_vals.append(df)
@@ -976,7 +985,8 @@ def main():
                         from_file=None,
                         is_pairwise=False,
                         axes_labels=args.axes_ticks,
-                        vector_format=args.vector
+                        vector_format=args.vector,
+                        rasterize=args.rasterize
                     )
 
         # -----------COMPUTE COMPARATIVE PLOTS-----------
@@ -1108,7 +1118,8 @@ def main():
                                 from_file=None,
                                 is_pairwise=True,
                                 axes_labels=args.axes_ticks,
-                                vector_format=args.vector
+                                vector_format=args.vector,
+                                rasterize=args.rasterize
                             )
 
             if args.grid or args.grid_only:
