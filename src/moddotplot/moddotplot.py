@@ -273,7 +273,7 @@ def get_parser():
     )
 
     static_parser.add_argument(
-        "--width", default=18, type=float, nargs="+", help="Plot width (also height for _FULL)."
+        "--width", default=18, type=float, help="Plot width (also height for _FULL)."
     )
 
     static_parser.add_argument("--dpi", default=600, type=int, help="Plot dpi.")
@@ -322,6 +322,13 @@ def get_parser():
         default=None,
         nargs="+",
         help="Tick labels to include in x and y axis for custom plots.",
+    )
+
+    static_parser.add_argument(
+        "--axes-number",
+        default=7,
+        nargs="+",
+        help="Number of axis ticks labels to include in x and y axis for custom plots, including 0 and seq_length. A minimum of 2 is required, maximum 25.",
     )
 
     static_parser.add_argument(
@@ -516,6 +523,7 @@ def main():
                                 from_file=df,
                                 is_pairwise=False,
                                 axes_labels=args.axes_ticks,
+                                axes_tick_number=args.axes_number,
                                 vector_format=args.vector,
                                 rasterize=args.rasterize
                             )
@@ -542,6 +550,7 @@ def main():
                                 from_file=df,
                                 is_pairwise=True,
                                 axes_labels=args.axes_ticks,
+                                axes_tick_number=args.axes_number,
                                 vector_format=args.vector,
                                 rasterize=args.rasterize
                             )
@@ -973,6 +982,7 @@ def main():
                         from_file=None,
                         is_pairwise=False,
                         axes_labels=args.axes_ticks,
+                        axes_tick_number=args.axes_number,
                         vector_format=args.vector,
                         rasterize=args.rasterize
                     )
@@ -1106,6 +1116,7 @@ def main():
                                 from_file=None,
                                 is_pairwise=True,
                                 axes_labels=args.axes_ticks,
+                                axes_tick_number=args.axes_number,
                                 vector_format=args.vector,
                                 rasterize=args.rasterize
                             )
