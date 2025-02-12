@@ -348,7 +348,11 @@ def get_parser():
         help="Plot comparative plots in an NxN grid like format, skipping individual plots",
     )
 
-    # TODO: Implement static mode logging options
+    static_parser.add_argument(
+        "--vector",
+        choices=["svg", "pdf", "eps"],
+        default="pdf",
+    )
 
     return parser
 
@@ -505,6 +509,7 @@ def main():
                                 from_file=df,
                                 is_pairwise=False,
                                 axes_labels=args.axes_ticks,
+                                vector_format=args.vector
                             )
                         if args.grid or args.grid_only:
                             single_vals.append(df)
@@ -529,6 +534,7 @@ def main():
                                 from_file=df,
                                 is_pairwise=True,
                                 axes_labels=args.axes_ticks,
+                                vector_format=args.vector
                             )
                         if args.grid or args.grid_only:
                             double_vals.append(df)
@@ -970,6 +976,7 @@ def main():
                         from_file=None,
                         is_pairwise=False,
                         axes_labels=args.axes_ticks,
+                        vector_format=args.vector
                     )
 
         # -----------COMPUTE COMPARATIVE PLOTS-----------
@@ -1101,6 +1108,7 @@ def main():
                                 from_file=None,
                                 is_pairwise=True,
                                 axes_labels=args.axes_ticks,
+                                vector_format=args.vector
                             )
 
             if args.grid or args.grid_only:
