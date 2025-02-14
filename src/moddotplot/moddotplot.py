@@ -327,7 +327,6 @@ def get_parser():
     static_parser.add_argument(
         "--axes-number",
         default=7,
-        nargs="+",
         help="Number of axis ticks labels to include in x and y axis for custom plots, including 0 and seq_length. A minimum of 2 is required, maximum 25.",
     )
 
@@ -363,9 +362,9 @@ def get_parser():
     )
 
     static_parser.add_argument(
-        "--rasterize",
+        "--deraster",
         action="store_true",
-        help="Rasterize dotplot in vector format, making it easier to handle in graphics/image editing software."
+        help="De-rasterize dotplot in vector format. Note this can lead to large image sizes and make it unusable in image editing software."
     )
 
     return parser
@@ -525,7 +524,7 @@ def main():
                                 axes_labels=args.axes_ticks,
                                 axes_tick_number=args.axes_number,
                                 vector_format=args.vector,
-                                rasterize=args.rasterize
+                                rasterize=args.deraster
                             )
                         if args.grid or args.grid_only:
                             single_vals.append(df)
@@ -552,7 +551,7 @@ def main():
                                 axes_labels=args.axes_ticks,
                                 axes_tick_number=args.axes_number,
                                 vector_format=args.vector,
-                                rasterize=args.rasterize
+                                rasterize=args.deraster
                             )
                         if args.grid or args.grid_only:
                             double_vals.append(df)
@@ -984,7 +983,7 @@ def main():
                         axes_labels=args.axes_ticks,
                         axes_tick_number=args.axes_number,
                         vector_format=args.vector,
-                        rasterize=args.rasterize
+                        rasterize=args.deraster
                     )
 
         # -----------COMPUTE COMPARATIVE PLOTS-----------
@@ -1118,7 +1117,7 @@ def main():
                                 axes_labels=args.axes_ticks,
                                 axes_tick_number=args.axes_number,
                                 vector_format=args.vector,
-                                rasterize=args.rasterize
+                                rasterize=args.deraster
                             )
 
             if args.grid or args.grid_only:
