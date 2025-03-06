@@ -7,6 +7,7 @@ import os
 import pickle
 import re
 import numpy as np
+import gzip
 
 tab_b = bytes.maketrans(b"ACTG", b"TGAC")
 
@@ -43,7 +44,8 @@ def generateKmersFromFasta(seq: Sequence[str], k: int, quiet: bool) -> Iterable[
 
 def isValidFasta(file_path):
     try:
-        with open(file_path, "r") as file:
+        open_func = gzip.open if file_path.endswith(".gz") else open
+        with open_func(file_path, "rt") as file:
             in_sequence = False
             for line in file:
                 line = line.strip()
@@ -144,7 +146,10 @@ def readKmersFromFile(filename: str, ksize: int, quiet: bool) -> List[List[int]]
 
 def getInputHeaders(filename: str) -> List[str]:
     header_list = []
-    seq = pysam.FastaFile(filename)
+    try:
+        seq = pysam.FastaFile(filename)
+    except OSError:
+        seq = None
     for seq_id in seq.references:
         header_list.append(seq_id)
 
