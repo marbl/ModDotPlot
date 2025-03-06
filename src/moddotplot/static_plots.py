@@ -1,3 +1,4 @@
+from ast import excepthandler
 from plotnine import (
     ggsave,
     ggplot,
@@ -20,20 +21,23 @@ from plotnine import (
     element_line,
     element_text,
     theme_light,
-    theme_void,
     geom_blank,
     annotate,
     element_rect,
     coord_flip,
     theme_minimal,
+    geom_raster,
 )
+import cairosvg
 import pandas as pd
 import numpy as np
 from PIL import Image
 import patchworklib as pw
 import math
 import os
+import xml.etree.ElementTree as ET
 import sys
+import re
 from moddotplot.parse_fasta import printProgressBar
 
 from moddotplot.const import (
@@ -86,7 +90,7 @@ def reverse_pascal(double_vals):
         sys.exit(9)
 
 
-# Hardcoding for now, I have the formula just lazy
+# Hardcoding for now, I have the formula.... I'm just lazy
 def transpose_order(double_vals):
     if len(double_vals) == 1:
         return [0]
@@ -125,9 +129,9 @@ def make_g(vals):
 
 def make_scale(vals: list) -> list:
     scaled = [number for number in vals]
-    if scaled[-1] < 100000:
+    if scaled[-1] < 200000:
         return make_k(scaled)
-    elif scaled[-1] > 100000000:
+    elif scaled[-1] > 200000000:
         return make_g(scaled)
     else:
         return make_m(scaled)
@@ -235,7 +239,8 @@ def read_df(
         function_name = getattr(sequential, palette)
         hexcodes = function_name.hex_colors
     else:
-        function_name = getattr(sequential, "Spectral_11")
+        print(f"Palette {palette} not found. Defaulting to Spectral_11.\n")
+        function_name = getattr(diverging, "Spectral_11")
         palette_orientation = "-"
         hexcodes = function_name.hex_colors
 
@@ -277,358 +282,613 @@ def read_df(
     return df
 
 
-def make_dot(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
-    if not breaks:
-        breaks = True
+def generate_breaks(number, min_breaks=6, max_breaks=8):
+    # Determine the order of magnitude
+    magnitude = 10 ** int(
+        np.floor(np.log10(number))
+    )  # Base power of 10 (e.g., 10M, 1M, 100K)
+
+    # Find a reasonable step size
+    possible_steps = [
+        magnitude // d
+        for d in [10, 5, 4, 2, 1]
+        if (number // (magnitude // d)) in range(min_breaks, max_breaks + 1)
+    ]
+
+    step = (
+        possible_steps[0] if possible_steps else magnitude // 5
+    )  # Default to 1/5th if no exact match
+
+    # Generate breakpoints
+    breaks = list(range(0, ((number // step) + 1) * step, step))
+
+    return breaks
+
+
+def make_dot(
+    sdf,
+    title_name,
+    palette,
+    palette_orientation,
+    colors,
+    breaks,
+    num_ticks,
+    xlim,
+    deraster,
+    width,
+):
+    # Select the color palette
+    if hasattr(diverging, palette):
+        function_name = getattr(diverging, palette)
+    elif hasattr(qualitative, palette):
+        function_name = getattr(qualitative, palette)
+    elif hasattr(sequential, palette):
+        function_name = getattr(sequential, palette)
     else:
-        breaks = [float(number) for number in breaks]
+        function_name = diverging.Spectral_11  # Default palette
+        palette_orientation = "-"
+
+    hexcodes = function_name.hex_colors
+
+    # Adjust palette orientation
+    if palette in diverging.__dict__:
+        palette_orientation = "-" if palette_orientation == "+" else "+"
+
+    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
+    if colors:
+        new_hexcodes = colors  # Override colors if provided
     if not xlim:
         xlim = 0
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
-        function_name = getattr(sequential, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
-
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
-    else:
-        new_hexcodes = hexcodes
-    if colors:
-        new_hexcodes = colors
+    # Determine maximum genomic position for scaling
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
+
+    # If user provides breaks, convert to ints
+    if not breaks:
+        breaks = generate_breaks(int(max_val))
+    else:
+        [int(x) for x in breaks]
+    xlim = xlim or 0
+    # Compute window size (handling exceptions)
     try:
         window = max(sdf["q_en"] - sdf["q_st"])
-    except:
-        p = (
-            ggplot(aes(x=[], y=[]))
-            + theme_minimal()  # Use a minimal theme with gridlines
-            + theme(
-                panel_grid_major=element_blank(),  # Remove major gridlines (optional)
-                panel_grid_minor=element_blank(),
-            )  # Remove minor gridlines (optional)
-        )
-        return p
-    if max_val < 100000:
+    except ValueError:  # Empty dataframe case
+        return ggplot(aes(x=[], y=[])) + theme_minimal()
+
+    # Determine axis label scale based on genomic position size
+    if max_val < 200_000:
         x_label = "Genomic Position (Kbp)"
-    elif max_val < 100000000:
+    elif max_val < 200_000_000:
         x_label = "Genomic Position (Mbp)"
     else:
         x_label = "Genomic Position (Gbp)"
-    p = (
+
+    # Create the plot
+    common_theme = theme(
+        legend_position="none",
+        panel_grid_major=element_blank(),
+        panel_grid_minor=element_blank(),
+        plot_background=element_blank(),
+        panel_background=element_blank(),
+        axis_line=element_line(color="black"),
+        axis_text=element_text(family=["DejaVu Sans"], size=width),
+        axis_ticks_major=element_line(
+            size=(width), color="black"
+        ),  # Increased tick length
+        title=element_blank(),  # Center title
+        axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+        strip_background=element_blank(),  # Remove facet strip background
+        strip_text=element_text(
+            size=(width * 1.2), family=["DejaVu Sans"]
+        ),  # Customize facet label text size (optional)
+    )
+
+    # Construct the plot arguments
+    ggplot_args = (
         ggplot(sdf)
-        + geom_tile(
-            aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
-        )
         + scale_color_discrete(guide=False)
-        + scale_fill_manual(
-            values=new_hexcodes,
-            guide=False,
-        )
-        + theme(
-            legend_position="none",
-            panel_grid_major=element_blank(),
-            panel_grid_minor=element_blank(),
-            plot_background=element_blank(),
-            panel_background=element_blank(),
-            axis_line=element_line(color="black"),  # Adjust axis line size
-            axis_text=element_text(
-                family=["Dejavu Sans"]
-            ),  # Change axis text font and size
-            axis_ticks_major=element_line(),
-            title=element_text(
-                family=["Dejavu Sans"],  # Change title font family
-            ),
-        )
+        + scale_fill_manual(values=new_hexcodes, guide=False)
+        + common_theme
         + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
-        + labs(x="", y="", title=title_name)
+        + labs(x=x_label, y="", title=title_name)
     )
 
-    # Adjust x-axis label size
-    # p += theme(axis_title_x=element_text())
+    # Select either geom_raster or geom_tile depending on deraster flag
+    p = ggplot_args + (geom_tile if deraster else geom_raster)(
+        aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
+    )
 
     return p
 
 
-def make_dot2(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
-    if not breaks:
-        breaks = True
+def make_dot_grid(
+    sdf,
+    title_name,
+    palette,
+    palette_orientation,
+    colors,
+    breaks,
+    on_diagonal,
+    xlim,
+    deraster,
+    width,
+):
+    # Select the color palette
+    if hasattr(diverging, palette):
+        function_name = getattr(diverging, palette)
+    elif hasattr(qualitative, palette):
+        function_name = getattr(qualitative, palette)
+    elif hasattr(sequential, palette):
+        function_name = getattr(sequential, palette)
     else:
-        breaks = [float(number) for number in breaks]
+        function_name = diverging.Spectral_11  # Default palette
+        palette_orientation = "-"
+
+    hexcodes = function_name.hex_colors
+
+    # Adjust palette orientation
+    if palette in diverging.__dict__:
+        palette_orientation = "-" if palette_orientation == "+" else "+"
+
+    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
+    if colors:
+        new_hexcodes = colors  # Override colors if provided
     if not xlim:
         xlim = 0
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
-        function_name = getattr(sequential, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
+    # Determine maximum genomic position for scaling
+    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
+    # If user provides breaks, convert to ints
+    if not breaks:
+        breaks = generate_breaks(int(max_val))
     else:
-        new_hexcodes = hexcodes
+        [int(x) for x in breaks]
+    xlim = xlim or 0
+    # Compute window size (handling exceptions)
+    try:
+        window = max(sdf["q_en"] - sdf["q_st"])
+    except ValueError:  # Empty dataframe case
+        return ggplot(aes(x=[], y=[])) + theme_minimal()
+
+    # Determine axis label scale based on genomic position size
+    if max_val < 200_000:
+        x_label = "Genomic Position (Kbp)"
+    elif max_val < 200_000_000:
+        x_label = "Genomic Position (Mbp)"
+    else:
+        x_label = "Genomic Position (Gbp)"
+
+    # Create the plot
+    common_theme = theme(
+        legend_position="none",
+        panel_grid_major=element_blank(),
+        panel_grid_minor=element_blank(),
+        plot_background=element_blank(),
+        panel_background=element_blank(),
+        axis_line=element_line(color="black"),
+        axis_text=element_text(family=["DejaVu Sans"], size=width),
+        axis_ticks_major=element_line(
+            size=(width), color="black"
+        ),  # Increased tick length
+        title=element_text(size=(width * 1.2), alpha=0),
+        axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+        strip_background=element_blank(),  # Remove facet strip background
+        strip_text=element_text(
+            size=(width * 1.2), family=["DejaVu Sans"]
+        ),  # Customize facet label text size (optional)
+    )
+
+    # Construct the plot arguments
+    ggplot_args = (
+        ggplot(sdf)
+        + scale_color_discrete(guide=False)
+        + scale_fill_manual(values=new_hexcodes, guide=False)
+        + common_theme
+        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + coord_fixed(ratio=1)
+        + labs(x="", y="", title="")
+    )
+
+    # Select either geom_raster or geom_tile depending on deraster flag
+    p = ggplot_args + (geom_tile if deraster else geom_raster)(
+        aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
+    )
+
+    return p
+
+
+def make_dot_final(
+    sdf,
+    width,
+    palette,
+    palette_orientation,
+    colors,
+    breaks,
+    xlim,
+    transpose=False,
+    deraster=False,
+):
+    if hasattr(diverging, palette):
+        function_name = getattr(diverging, palette)
+    elif hasattr(qualitative, palette):
+        function_name = getattr(qualitative, palette)
+    elif hasattr(sequential, palette):
+        function_name = getattr(sequential, palette)
+    else:
+        function_name = diverging.Spectral_11  # Default palette
+        palette_orientation = "-"
+
+    hexcodes = function_name.hex_colors
+
+    # Adjust palette orientation
+    if palette in diverging.__dict__:
+        palette_orientation = "-" if palette_orientation == "+" else "+"
+
+    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
     if colors:
-        new_hexcodes = colors
+        new_hexcodes = colors  # Override colors if provided
+    if not xlim:
+        xlim = 0
+    # Determine maximum genomic position for scaling
+    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
+
+    # If user provides breaks, convert to ints
+    if not breaks:
+        breaks = generate_breaks(int(max_val))
+    else:
+        [int(x) for x in breaks]
+    xlim = xlim or 0
+
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
     try:
         window = max(sdf["q_en"] - sdf["q_st"])
     except:
         p = (
             ggplot(aes(x=[], y=[]))
-            + theme_minimal()  # Use a minimal theme with gridlines
+            + theme_minimal()
             + theme(
-                panel_grid_major=element_blank(),  # Remove major gridlines (optional)
+                panel_grid_major=element_blank(),
                 panel_grid_minor=element_blank(),
-            )  # Remove minor gridlines (optional)
+            )
         )
         return p
-    if max_val < 100000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 100000000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-    p = (
-        ggplot(sdf)
-        + geom_tile(
-            aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
-        )
-        + scale_color_discrete(guide=False)
-        + scale_fill_manual(
-            values=new_hexcodes,
-            guide=False,
-        )
-        + theme(
-            legend_position="none",
-            panel_grid_major=element_blank(),
-            panel_grid_minor=element_blank(),
-            plot_background=element_blank(),
-            panel_background=element_blank(),
-            axis_line=element_line(color="black"),  # Adjust axis line size
-            axis_text=element_text(
-                family=["Dejavu Sans"]
-            ),  # Change axis text font and size
-            axis_ticks_major=element_line(),
-            title=element_text(
-                family=["Dejavu Sans"],  # Change title font family
-            ),
-        )
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + coord_fixed(ratio=1)
-        + labs(x=None, y=None, title=title_name)
-    )
 
-    # Adjust x-axis label size
-    p += theme(axis_title_x=element_blank())
-    p += theme(axis_title_y=element_blank())
-    # p += theme(title=element_blank())
+    x_col, y_col = ("r_st", "q_st") if transpose else ("q_st", "r_st")
+
+    if deraster:
+        p = (
+            ggplot(sdf)
+            + geom_tile(
+                aes(x=x_col, y=y_col, fill="discrete", height=window, width=window)
+            )
+            + scale_color_discrete(guide=False)
+            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + theme(
+                legend_position="none",
+                panel_grid_major=element_blank(),
+                panel_grid_minor=element_blank(),
+                plot_background=element_blank(),
+                panel_background=element_blank(),
+                axis_line=element_line(color="black"),
+                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_ticks_major=element_line(),
+                title=element_text(family=["Dejavu Sans"]),
+            )
+            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + coord_fixed(ratio=1)
+            + labs(x=None, y=None, title=None)
+        )
+    else:
+        p = (
+            ggplot(sdf)
+            + geom_raster(
+                aes(x=x_col, y=y_col, fill="discrete", height=window, width=window)
+            )
+            + scale_color_discrete(guide=False)
+            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + theme(
+                legend_position="none",
+                panel_grid_major=element_blank(),
+                panel_grid_minor=element_blank(),
+                plot_background=element_blank(),
+                panel_background=element_blank(),
+                axis_line=element_line(color="black"),
+                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_ticks_major=element_line(),
+                title=element_text(family=["Dejavu Sans"]),
+            )
+            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + coord_fixed(ratio=1)
+            + labs(x=None, y=None, title=None)
+        )
+
+    p += theme(axis_title_x=element_blank(), axis_title_y=element_blank())
 
     return p
 
 
-def make_dot3(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
-    # sdf = sdf.transpose()
-    if not breaks:
-        breaks = True
+def make_tri(
+    sdf,
+    title_name,
+    palette,
+    palette_orientation,
+    colors,
+    breaks,
+    xlim,
+    num_ticks,
+    deraster,
+    width,
+):
+    # Select the color palette
+    if hasattr(diverging, palette):
+        function_name = getattr(diverging, palette)
+    elif hasattr(qualitative, palette):
+        function_name = getattr(qualitative, palette)
+    elif hasattr(sequential, palette):
+        function_name = getattr(sequential, palette)
     else:
-        breaks = [float(number) for number in breaks]
+        function_name = diverging.Spectral_11  # Default palette
+        palette_orientation = "-"
+
+    hexcodes = function_name.hex_colors
+
+    # Adjust palette orientation
+    if palette in diverging.__dict__:
+        palette_orientation = "-" if palette_orientation == "+" else "+"
+
+    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
+    if colors:
+        new_hexcodes = colors  # Override colors if provided
     if not xlim:
         xlim = 0
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
-        function_name = getattr(sequential, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
-
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
-    else:
-        new_hexcodes = hexcodes
-    if colors:
-        new_hexcodes = colors
+    # Determine maximum genomic position for scaling
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
+
+    # If user provides breaks, convert to ints
+    if not breaks:
+        breaks = generate_breaks(int(max_val))
+    else:
+        [int(x) for x in breaks]
+    xlim = xlim or 0
+    # Compute window size (handling exceptions)
     try:
         window = max(sdf["q_en"] - sdf["q_st"])
-    except:
-        p = (
-            ggplot(aes(x=[], y=[]))
-            + theme_minimal()  # Use a minimal theme with gridlines
+    except ValueError:  # Empty dataframe case
+        return ggplot(aes(x=[], y=[])) + theme_minimal()
+
+    # Determine axis label scale based on genomic position size
+    if max_val < 200_000:
+        x_label = "Genomic Position (Kbp)"
+    elif max_val < 200_000_000:
+        x_label = "Genomic Position (Mbp)"
+    else:
+        x_label = "Genomic Position (Gbp)"
+
+    if not deraster:
+        tri = (
+            ggplot(sdf)
+            + geom_raster(
+                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
+                alpha=1.0,
+            )  # Ensure full opacity
+            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + scale_color_discrete(guide=False)
+            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + coord_fixed(ratio=1)
+            + labs(x=x_label, y="", title=title_name)
             + theme(
-                panel_grid_major=element_blank(),  # Remove major gridlines (optional)
+                legend_position="none",
+                panel_grid_major=element_blank(),
                 panel_grid_minor=element_blank(),
-            )  # Remove minor gridlines (optional)
+                plot_background=element_blank(),
+                panel_background=element_blank(),
+                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_line_x=element_line(),
+                axis_line_y=element_blank(),
+                axis_ticks_major_x=element_line(),
+                axis_ticks_major_y=element_blank(),
+                axis_ticks_major=element_line(size=(width)),
+                title=element_text(size=(width * 1.4), hjust=0.5),
+                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+                axis_text_y=element_blank(),
+            )
         )
-        return p
-    if max_val < 100000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 100000000:
-        x_label = "Genomic Position (Mbp)"
+        axis = (
+            ggplot(sdf)
+            + geom_tile(
+                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
+                alpha=0,
+            )
+            + scale_color_discrete(guide=False)
+            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + coord_fixed(ratio=1)
+            + labs(x="", y="", title=title_name)
+            + theme(
+                legend_position="none",
+                panel_grid_major=element_blank(),
+                panel_grid_minor=element_blank(),
+                plot_background=element_blank(),
+                panel_background=element_blank(),
+                axis_line=element_line(color="black"),
+                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_ticks_major=element_line(),
+                axis_line_x=element_line(),
+                axis_line_y=element_blank(),
+                axis_ticks_major_x=element_line(),
+                axis_ticks_major_y=element_blank(),
+                axis_text_x=element_line(),
+                axis_text_y=element_blank(),
+                plot_title=element_blank(),
+                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+            )
+        )
     else:
-        x_label = "Genomic Position (Gbp)"
-    p = (
-        ggplot(sdf)
-        + geom_tile(
-            aes(x="r_st", y="q_st", fill="discrete", height=window, width=window)
+        tri = (
+            ggplot(sdf)
+            + geom_tile(
+                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
+                alpha=1.0,
+            )  # Ensure full opacity
+            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + scale_color_discrete(guide=False)
+            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + coord_fixed(ratio=1)
+            + labs(x=x_label, y="", title=title_name)
+            + theme(
+                legend_position="none",
+                panel_grid_major=element_blank(),
+                panel_grid_minor=element_blank(),
+                plot_background=element_blank(),
+                panel_background=element_blank(),
+                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_line_x=element_line(),
+                axis_line_y=element_blank(),
+                axis_ticks_major_x=element_line(),
+                axis_ticks_major_y=element_blank(),
+                axis_ticks_major=element_line(),
+                axis_text_y=element_blank(),
+                title=element_blank(),
+                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+            )
         )
-        + scale_color_discrete(guide=False)
-        + scale_fill_manual(
-            values=new_hexcodes,
-            guide=False,
+        axis = (
+            ggplot(sdf)
+            + geom_tile(
+                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
+                alpha=0,
+            )
+            + scale_color_discrete(guide=False)
+            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + coord_fixed(ratio=1)
+            + labs(x="", y="", title="")
+            + theme(
+                legend_position="none",
+                panel_grid_major=element_blank(),
+                panel_grid_minor=element_blank(),
+                plot_background=element_blank(),
+                panel_background=element_blank(),
+                axis_line=element_line(color="black"),
+                axis_text=element_text(family=["DejaVu Sans"]),
+                axis_ticks_major=element_line(),
+                axis_line_x=element_line(),
+                axis_line_y=element_blank(),
+                axis_ticks_major_x=element_line(),
+                axis_ticks_major_y=element_blank(),
+                axis_text_x=element_line(),
+                axis_text_y=element_blank(),
+                plot_title=element_blank(),
+                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+            )
         )
-        + theme(
-            legend_position="none",
-            panel_grid_major=element_blank(),
-            panel_grid_minor=element_blank(),
-            plot_background=element_blank(),
-            panel_background=element_blank(),
-            axis_line=element_line(color="black"),  # Adjust axis line size
-            axis_text=element_text(
-                family=["Dejavu Sans"]
-            ),  # Change axis text font and size
-            axis_ticks_major=element_line(),
-            title=element_text(
-                family=["Dejavu Sans"],  # Change title font family
-            ),
-        )
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + coord_fixed(ratio=1)
-        + labs(x=None, y=None, title=title_name)
-    )
 
-    # Adjust x-axis label size
-    p += theme(axis_title_x=element_blank())
-    p += theme(axis_title_y=element_blank())
-    # p += theme(title=element_blank())
-
-    return p
+    return tri, axis
 
 
-def make_tri(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
-    if not breaks:
-        breaks = True
+def rotate_vectorized_tri(svg_path, scale_x, scale_y):
+    # Define SVG namespace
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+
+    # Parse the SVG file
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+
+    # Find all <g> elements with id="PolyCollection_1"
+    g_elements = root.find(".//svg:g[@id='PolyCollection_1']", namespaces=ns)
+
+    if g_elements is not None:
+        # Apply the rotation transform to the group
+        scale_factor = 1 / math.sqrt(2)
+        transform = f"rotate(45 0 0) translate({scale_x}, {scale_y}) scale({scale_factor}, {scale_factor})"
+        g_elements.set("transform", transform)
+
+        # Save the modified SVG
+
+    viewBox = root.get("viewBox")
+
+    if viewBox:
+        min_x, min_y, width, height = map(float, viewBox.split())
+        new_min_y = min_y + height / 2  # Move down by half the height
+        new_height = height / 2  # Reduce height by half
+        root.set("viewBox", f"{min_x} {new_min_y} {width} {new_height}")
     else:
-        breaks = [float(number) for number in breaks]
-    if not xlim:
-        xlim = 0
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
+        print("No viewBox found. Consider adding one manually.")
+
+    # Hacky, but it works to halve the height
+    height_svg = root.get("height")
+    if height_svg:
+        current_height = re.match(r"(\d*\.?\d+)([a-zA-Z%]*)", height_svg)
+        if current_height:
+            numeric_height, unit = current_height.groups()
+            numeric_height = float(numeric_height)
+
+            root.set("height", f"{numeric_height / 1.8}pt")
+    tree.write(svg_path)
+
+
+def rotate_rasterized_tri(svg_path, shift_x, shift_y):
+    # Load the SVG file
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+
+    # Namespace handling
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    # Find all image elements with base64 embedded data
+    for image in root.findall(".//svg:image", ns):
+        href = image.get("{http://www.w3.org/1999/xlink}href", "")
+        if href.startswith("data:image/png;base64,"):
+            # Get the current width and height of the image
+            width = float(image.get("width", 0)) / math.sqrt(2)
+            height = float(image.get("height", 0)) / math.sqrt(2)
+            # Set the new width and height
+            image.set("width", str(width))
+            image.set("height", str(height))
+            # Apply a 270-degree rotation (about the top-left corner of the image)
+            transform = image.get("transform", "")
+            new_transform = (
+                f"rotate(45, 0, 0) translate({shift_x}, {shift_y}) {transform}"
+                if transform
+                else f"rotate(45, 0, {height}) translate({shift_x}, {shift_y})"
+            )
+            image.set("transform", new_transform)
+    # Update viewbox
+    viewBox = root.get("viewBox")
+
+    if viewBox:
+        min_x, min_y, width, height = map(float, viewBox.split())
+        new_min_y = min_y + height / 2  # Move down by half the height
+        new_height = height / 2  # Reduce height by half
+        root.set("viewBox", f"{min_x} {new_min_y} {width} {new_height}")
     else:
-        function_name = getattr(sequential, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
+        print("No viewBox found. Consider adding one manually.")
 
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
+    # Hacky, but it works to halve the height
+    height_svg = root.get("height")
+    if height_svg:
+        current_height = re.match(r"(\d*\.?\d+)([a-zA-Z%]*)", height_svg)
+        if current_height:
+            numeric_height, unit = current_height.groups()
+            numeric_height = float(numeric_height)
+
+            root.set("height", f"{numeric_height / 1.8}pt")
     else:
-        new_hexcodes = hexcodes
-    if colors:
-        new_hexcodes = colors
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-    window = max(sdf["q_en"] - sdf["q_st"])
-    if max_val < 100000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 100000000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-    p = (
-        ggplot(sdf)
-        + geom_tile(
-            aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
-        )
-        + scale_color_discrete(guide=False)
-        + scale_fill_manual(
-            values=new_hexcodes,
-            guide=False,
-        )
-        + theme(
-            legend_position="none",
-            panel_grid_major=element_blank(),
-            panel_grid_minor=element_blank(),
-            plot_background=element_blank(),
-            panel_background=element_blank(),
-            axis_line=element_line(color="black"),  # Adjust axis line size
-            axis_text=element_text(
-                family=["DejaVu Sans"]
-            ),  # Change axis text font and size
-            axis_ticks_major=element_line(),
-            title=element_text(
-                family=["DejaVu Sans"],  # Change title font family
-            ),
-        )
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + coord_fixed(ratio=1)
-        + labs(x="", y="", title=title_name)
-    )
+        print("Warning: Could not parse height attribute.")
 
-    # Adjust x-axis label size
-    p += theme(axis_title_x=element_text())
-
-    return p
+    # Save the modified SVG back to the same file
+    tree.write(svg_path)
 
 
-def make_tri2(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
+def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
     if not breaks:
         breaks = True
     else:
@@ -728,7 +988,7 @@ def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoin
         function_name = getattr(sequential, palette)
         hexcodes = function_name.hex_colors
     else:
-        function_name = getattr(sequential, "Spectral_11")
+        function_name = getattr(diverging, "Spectral_11")
         palette_orientation = "-"
         hexcodes = function_name.hex_colors
 
@@ -770,7 +1030,6 @@ def create_grid(
     directory,
     palette,
     palette_orientation,
-    no_hist,
     single_names,
     double_names,
     is_freq,
@@ -779,6 +1038,10 @@ def create_grid(
     custom_breakpoints,
     axes_label,
     is_bed,
+    width,
+    breaks,
+    deraster,
+    vector_format,
 ):
     new_index = []
     transpose_index = []
@@ -844,59 +1107,71 @@ def create_grid(
                 None,
             )
         double_list.append(df)
+    # This is the diagonals
     for plot in single_list:
-        heatmap = make_dot2(
-            plot,
-            plot["q"].iloc[1],
-            palette,
-            palette_orientation,
-            custom_colors,
-            axes_label,
-            xlim,
+        heatmap = make_dot_final(
+            sdf=plot,
+            width=width,
+            palette=palette,
+            palette_orientation=palette_orientation,
+            colors=custom_colors,
+            breaks=axes_label,
+            xlim=xlim,
+            transpose=False,
+            deraster=deraster,
         )
         single_heatmap_list.append(heatmap)
     for indie in new_index:
         xd = new_index.index(indie)
+        # These are the non-diagonal transposes and normals!
         if transpose_index[xd] == 0:
-            heatmap = make_dot2(
-                double_list[indie],
-                f"{double_names[indie][0]}_{double_names[indie][1]}",
-                palette,
-                palette_orientation,
-                custom_colors,
-                axes_label,
-                xlim,
+            heatmap = make_dot_final(
+                sdf=double_list[indie],
+                width=width,
+                palette=palette,
+                palette_orientation=palette_orientation,
+                colors=custom_colors,
+                breaks=axes_label,
+                xlim=xlim,
+                transpose=True,
+                deraster=deraster,
             )
             normal_heatmap_list.append(heatmap)
-            heatmap_t = make_dot3(
+            heatmap_t = make_dot_final(
                 double_list[indie],
-                f"{double_names[indie][1]}_{double_names[indie][0]}",
+                width,
                 palette,
                 palette_orientation,
                 custom_colors,
                 axes_label,
                 xlim,
+                transpose=False,
+                deraster=deraster,
             )
             transpose_heatmap_list.append(heatmap_t)
         else:
-            heatmap = make_dot3(
+            heatmap = make_dot_final(
                 double_list[indie],
-                f"{double_names[indie][0]}_{double_names[indie][1]}",
+                width,
                 palette,
                 palette_orientation,
                 custom_colors,
                 axes_label,
                 xlim,
+                transpose=True,
+                deraster=deraster,
             )
             normal_heatmap_list.append(heatmap)
-            heatmap_t = make_dot2(
+            heatmap_t = make_dot_final(
                 double_list[indie],
-                f"{double_names[indie][1]}_{double_names[indie][0]}",
+                width,
                 palette,
                 palette_orientation,
                 custom_colors,
                 axes_label,
                 xlim,
+                transpose=False,
+                deraster=deraster,
             )
             transpose_heatmap_list.append(heatmap_t)
 
@@ -911,28 +1186,31 @@ def create_grid(
     start_grid = pw.Brick(figsize=(9, 9))
     n = single_length * single_length
 
-    if n > 4:
+    if n > 9:
         print(f"This might take a while\n...\n")
 
     printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     tots = 0
-    col_names = pw.Brick(figsize=(2, 9))
-    row_names = pw.Brick(figsize=(9, 2))
+    col_names = pw.Brick(figsize=(width / 4.5, width))
+    row_names = pw.Brick(figsize=(width, width / 4.5))
     for i in range(single_length):
-        row_grid = pw.Brick(figsize=(9, 9))
+        row_grid = pw.Brick(figsize=(width, width))
         for j in range(single_length):
             if i == j:
                 if len(single_heatmap_list) == 0:
-                    g1 = pw.Brick(figsize=(9, 9))
+                    g1 = pw.Brick(figsize=(width, width))
                 else:
-                    g1 = pw.load_ggplot(single_heatmap_list[i], figsize=(9, 9))
+                    g1 = pw.load_ggplot(single_heatmap_list[i], figsize=(width, width))
 
             elif i < j:
-                g1 = pw.load_ggplot(normal_heatmap_list[normal_counter], figsize=(9, 9))
+                g1 = pw.load_ggplot(
+                    normal_heatmap_list[normal_counter], figsize=(width, width)
+                )
                 normal_counter += 1
             elif i > j:
                 g1 = pw.load_ggplot(
-                    transpose_heatmap_list[trans_to_use[trans_counter]], figsize=(9, 9)
+                    transpose_heatmap_list[trans_to_use[trans_counter]],
+                    figsize=(width, width),
                 )
                 trans_counter += 1
             if j == 0:
@@ -954,7 +1232,7 @@ def create_grid(
                 x=0,
                 y=0,
                 label=single_names[w],
-                size=32,
+                size=width * 3,
                 angle=90,
                 ha="center",
                 va="center",
@@ -984,7 +1262,7 @@ def create_grid(
                 x=0,
                 y=0,
                 label=single_names[w],
-                size=32,
+                size=width * 3,
                 ha="center",
                 va="center",
             )
@@ -1004,8 +1282,8 @@ def create_grid(
                 aspect_ratio=0.5,  # Adjust the aspect ratio for the desired width/height
             )
         )
-        g1 = pw.load_ggplot(p1, figsize=(2, 9))
-        g2 = pw.load_ggplot(p2, figsize=(9, 2))
+        g1 = pw.load_ggplot(p1, figsize=(width / 4.5, width))
+        g2 = pw.load_ggplot(p2, figsize=(width, width / 4.5))
 
         if w == 0:
             col_names = g1
@@ -1038,7 +1316,7 @@ def create_grid(
     gridname = f"{single_length}x{single_length}_GRID"
     print(f"\nGrid complete! Saving to {directory}/{gridname}...\n")
     start_grid.savefig(f"{directory}/{gridname}.png")
-    start_grid.savefig(f"{directory}/{gridname}.pdf", format="pdf")
+    start_grid.savefig(f"{directory}/{gridname}.{vector_format}", format=vector_format)
     print(f"Grid saved successfully!\n")
 
 
@@ -1059,6 +1337,9 @@ def create_plots(
     from_file,
     is_pairwise,
     axes_labels,
+    axes_tick_number,
+    vector_format,
+    deraster,
 ):
     df = read_df(
         sdf,
@@ -1086,22 +1367,25 @@ def create_plots(
             palette_orientation,
             custom_colors,
             axes_labels,
+            axes_tick_number,
             xlim,
+            deraster,
+            width,
         )
         print(f"Creating plots and saving to {plot_filename}...\n")
         ggsave(
             heatmap,
-            width=9,
-            height=9,
+            width=width,
+            height=width,
             dpi=dpi,
-            format="pdf",
-            filename=f"{plot_filename}_COMPARE.pdf",
+            format=vector_format,
+            filename=f"{plot_filename}_COMPARE.{vector_format}",
             verbose=False,
         )
         ggsave(
             heatmap,
-            width=9,
-            height=9,
+            width=width,
+            height=width,
             dpi=dpi,
             format="png",
             filename=f"{plot_filename}_COMPARE.png",
@@ -1128,8 +1412,8 @@ def create_plots(
                 width=3,
                 height=3,
                 dpi=dpi,
-                format="pdf",
-                filename=f"{plot_filename}_HIST.pdf",
+                format=vector_format,
+                filename=f"{plot_filename}_HIST.{vector_format}",
                 verbose=False,
             )
             ggsave(
@@ -1146,6 +1430,8 @@ def create_plots(
             )
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
+        if deraster:
+            print(f"Derasterization turned off. This may take a while...\n")
         tri_plot = make_tri(
             sdf,
             plot_filename,
@@ -1154,15 +1440,9 @@ def create_plots(
             custom_colors,
             axes_labels,
             xlim,
-        )
-        tri_plot_axis_only = make_tri2(
-            sdf,
-            plot_filename,
-            palette,
-            palette_orientation,
-            custom_colors,
-            axes_labels,
-            xlim,
+            axes_tick_number,
+            deraster,
+            width,
         )
         full_plot = make_dot(
             check_st_en_equality(sdf),
@@ -1171,74 +1451,85 @@ def create_plots(
             palette_orientation,
             custom_colors,
             axes_labels,
+            axes_tick_number,
             xlim,
+            deraster,
+            width,
         )
-        print(f"Creating plots and saving to {plot_filename}...\n")
-        triplot_no_axis = tri_plot + theme(
-            axis_text_x=element_blank(),
-            axis_text_y=element_blank(),
-            axis_title_x=element_blank(),
-            axis_title_y=element_blank(),
-            axis_line_x=element_blank(),
-            axis_line_y=element_blank(),
-            axis_ticks_major=element_blank(),
-            axis_ticks_minor=element_blank(),
-            panel_background=element_blank(),
-            panel_grid_major=element_blank(),
-            panel_grid_minor=element_blank(),
-            plot_title=element_blank(),
-        )
-        ggsave(
-            triplot_no_axis,
-            width=9,
-            height=9,
-            dpi=600,
-            format="png",
-            filename=f"{plot_filename}_TRI_NOAXIS.png",
-            verbose=False,
-        )
-        ggsave(
-            tri_plot_axis_only,
-            width=9,
-            height=9,
-            dpi=600,
-            format="png",
-            filename=f"{plot_filename}_AXIS.png",
-            verbose=False,
-        )
-
-        png_no_axes = Image.open(f"{plot_filename}_TRI_NOAXIS.png")
-        rotated_png = png_no_axes.rotate(315, expand=True)
-
-        rotated_png.save(f"{plot_filename}_ROTATED_TRI_NOAXIS.png")
-        overlap_axis(rotated_png, f"{plot_filename}_AXIS.png", plot_filename)
-
-        if os.path.exists(f"{plot_filename}_ROTATED_TRI_NOAXIS.png"):
-            os.remove(f"{plot_filename}_ROTATED_TRI_NOAXIS.png")
-        if os.path.exists(f"{plot_filename}_TRI_NOAXIS.png"):
-            os.remove(f"{plot_filename}_TRI_NOAXIS.png")
-
         ggsave(
             full_plot,
-            width=9,
-            height=9,
+            width=width,
+            height=width,
             dpi=dpi,
-            format="pdf",
-            filename=f"{plot_filename}_FULL.pdf",
+            format=vector_format,
+            filename=f"{plot_filename}_FULL.{vector_format}",
             verbose=False,
         )
         ggsave(
             full_plot,
-            width=9,
-            height=9,
+            width=width,
+            height=width,
             dpi=dpi,
             format="png",
             filename=f"{plot_filename}_FULL.png",
             verbose=False,
         )
+        tri_prefix = f"{plot_filename}_TRI"
+        ggsave(
+            tri_plot[0],
+            width=width,
+            height=width,
+            dpi=dpi,
+            format="svg",
+            filename=f"{tri_prefix}.svg",
+            verbose=False,
+        )
+
+        # These scaling values were determined thorugh much trial and error. Please don't delete :)
+        if deraster:
+            scaling_values = (46.62 * width, -3.75 * width)
+            rotate_vectorized_tri(
+                f"{tri_prefix}.svg", scaling_values[0], scaling_values[1]
+            )
+            try:
+                cairosvg.svg2png(
+                    url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.png", dpi=dpi
+                )
+            except:
+                print(f"Error installing cairosvg. Unable to convert svg file. \n")
+        else:
+            scaling_values = (44.6 * width, -23 * width)
+            rotate_rasterized_tri(
+                f"{tri_prefix}.svg", scaling_values[0], scaling_values[1]
+            )
+            try:
+                cairosvg.svg2png(
+                    url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.png", dpi=dpi
+                )
+            except:
+                print(f"Error installing cairosvg. Unable to convert svg file. \n")
+
+        # Convert from svg to selected vector format. Ignore error if user has issues with cairosvg.
+        try:
+            if vector_format != "svg":
+                if vector_format == "pdf":
+                    cairosvg.svg2pdf(
+                        url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.pdf"
+                    )
+                    if os.path.exists(f"{tri_prefix}.svg"):
+                        os.remove(f"{tri_prefix}.svg")
+                elif vector_format == "ps":
+                    cairosvg.svg2pdf(
+                        url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.ps"
+                    )
+                    if os.path.exists(f"{tri_prefix}.svg"):
+                        os.remove(f"{tri_prefix}.svg")
+        except:
+            pass
+
         if no_hist:
             print(
-                f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_FULL.png and {plot_filename}_FULL.pdf saved sucessfully. \n"
+                f"Triangle plots and full plots for {plot_filename} saved sucessfully. \n"
             )
         else:
             ggsave(
@@ -1246,8 +1537,8 @@ def create_plots(
                 width=3,
                 height=3,
                 dpi=dpi,
-                format="pdf",
-                filename=plot_filename + "_HIST.pdf",
+                format=vector_format,
+                filename=plot_filename + f"_HIST.{vector_format}",
                 verbose=False,
             )
             ggsave(
@@ -1260,5 +1551,5 @@ def create_plots(
                 verbose=False,
             )
             print(
-                f"{plot_filename}_TRI.png, {plot_filename}_TRI.pdf, {plot_filename}_FULL.png, {plot_filename}_FULL.pdf, {plot_filename}_HIST.png and {plot_filename}_HIST.pdf, saved sucessfully. \n"
+                f"Triangle plots, full plots, and histogram for {plot_filename} saved sucessfully. \n"
             )
