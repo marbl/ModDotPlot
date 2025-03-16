@@ -5,7 +5,6 @@ from moddotplot.parse_fasta import (
     getInputHeaders,
     isValidFasta,
     extractFiles,
-    sortInput
 )
 
 from moddotplot.estimate_identity import (
