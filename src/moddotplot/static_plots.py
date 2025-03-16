@@ -1,4 +1,3 @@
-from ast import excepthandler
 from plotnine import (
     ggsave,
     ggplot,
@@ -282,32 +281,28 @@ def read_df(
     return df
 
 
-def generate_breaks(number, min_breaks=6, max_breaks=8):
+def generate_breaks(number, min_breaks=5, max_breaks=9):
     # Determine the order of magnitude
     magnitude = 10 ** int(
-        np.floor(np.log10(number))
+        math.floor(np.log10(number))
     )  # Base power of 10 (e.g., 10M, 1M, 100K)
-
-    # Find a reasonable step size
-    possible_steps = [
-        magnitude // d
-        for d in [10, 5, 4, 2, 1]
-        if (number // (magnitude // d)) in range(min_breaks, max_breaks + 1)
-    ]
-
-    step = (
-        possible_steps[0] if possible_steps else magnitude // 5
-    )  # Default to 1/5th if no exact match
-
+    threshold = math.ceil(number / magnitude)
+    while threshold > max_breaks:
+        magnitude = magnitude * 2
+        threshold = np.ceil(number / magnitude)
+    while threshold < min_breaks:
+        magnitude = magnitude / 2
+        threshold = np.ceil(number / magnitude)
     # Generate breakpoints
-    breaks = list(range(0, ((number // step) + 1) * step, step))
+    breaks = list(range(0, (threshold * magnitude) + magnitude, magnitude))
 
     return breaks
 
 
 def make_dot(
     sdf,
-    title_name,
+    name_x,
+    name_y,
     palette,
     palette_orientation,
     colors,
@@ -316,7 +311,17 @@ def make_dot(
     xlim,
     deraster,
     width,
+    is_pairwise,
 ):
+    if is_pairwise:
+        title_name = f"Comparative Plot: {name_x} vs {name_y}"
+    else:
+        title_name = f"Self-Identity Plot: {name_x}"
+    title_length = 2 * width
+    if len(title_name) > 50:
+        title_length = 1.5 * width
+    elif len(title_name) > 80:
+        title_length = width
     # Select the color palette
     if hasattr(diverging, palette):
         function_name = getattr(diverging, palette)
@@ -374,8 +379,10 @@ def make_dot(
         axis_ticks_major=element_line(
             size=(width), color="black"
         ),  # Increased tick length
-        title=element_blank(),  # Center title
-        axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+        title=element_text(
+            family=["DejaVu Sans"], size=title_length, hjust=0.5
+        ),  # Center title
+        axis_title_x=element_text(size=(width * 1.4), family=["DejaVu Sans"]),
         strip_background=element_blank(),  # Remove facet strip background
         strip_text=element_text(
             size=(width * 1.2), family=["DejaVu Sans"]
@@ -695,7 +702,7 @@ def make_tri(
                 axis_ticks_major_y=element_blank(),
                 axis_ticks_major=element_line(size=(width)),
                 title=element_text(size=(width * 1.4), hjust=0.5),
-                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+                axis_title_x=element_text(size=(width * 1.4), family=["DejaVu Sans"]),
                 axis_text_y=element_blank(),
             )
         )
@@ -1362,7 +1369,8 @@ def create_plots(
     if is_pairwise:
         heatmap = make_dot(
             sdf,
-            plot_filename,
+            name_x,
+            name_y,
             palette,
             palette_orientation,
             custom_colors,
@@ -1371,6 +1379,7 @@ def create_plots(
             xlim,
             deraster,
             width,
+            True,
         )
         print(f"Creating plots and saving to {plot_filename}...\n")
         ggsave(
@@ -1394,17 +1403,17 @@ def create_plots(
         try:
             if not heatmap.data:
                 print(
-                    f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n"
+                    f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
                 )
                 return 0
         except ValueError:
             print(
-                f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n"
+                f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
             )
             return 0
         if no_hist:
             print(
-                f"{plot_filename}_COMPARE.pdf and {plot_filename}_COMPARE.png saved sucessfully. \n"
+                f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
             )
         else:
             ggsave(
@@ -1446,7 +1455,8 @@ def create_plots(
         )
         full_plot = make_dot(
             check_st_en_equality(sdf),
-            plot_filename,
+            name_x,
+            name_y,
             palette,
             palette_orientation,
             custom_colors,
@@ -1455,6 +1465,7 @@ def create_plots(
             xlim,
             deraster,
             width,
+            False,
         )
         ggsave(
             full_plot,
