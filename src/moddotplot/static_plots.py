@@ -286,15 +286,15 @@ def generate_breaks(number, min_breaks=5, max_breaks=9):
     magnitude = 10 ** int(
         math.floor(np.log10(number))
     )  # Base power of 10 (e.g., 10M, 1M, 100K)
-    threshold = math.ceil(number/magnitude)
+    threshold = math.ceil(number / magnitude)
     while threshold > max_breaks:
         magnitude = magnitude * 2
-        threshold = np.ceil(number/magnitude)
+        threshold = np.ceil(number / magnitude)
     while threshold < min_breaks:
         magnitude = magnitude / 2
-        threshold = np.ceil(number/magnitude)
+        threshold = np.ceil(number / magnitude)
     # Generate breakpoints
-    breaks = list(range(0, (threshold*magnitude)+magnitude,magnitude))
+    breaks = list(range(0, (threshold * magnitude) + magnitude, magnitude))
 
     return breaks
 
@@ -311,15 +311,15 @@ def make_dot(
     xlim,
     deraster,
     width,
-    is_pairwise
+    is_pairwise,
 ):
     if is_pairwise:
         title_name = f"Comparative Plot: {name_x} vs {name_y}"
     else:
         title_name = f"Self-Identity Plot: {name_x}"
-    title_length = 2*width
+    title_length = 2 * width
     if len(title_name) > 50:
-        title_length = 1.5*width
+        title_length = 1.5 * width
     elif len(title_name) > 80:
         title_length = width
     # Select the color palette
@@ -379,7 +379,9 @@ def make_dot(
         axis_ticks_major=element_line(
             size=(width), color="black"
         ),  # Increased tick length
-        title=element_text(family=["DejaVu Sans"], size=title_length, hjust=0.5),  # Center title
+        title=element_text(
+            family=["DejaVu Sans"], size=title_length, hjust=0.5
+        ),  # Center title
         axis_title_x=element_text(size=(width * 1.4), family=["DejaVu Sans"]),
         strip_background=element_blank(),  # Remove facet strip background
         strip_text=element_text(
@@ -1377,7 +1379,7 @@ def create_plots(
             xlim,
             deraster,
             width,
-            True
+            True,
         )
         print(f"Creating plots and saving to {plot_filename}...\n")
         ggsave(
@@ -1463,7 +1465,7 @@ def create_plots(
             xlim,
             deraster,
             width,
-            False
+            False,
         )
         ggsave(
             full_plot,
