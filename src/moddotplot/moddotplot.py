@@ -5,6 +5,7 @@ from moddotplot.parse_fasta import (
     getInputHeaders,
     isValidFasta,
     extractFiles,
+    sortInput
 )
 
 from moddotplot.estimate_identity import (
@@ -258,6 +259,13 @@ def get_parser():
         "--compare-only",
         action="store_true",
         help="Create a dotplot with two different sequences (skips self-identity plots).",
+    )
+
+    static_parser.add_argument(
+        "--compare-order",
+        choices=["sequential", "size"],
+        default="sequential",
+        help = "Order in which sequences appear in the comparative plot. Default is 'sequential': First file on x-axis, second file on y-axis. Another option is 'size': The larger sequence on the x-axis and the smaller on y-axis."
     )
 
     static_parser.add_argument(
@@ -907,6 +915,10 @@ def main():
             grid_val_singles = []
             grid_val_single_names = []
         sequences = list(zip(seq_list, k_list))
+        if args.compare_order == 'size':
+            sequences = sorted(sequences, key=lambda seq: len(seq[1]), reverse=True)
+        for seq in sequences:
+            print(seq[0],len(seq[1]))
         if len(sequences) > 6 and (args.grid or args.grid_only):
             print("Too many sequences to create a grid. Skipping. \n")
 
@@ -1022,15 +1034,6 @@ def main():
                     smaller_length = len(smaller_seq)
                     larger_seq_name = sequences[i][0]
                     smaller_seq_name = sequences[j][0]
-
-                    if larger_length < smaller_length:
-                        smaller_seq = sequences[i][1]
-                        larger_seq = sequences[j][1]
-                        larger_length = len(larger_seq)
-                        smaller_length = len(smaller_seq)
-                        larger_seq_name = sequences[j][0]
-                        smaller_seq_name = sequences[i][0]
-
                     win = args.window
                     res = args.resolution
                     if args.window:
@@ -1062,10 +1065,10 @@ def main():
                     print(f"\tPlot Resolution r: {res}\n")
 
                     pair_mat = createPairwiseMatrix(
-                        larger_length,
                         smaller_length,
-                        larger_seq,
+                        larger_length,
                         smaller_seq,
+                        larger_seq,
                         win,
                         seq_sparsity,
                         args.delta,
@@ -1098,17 +1101,17 @@ def main():
                             # Log saving bed file
                             if not args.output_dir:
                                 bedfile_output = (
-                                    smaller_seq_name
+                                    larger_seq_name
                                     + "_"
-                                    + larger_seq_name
+                                    + smaller_seq_name
                                     + "_COMPARE.bed"
                                 )
                             else:
                                 bedfile_output = os.path.join(
                                     args.output_dir,
-                                    smaller_seq_name
+                                    larger_seq_name
                                     + "_"
-                                    + larger_seq_name
+                                    + smaller_seq_name
                                     + "_COMPARE.bed",
                                 )
                             with open(bedfile_output, "w") as bedfile:
@@ -1120,8 +1123,8 @@ def main():
                             create_plots(
                                 sdf=[bed],
                                 directory=args.output_dir if args.output_dir else ".",
-                                name_x=smaller_seq_name,
-                                name_y=larger_seq_name,
+                                name_x=larger_seq_name,
+                                name_y=smaller_seq_name,
                                 palette=args.palette,
                                 palette_orientation=args.palette_orientation,
                                 no_hist=args.no_hist,
