@@ -971,7 +971,6 @@ def main():
                     args.ambiguous,
                     expectation,
                 )
-                print(seq_list[i])
                 bed = convertMatrixToBed(
                     self_mat, win, args.identity, seq_name, seq_name, True
                 )
