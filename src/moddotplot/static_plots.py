@@ -284,17 +284,20 @@ def read_df(
 def generate_breaks(number, min_breaks=5, max_breaks=9):
     # Determine the order of magnitude
     magnitude = 10 ** int(
-        math.floor(np.log10(number))
+        math.floor(math.log10(number))
     )  # Base power of 10 (e.g., 10M, 1M, 100K)
     threshold = math.ceil(number / magnitude)
+
     while threshold > max_breaks:
-        magnitude = magnitude * 2
-        threshold = np.ceil(number / magnitude)
+        magnitude *= 2
+        threshold = math.ceil(number / magnitude)
+
     while threshold < min_breaks:
-        magnitude = magnitude / 2
-        threshold = np.ceil(number / magnitude)
+        magnitude /= 2
+        threshold = math.ceil(number / magnitude)
+
     # Generate breakpoints
-    breaks = list(range(0, (threshold * magnitude) + magnitude, magnitude))
+    breaks = list(range(0, int((threshold * magnitude) + magnitude), int(magnitude)))
 
     return breaks
 
@@ -1400,29 +1403,14 @@ def create_plots(
             filename=f"{plot_filename}_COMPARE.png",
             verbose=False,
         )
-        try:
-            if not heatmap.data:
-                print(
-                    f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
-                )
-                return 0
-        except ValueError:
-            print(
-                f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
-            )
-            return 0
-        if no_hist:
-            print(
-                f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
-            )
-        else:
+        if not no_hist:
             ggsave(
                 histy,
                 width=3,
                 height=3,
                 dpi=dpi,
                 format=vector_format,
-                filename=f"{plot_filename}_HIST.{vector_format}",
+                filename=f"{plot_filename}_COMPARE_HIST.{vector_format}",
                 verbose=False,
             )
             ggsave(
@@ -1431,11 +1419,23 @@ def create_plots(
                 height=3,
                 dpi=dpi,
                 format="png",
-                filename=f"{plot_filename}_HIST.png",
+                filename=f"{plot_filename}_COMPARE_HIST.png",
                 verbose=False,
             )
+        try:
+            if not heatmap.data:
+                print(
+                    f"{plot_filename} comparative plots and histogram saved sucessfully. \n"
+                )
+                return 0
+        except ValueError:
             print(
-                f"{plot_filename}_COMPARE.pdf, {plot_filename}_COMPARE.png, {plot_filename}_HIST.pdf and {plot_filename}_HIST.png saved sucessfully. \n"
+                f"{plot_filename} comparative plots and histogram saved sucessfully. \n"
+            )
+            return 0
+        if no_hist:
+            print(
+                f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
             )
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
