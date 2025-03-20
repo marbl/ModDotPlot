@@ -283,7 +283,7 @@ def get_parser():
         "--width", default=18, type=float, help="Plot width (also height for _FULL)."
     )
 
-    static_parser.add_argument("--dpi", default=600, type=int, help="Plot dpi.")
+    static_parser.add_argument("--dpi", default=300, type=int, help="Plot dpi.")
 
     # TODO: Create list of accepted colors.
     static_parser.add_argument(
