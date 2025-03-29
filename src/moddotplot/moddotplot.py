@@ -176,8 +176,8 @@ def get_parser():
     )
 
     static_input_group.add_argument(
-        "-b",
-        "--bed",
+        "-l",
+        "--load",
         default=argparse.SUPPRESS,
         help="Path to input paired-end bed file(s). Exclusively used in static mode.",
         nargs="+",
@@ -195,6 +195,13 @@ def get_parser():
     static_compare_group = static_parser.add_mutually_exclusive_group(required=False)
     static_window_size_group = static_parser.add_mutually_exclusive_group(
         required=False
+    )
+
+    static_parser.add_argument(
+        "-b",
+        "--bed",
+        default=None,
+        help="Bed file annotation."
     )
 
     static_parser.add_argument(
@@ -268,7 +275,7 @@ def get_parser():
     )
 
     static_parser.add_argument(
-        "--no-bed", action="store_true", help="Skip output of bed file."
+        "--no-bedpe", action="store_true", help="Skip output of paired-end bed file."
     )
 
     static_parser.add_argument(
@@ -280,7 +287,7 @@ def get_parser():
     )
 
     static_parser.add_argument(
-        "--width", default=18, type=float, help="Plot width (also height for _FULL)."
+        "--width", default=9, type=float, help="Plot width (also height for _FULL)."
     )
 
     static_parser.add_argument("--dpi", default=300, type=int, help="Plot dpi.")
@@ -430,6 +437,7 @@ def main():
                 config = json.load(f)
                 # TODO: Remove args that are interactive only
                 args.fasta = config.get("fasta")
+                args.load = config.get("load")
                 args.bed = config.get("bed")
 
                 # Distance matrix commands
@@ -458,17 +466,8 @@ def main():
                 args.breakpoints = config.get("breakpoints", args.breakpoints)
                 args.bin_freq = config.get("bin_freq", args.bin_freq)
 
-        #
-        """if args.grid or args.grid_only:
-            if not (args.compare or args.compare_only) and not args.bed:
-                print(
-                    f"Option --grid was selected, but no comparative plots will be produced. Please rerun ModDotPlot with the `--compare` or `--compare-only` option.\n"
-                )
-                sys.exit(10)"""
-
         # -----------INPUT COMMAND VALIDATION-----------
         # TODO: More tests!
-        # Validation for breakpoints command
         if args.breakpoints:
             # Check that start value for breakpoints = identity threshold value
             if float(args.breakpoints[0]) != float(args.identity):
@@ -483,15 +482,15 @@ def main():
                 sys.exit(2)
 
         # -----------BEDFILE INPUT FOR STATIC MODE-----------
-        if hasattr(args, "bed") and args.bed:
+        if hasattr(args, "load") and args.load:
             if args.grid or args.grid_only:
                 single_vals = []
                 double_vals = []
                 single_val_name = []
                 double_val_name = []
                 xlim_val_grid = 0
-            for bed in args.bed:
-                # If args.bed is provided as input, run static mode directly from the bed file. Skip counting input k-mers.
+            for bed in args.load:
+                # If args.load is provided as input, run static mode directly from the paired-end bed file. Skip counting input k-mers.
                 df = read_df_from_file(bed)
 
                 unique_query_names = df["#query_name"].unique()
@@ -529,6 +528,7 @@ def main():
                             axes_tick_number=args.axes_number,
                             vector_format=args.vector,
                             deraster=args.deraster,
+                            annotation=args.bed,
                         )
                     if args.grid or args.grid_only:
                         single_vals.append(df)
@@ -566,6 +566,7 @@ def main():
                             axes_tick_number=args.axes_number,
                             vector_format=args.vector,
                             deraster=args.deraster,
+                            annotation=args.bed,
                         )
                     if args.grid or args.grid_only:
                         double_vals.append(df)
@@ -1012,6 +1013,7 @@ def main():
                         axes_tick_number=args.axes_number,
                         vector_format=args.vector,
                         deraster=args.deraster,
+                        annotation=args.bed,
                     )
 
         # -----------COMPUTE COMPARATIVE PLOTS-----------
@@ -1140,6 +1142,7 @@ def main():
                                 axes_tick_number=args.axes_number,
                                 vector_format=args.vector,
                                 deraster=args.deraster,
+                                annotation=args.bed,
                             )
 
             if args.grid or args.grid_only:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ModDotPlot"
-version = "0.9.3"
+version = "0.9.4"
 requires-python = ">= 3.7"
 dependencies = [
   "pysam",
@@ -14,12 +14,12 @@ dependencies = [
   "plotnine==0.12.4",
   "palettable",
   "mmh3",
-  "tk",
   "setproctitle",
   "numpy",
   "pillow",
   "patchworklib==0.6.3",
-  "cairosvg"
+  "cairosvg",
+  "pygenometracks",
 ]
 authors = [
   {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"},
