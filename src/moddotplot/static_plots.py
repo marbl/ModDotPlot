@@ -38,6 +38,7 @@ import xml.etree.ElementTree as ET
 import sys
 import re
 from moddotplot.parse_fasta import printProgressBar
+import subprocess
 
 from moddotplot.const import (
     DIVERGING_PALETTES,
@@ -72,6 +73,56 @@ def check_pascal(single_val, double_val):
             f"Missing bed files required to create grid. Please verify all bed files are included."
         )
         sys.exit(8)
+
+def generate_ini_file(filename, ininame, color_value="bed_rgb", x_axis=True, display="collapsed"):
+    sections = ["[spacer]", "# height of space in cm (optional)", "height = 0.5", "", 
+                "[anianns_subtracted]", f"file = {filename}", "", 
+                "height = 1", f"display = {display}", f"color = {color_value}", 
+                "labels = false", "fontsize = 10", "file_type = bed"]
+    
+    if x_axis:
+        sections.insert(0, "[x-axis]")
+    
+    ini_content = "\n".join(sections)
+    with open(f"{ininame}.ini", "w") as file:
+        file.write(ini_content)
+
+def read_annotation_bed(filepath):
+    """Reads a BED file into a Pandas DataFrame and ensures correct formatting."""
+    col_names = ["chrom", "start", "end", "name", "score", "strand", 
+                 "thickStart", "thickEnd", "itemRgb"]  # Include additional fields
+    
+    df = pd.read_csv(filepath, sep="\t", comment="#", header=None)
+
+    # Ensure at least three required columns exist
+    if df.shape[1] < 3:
+        raise ValueError("Invalid BED file: must have at least 3 columns (chrom, start, end).")
+    
+    # Rename only the expected columns
+    df.columns = col_names[:df.shape[1]]
+    
+    # Ensure start and end columns contain valid integers
+    if df["start"].isna().any() or df["end"].isna().any():
+        raise ValueError("Invalid BED file: 'start' and 'end' columns must be integers and contain no missing values.")
+
+    return df
+
+def run_pygenometracks(inifile, region, output_file):
+    try:
+        command = [
+            "pyGenomeTracks", 
+            "--tracks", inifile, 
+            "--region", region, 
+            "-out", output_file, 
+            "--dpi", str(300)
+        ]
+    
+        # Run the command as if it were in the shell
+        subprocess.run(command, check=True)
+        return True
+    except Exception as e:
+        print(f"Error reading ini file: {e}")
+        return False
 
 
 def reverse_pascal(double_vals):
@@ -281,23 +332,26 @@ def read_df(
     return df
 
 
-def generate_breaks(number, min_breaks=5, max_breaks=9):
+def generate_breaks(min_number, max_number, min_breaks=5, max_breaks=9):
     # Determine the order of magnitude
+    difference = max_number - min_number
     magnitude = 10 ** int(
-        math.floor(math.log10(number))
+        math.floor(math.log10(difference))
     )  # Base power of 10 (e.g., 10M, 1M, 100K)
-    threshold = math.ceil(number / magnitude)
+    threshold = math.ceil(difference / magnitude)
+    print(threshold)
 
     while threshold > max_breaks:
         magnitude *= 2
-        threshold = math.ceil(number / magnitude)
+        threshold = math.ceil(difference / magnitude)
 
     while threshold < min_breaks:
         magnitude /= 2
-        threshold = math.ceil(number / magnitude)
+        threshold = math.ceil(difference / magnitude)
 
     # Generate breakpoints
-    breaks = list(range(0, int((threshold * magnitude) + magnitude), int(magnitude)))
+    breaks = list(range(min_number, int((threshold * magnitude) + magnitude + min_number), int(magnitude)))
+    print(breaks)
 
     return breaks
 
@@ -348,11 +402,12 @@ def make_dot(
     if not xlim:
         xlim = 0
     # Determine maximum genomic position for scaling
+    min_val = min(sdf["q_st"].min(), sdf["r_st"].min())
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(max_val))
+        breaks = generate_breaks(int(min_val),int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -398,8 +453,8 @@ def make_dot(
         + scale_color_discrete(guide=False)
         + scale_fill_manual(values=new_hexcodes, guide=False)
         + common_theme
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + scale_x_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
+        + scale_y_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
         + labs(x=x_label, y="", title=title_name)
@@ -448,11 +503,12 @@ def make_dot_grid(
     if not xlim:
         xlim = 0
     # Determine maximum genomic position for scaling
+    min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(max_val))
+        breaks = generate_breaks(int(min_val), int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -543,11 +599,12 @@ def make_dot_final(
     if not xlim:
         xlim = 0
     # Determine maximum genomic position for scaling
+    min_val = min(sdf["q_st"].min(), sdf["r_st"].min())
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(max_val))
+        breaks = generate_breaks(int(min_val), int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -657,11 +714,12 @@ def make_tri(
     if not xlim:
         xlim = 0
     # Determine maximum genomic position for scaling
+    min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(max_val))
+        breaks = generate_breaks(int(min_val), int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -688,8 +746,8 @@ def make_tri(
             )  # Ensure full opacity
             + scale_fill_manual(values=new_hexcodes, guide=False)
             + scale_color_discrete(guide=False)
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_x_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
+            + scale_y_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
             + coord_fixed(ratio=1)
             + labs(x=x_label, y="", title=title_name)
             + theme(
@@ -1350,6 +1408,7 @@ def create_plots(
     axes_tick_number,
     vector_format,
     deraster,
+    annotation
 ):
     df = read_df(
         sdf,
@@ -1368,6 +1427,20 @@ def create_plots(
     histy = make_hist(
         sdf, palette, palette_orientation, custom_colors, custom_breakpoints
     )
+
+    if annotation:
+        # Check if bedfile contains the correct sequence
+        bedfile_df = read_annotation_bed(annotation)
+        if bedfile_df is not None:
+            print(name_x,name_y)
+            if name_x or name_y in bedfile_df["chrom"].unique():
+                print(f"{name_x} in provided bedfile. Create bed track...")
+                ininame, _ = os.path.splitext(annotation)
+                generate_ini_file(filename=annotation, ininame=ininame)
+                run_pygenometracks(inifile=f"{ininame}.bed",region=name_x,output_file="deeznuts.png")
+            #unique_chroms = bedfile_df["chrom"].unique()
+            print(bedfile_df)
+            print(f"Generating annotation track")
 
     if is_pairwise:
         heatmap = make_dot(

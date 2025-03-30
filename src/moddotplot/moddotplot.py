@@ -5,6 +5,7 @@ from moddotplot.parse_fasta import (
     getInputHeaders,
     isValidFasta,
     extractFiles,
+    extractRegion
 )
 
 from moddotplot.estimate_identity import (
@@ -451,7 +452,7 @@ def main():
                 args.compare = config.get("compare", args.compare)
                 args.compare_only = config.get("compare_only", args.compare_only)
 
-                args.no_bed = config.get("no_bed", args.no_bed)
+                args.no_bedpe = config.get("no_bed", args.no_bedpe)
                 args.no_plot = config.get("no_plot", args.no_plot)
                 args.no_hist = config.get("no_hist", args.no_hist)
                 args.width = config.get("width", args.width)
@@ -930,6 +931,11 @@ def main():
             for i in range(len(sequences)):
                 seq_length = len(sequences[i][1])
                 seq_name = sequences[i][0]
+                seq_range = extractRegion(seq_name)
+                if not seq_range:
+                    seq_start_pos = 1
+                else:
+                    seq_start_pos = int(seq_range[1])
                 win = args.window
                 res = args.resolution
                 if args.window:
@@ -973,13 +979,13 @@ def main():
                     expectation,
                 )
                 bed = convertMatrixToBed(
-                    self_mat, win, args.identity, seq_name, seq_name, True
+                    self_mat, win, args.identity, seq_name, seq_name, True, seq_start_pos, seq_start_pos
                 )
                 if args.grid or args.grid_only:
                     grid_val_singles.append(bed)
                     grid_val_single_names.append(seq_name)
 
-                if not args.no_bed:
+                if not args.no_bedpe:
                     # Log saving bed file
                     if not args.output_dir:
                         bedfile_output = seq_name + ".bed"
@@ -1030,12 +1036,23 @@ def main():
 
             for i in range(len(sequences)):
                 for j in range(i + 1, len(sequences)):
+                    #Larger = x, smaller = y. This is pre-sorted earlier.
                     larger_seq = sequences[i][1]
                     smaller_seq = sequences[j][1]
                     larger_length = len(larger_seq)
                     smaller_length = len(smaller_seq)
                     larger_seq_name = sequences[i][0]
                     smaller_seq_name = sequences[j][0]
+                    larger_seq_range = extractRegion(larger_seq_name)
+                    if not larger_seq_range:
+                        larger_seq_start_pos = 1
+                    else:
+                        larger_seq_start_pos = int(larger_seq_range[1])
+                    smaller_seq_range = extractRegion(smaller_seq_name)
+                    if not larger_seq_range:
+                        smaller_seq_start_pos = 1
+                    else:
+                        smaller_seq_start_pos = int(smaller_seq_range[1])
                     win = args.window
                     res = args.resolution
                     if args.window:
@@ -1092,6 +1109,8 @@ def main():
                             seq_list[i],
                             seq_list[j],
                             False,
+                            larger_seq_start_pos,
+                            smaller_seq_start_pos
                         )
                         if args.grid or args.grid_only:
                             grid_val_doubles.append(bed)
@@ -1099,7 +1118,7 @@ def main():
                                 [larger_seq_name, smaller_seq_name]
                             )
                             xlim_val_grid = max(larger_length, xlim_val_grid)
-                        if not args.no_bed:
+                        if not args.no_bedpe:
                             # Log saving bed file
                             if not args.output_dir:
                                 bedfile_output = (
