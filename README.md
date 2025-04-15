@@ -108,7 +108,7 @@ Running _ModDotPlot_ in static mode skips running Dash and quickly creates plots
 - A self-identity dotplot for each sequence, as both an upper triangle matrix `_TRI` and full matrix `_FULL` representation.
 - A histogram of identity values for each sequence.
 
-All plots and histograms are output in a vectorized (default: `.svg`) and rasterized `.png` image. [plotnine](https://plotnine.readthedocs.io/en/v0.12.4/).
+All plots and histograms are output in a vectorized (default: `.svg`) and rasterized `.png` image. [Plotnine](https://plotnine.readthedocs.io/en/v0.12.4/) is the Python plotting library used, with [CairoSVG](https://cairosvg.org) used for converting between image formats.
 
 ModDotPlot supports highly customizable plotting features in static mode. See [static mode commands](#static-mode-commands) for a complete list of features.
 
