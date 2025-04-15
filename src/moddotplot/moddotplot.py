@@ -36,7 +36,7 @@ def get_parser():
     """
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="ModDotPlot: Visualization of Complex Repeat Structures",
+        description="ModDotPlot: Visualization of Tandem Repeats"
     )
     subparsers = parser.add_subparsers(
         dest="command", help="Choose mode: interactive or static"
@@ -452,7 +452,7 @@ def main():
                 args.compare = config.get("compare", args.compare)
                 args.compare_only = config.get("compare_only", args.compare_only)
 
-                args.no_bedpe = config.get("no_bed", args.no_bedpe)
+                args.no_bedpe = config.get("no_bedpe", args.no_bedpe)
                 args.no_plot = config.get("no_plot", args.no_plot)
                 args.no_hist = config.get("no_hist", args.no_hist)
                 args.width = config.get("width", args.width)
@@ -466,6 +466,11 @@ def main():
                 args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
                 args.breakpoints = config.get("breakpoints", args.breakpoints)
                 args.bin_freq = config.get("bin_freq", args.bin_freq)
+                args.axes_limits = config.get("axes_limits", args.axes_limits)
+                args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
+                args.vector = config.get("vector", args.vector)
+                args.deraster = config.get("deraster", args.deraster)
+
 
         # -----------INPUT COMMAND VALIDATION-----------
         # TODO: More tests!
@@ -988,15 +993,15 @@ def main():
                 if not args.no_bedpe:
                     # Log saving bed file
                     if not args.output_dir:
-                        bedfile_output = seq_name + ".bed"
+                        bedfile_output = seq_name + ".bedpe"
                     else:
                         bedfile_output = os.path.join(
-                            args.output_dir, seq_name + ".bed"
+                            args.output_dir, seq_name + ".bedpe"
                         )
                     with open(bedfile_output, "w") as bedfile:
                         for row in bed:
                             bedfile.write("\t".join(map(str, row)) + "\n")
-                    print(f"Saved bed file to {bedfile_output}\n")
+                    print(f"Saved self-identity matrix as a paired-end bed file to {bedfile_output}\n")
 
                 if (not args.no_plot) and (not args.grid_only):
                     create_plots(
@@ -1125,7 +1130,7 @@ def main():
                                     larger_seq_name
                                     + "_"
                                     + smaller_seq_name
-                                    + "_COMPARE.bed"
+                                    + "_COMPARE.bedpe"
                                 )
                             else:
                                 bedfile_output = os.path.join(
@@ -1133,12 +1138,12 @@ def main():
                                     larger_seq_name
                                     + "_"
                                     + smaller_seq_name
-                                    + "_COMPARE.bed",
+                                    + "_COMPARE.bedpe",
                                 )
                             with open(bedfile_output, "w") as bedfile:
                                 for row in bed:
                                     bedfile.write("\t".join(map(str, row)) + "\n")
-                            print(f"Saved bed file to {bedfile_output}\n")
+                            print(f"Saved comparative matrix as a paired-end bed file to {bedfile_output}\n")
 
                         if (not args.no_plot) and (not args.grid_only):
                             create_plots(
