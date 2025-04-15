@@ -1,5 +1,9 @@
 ![](images/logo.png)
+---
+[![PyPI](https://img.shields.io/pypi/v/ModDotPlot?color=blue&label=PyPI)](https://pypi.org/project/ModDotPlot/)
+[![CI](https://github.com/marbl/ModDotPlot/actions/workflows/black.yml/badge.svg)](https://github.com/marbl/ModDotPlot/actions/workflows/black.yml)
 
+- [](#)
 - [Cite](#cite)
 - [About](#about)
 - [Installation](#installation)
@@ -19,7 +23,7 @@
 
 ## Cite
 
-Alexander P Sweeten, Michael C Schatz, Adam M Phillippy, ModDotPlot—rapid and interactive visualization of tandem repeats, Bioinformatics, Volume 40, Issue 8, August 2024, btae493, [https://doi.org/10.1093/bioinformatics/btae493](https://pmc.ncbi.nlm.nih.gov/articles/PMC11321072/)
+Alexander P Sweeten, Michael C Schatz, Adam M Phillippy, ModDotPlot—rapid and interactive visualization of tandem repeats, Bioinformatics, Volume 40, Issue 8, August 2024, btae493, [https://doi.org/10.1093/bioinformatics/btae493](https://doi.org/10.1093/bioinformatics/btae493)
 
 If you use ModDotPlot for your research, please cite our software!
 
@@ -27,7 +31,7 @@ If you use ModDotPlot for your research, please cite our software!
 
 ## About
 
-ModDotPlot is a dot plot visualization tool designed for large sequences and whole genomes. ModDotPlot outputs an identity heatmap similar to [StainedGlass](https://mrvollger.github.io/StainedGlass/) by rapidly approximating the Average Nucleotide Identity between pairwise combinations of genomic intervals. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
+_ModDotPlot_ is a dot plot visualization tool designed for large sequences and whole genomes. _ModDotPlot_ outputs an identity heatmap similar to [StainedGlass](https://mrvollger.github.io/StainedGlass/) by rapidly approximating the Average Nucleotide Identity between pairwise combinations of genomic intervals. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
 
 ![](images/demo.gif)
 
@@ -35,12 +39,14 @@ ModDotPlot is a dot plot visualization tool designed for large sequences and who
 
 ## Installation
 
+_ModDotPlot_ can be installed by running `pip install moddotplot`. It requires Python 3.7+ to run. Alternatively, you can download the current release from GitHub by using:
+
 ```
 git clone https://github.com/marbl/ModDotPlot.git
 cd ModDotPlot
 ```
 
-Although optional, it's recommended to setup a virtual environment before using ModDotPlot:
+Although optional, it's recommended to setup a virtual environment before using _ModDotPlot_:
 
 ```
 python -m venv venv
@@ -53,7 +59,7 @@ Once activated, you can install the required dependencies:
 python -m pip install .
 ```
 
-Finally, confirm that the installation was installed correctly by running `moddotplot -h`:
+Finally, confirm that the installation was installed correctly and that your version is up to date by running `moddotplot -h`:
 ```       
   __  __           _   _____        _     _____  _       _   
  |  \/  |         | | |  __ \      | |   |  __ \| |     | |  
@@ -61,6 +67,8 @@ Finally, confirm that the installation was installed correctly by running `moddo
  | |\/| |/ _ \ / _` | | |  | |/ _ \| __| |  ___/| |/ _ \| __|
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
+
+ v0.9.4
 
 usage: moddotplot [-h] {interactive,static} ...
 
@@ -78,7 +86,7 @@ options:
 
 ## Usage
 
-ModDotPlot must be run either in `interactive` mode, or `static` mode:
+_ModDotPlot_ must be run either in `interactive` mode, or `static` mode:
 
 ### Interactive Mode
 
@@ -94,13 +102,15 @@ This will launch a [Dash application](https://plotly.com/dash/) on your machine'
 moddotplot static <ARGS>
 ```
 
-This skips running Dash and quickly creates plots under the specified output directory using [plotnine](https://plotnine.readthedocs.io/en/v0.12.4/). By default, running ModDotPlot in static mode this will produce the following files:
+Running _ModDotPlot_ in static mode skips running Dash and quickly creates plots under the specified output directory `-o`. By default, running _ModDotPlot_ in static mode this will produce the following files:
 
-- A paired-end bed file, containing intervals alongside their corresponding identity estimates.
-- A self-identity dotplot for each sequence.
+- A paired-end bed file `.bedpe`, containing intervals alongside their corresponding identity estimates.
+- A self-identity dotplot for each sequence, as both an upper triangle matrix `_TRI` and full matrix `_FULL` representation.
 - A histogram of identity values for each sequence.
-  
-See [static mode commands](#static-mode-commands) for further info.
+
+All plots and histograms are output in a vectorized (default: `.svg`) and rasterized `.png` image. [plotnine](https://plotnine.readthedocs.io/en/v0.12.4/).
+
+ModDotPlot supports highly customizable plotting features in static mode. See [static mode commands](#static-mode-commands) for a complete list of features.
 
 --- 
 
@@ -111,6 +121,10 @@ The following arguments are the same in both interactive and static mode:
 `-f / --fasta <file>`
 
 Fasta files to input. Multifasta files are accepted. Interactive mode will only support a maximum of two sequences at a time.
+
+`-b / --bed <.bed file>`
+
+Input bedfile used for dotplot annotation (note: this is not the same as the paired-end bed file produced by ModDotPlot). If selected, this will produce an annotated bedtrack image `_ANNOTATION.svg`. Name in the bedfile must match the name of the fasta sequence header (or input, if `-l` is used instead) in order to produce a correct bed track.
 
 `-k / --kmer <int>`
 
@@ -184,15 +198,15 @@ Load previously saved matrices. Used instead of `-f/--fasta`
 
 Run `moddotplot static` with a config file, rather than (sample syntax). Recommended when creating a really customized plot. Used instead of `-f/--fasta`.
 
-`-b / --bed <.bed file>`
+`-l / --load <.bedpe file>`
 
-Create a plot from a previously computed pairwise bed file. Skips Average Nucleotide Identity computation. Used instead of `-f/--fasta`. 
+Create a plot from a previously computed pairwise bed file. Skips Average Nucleotide Identity computation. Used instead of `-f/--fasta`. Will only accept paired-end bed files produced by ModDotPlot. 
 
 `-w / --window <int>`
 
 Window size. Unlike interactive mode, only one matrix will be created, so this represents the *only* window size. Default is set to `n/1000` (eg. 3000bp for a 3Mbp sequence). 
 
-`--no-bed <bool>`
+`--no-bedpe <bool>`
 
 Skip output of bed file.
 
@@ -204,9 +218,17 @@ Skip output of histogram legend.
 
 Adjust width of self dot plots. Default is 9 inches.
 
-`--dpi <bool>`
+`--dpi <int>`
 
-Image resolution in dots per inch (not to be confused with dotplot resolution). Default is 600.
+Image resolution in dots per inch (not to be confused with dotplot resolution). Default is `300`.
+
+`--vector <str>` 
+
+Vectorized image format to output to. Must be one of ["svg", "pdf", "ps"]. Default: `svg`
+
+`--deraster <bool>`
+
+By default, vectorized ouptuts rasterize the actual plot (not the axis). This is done to save space, as a high-resolution dotplot can be extremely space inefficient and prevent use of image manipulation software. This plot rasterization can be removed using this flag. 
 
 `--palette <str>`
 
@@ -226,11 +248,11 @@ Add custom identity threshold breakpoints. Note that the number of breakpoints m
 
 `-t / --axes-ticks <list of ints>`
 
-Custom tickmarks for x and y axis. Values outside of the axes-limits will not be shown. 
+Custom tickmarks for x and y axis. Values outside of the `--axes-limits` will not be shown. 
 
 `-a / --axes-limits <int>`
 
-Change axis limits for x and y axis. Useful for comparing multiple plots, allowing them to stay in scale. 
+Change axis limits for x and y axis. Useful when comparing multiple plots, allowing them to stay in scale. 
 
 `--bin-freq <bool>`
 
@@ -376,6 +398,8 @@ ModDotPlot can produce an a vs. b style dotplot for each pairwise combination of
 moddotplot interactive -f sequences/chr15_segment.fa sequences/chr21_segment.fa --compare-only
 ```
 
+![](images/chr14:2000000-5000000_chr21:2000000-5000000.png)
+
 --- 
 
 ## Questions
@@ -386,10 +410,6 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 
 ## Known Issues
 
-- Plot width and xlim (limiting the x axis to a different amount) currently do not work. I plan to have those working in v0.9.0.
-
 - Mac users might encounter the following unexpected command line output: `/bin/sh: lscpu: command not found`. This is a known issue with Plotnine, the Python plotting library used by ModDotPlot. This can be safely ignored.
 
 - If you encounter an error with the following traceback: `rv = reductor(4) TypeError: cannot pickle 'generator' object`, ths means that you have a newer version of Plotnine that is incompatible with ModDotPlot. Please uninstall plotnine and reinstall version 0.12.4 `pip install plotnine==0.12.4`. 
-
-- In interactive mode, comparing sequences of two sizes will lead to errors in zooming for the larger sequence. I plan to fix this in v0.9.0.
