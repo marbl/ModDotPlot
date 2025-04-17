@@ -110,7 +110,7 @@ Running _ModDotPlot_ in static mode skips running Dash and quickly creates plots
 
 All plots and histograms are output in a vectorized (default: `.svg`) and rasterized `.png` image. [Plotnine](https://plotnine.readthedocs.io/en/v0.12.4/) is the Python plotting library used, with [CairoSVG](https://cairosvg.org) used for converting between image formats.
 
-ModDotPlot supports highly customizable plotting features in static mode. See [static mode commands](#static-mode-commands) for a complete list of features.
+_ModDotPlot_ supports highly customizable plotting features in static mode. See [static mode commands](#static-mode-commands) for a complete list of features.
 
 --- 
 
@@ -330,7 +330,6 @@ $ cat config/config.json
 
 {
     "identity": 90,
-    "sparsity": 10,
     "palette": "OrRd_7",
     "breakpoints": [
         90,
@@ -360,13 +359,13 @@ $ moddotplot static -c config/config.json
 
 Running ModDotPlot in static mode
 
-Retrieving k-mers from Chr1:14M-18M.... 
+Retrieving k-mers from Chr1:14000000-18000000.... 
 
 Progress: |████████████████████████████████████████| 100.0% Completed
 
-Chr1:14M-18M k-mers retrieved! 
+Chr1:14000000-18000000 k-mers retrieved! 
 
-Computing self identity matrix for chr1:14M-18M... 
+Computing self identity matrix for chr1:14000000-18000000... 
 
         Sequence length n: 4000000
 
@@ -379,13 +378,13 @@ Computing self identity matrix for chr1:14M-18M...
 Progress: |████████████████████████████████████████| 100.0% Completed
 
 
-Saved bed file to Chr1_cen_plots/Chr1:14M-18M.bed
+Saved bed file to Chr1_cen_plots/Chr1:14000000-18000000.bed
 
-Plots created! Saving to Chr1_cen_plots/Chr1:14M-18M...
+Plots created! Saving to Chr1_cen_plots/Chr1:14000000-18000000...
 
 Chr1_cen_plots/Chr1:14M-18M_TRI.png, Chr1_cen_plots/Chr1:14M-18M_TRI.pdf, Chr1_cen_plots/Chr1:14M-18M_FULL.png, Chr1_cen_plots/Chr1:14M-18M_FULL.png, Chr1_cen_plots/Chr1:14M-18M_HIST.png and Chr1_cen_plots/Chr1:14M-18M_HIST.pdf, saved sucessfully. 
 ```
-![](images/Chr1:14M-18M_FULL.png)
+![](images/Chr1:14000000-18000000_FULL.png)
 
 --- 
 
