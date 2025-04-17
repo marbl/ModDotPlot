@@ -3,7 +3,6 @@
 [![PyPI](https://img.shields.io/pypi/v/ModDotPlot?color=blue&label=PyPI)](https://pypi.org/project/ModDotPlot/)
 [![CI](https://github.com/marbl/ModDotPlot/actions/workflows/black.yml/badge.svg)](https://github.com/marbl/ModDotPlot/actions/workflows/black.yml)
 
-- [](#)
 - [Cite](#cite)
 - [About](#about)
 - [Installation](#installation)
