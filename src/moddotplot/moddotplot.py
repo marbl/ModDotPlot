@@ -5,7 +5,7 @@ from moddotplot.parse_fasta import (
     getInputHeaders,
     isValidFasta,
     extractFiles,
-    extractRegion
+    extractRegion,
 )
 
 from moddotplot.estimate_identity import (
@@ -36,7 +36,7 @@ def get_parser():
     """
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="ModDotPlot: Visualization of Tandem Repeats"
+        description="ModDotPlot: Visualization of Tandem Repeats",
     )
     subparsers = parser.add_subparsers(
         dest="command", help="Choose mode: interactive or static"
@@ -198,12 +198,7 @@ def get_parser():
         required=False
     )
 
-    static_parser.add_argument(
-        "-b",
-        "--bed",
-        default=None,
-        help="Bed file annotation."
-    )
+    static_parser.add_argument("-b", "--bed", default=None, help="Bed file annotation.")
 
     static_parser.add_argument(
         "-k", "--kmer", default=21, type=int, help="k-mer length."
@@ -470,7 +465,6 @@ def main():
                 args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
                 args.vector = config.get("vector", args.vector)
                 args.deraster = config.get("deraster", args.deraster)
-
 
         # -----------INPUT COMMAND VALIDATION-----------
         # TODO: More tests!
@@ -984,7 +978,14 @@ def main():
                     expectation,
                 )
                 bed = convertMatrixToBed(
-                    self_mat, win, args.identity, seq_name, seq_name, True, seq_start_pos, seq_start_pos
+                    self_mat,
+                    win,
+                    args.identity,
+                    seq_name,
+                    seq_name,
+                    True,
+                    seq_start_pos,
+                    seq_start_pos,
                 )
                 if args.grid or args.grid_only:
                     grid_val_singles.append(bed)
@@ -1001,7 +1002,9 @@ def main():
                     with open(bedfile_output, "w") as bedfile:
                         for row in bed:
                             bedfile.write("\t".join(map(str, row)) + "\n")
-                    print(f"Saved self-identity matrix as a paired-end bed file to {bedfile_output}\n")
+                    print(
+                        f"Saved self-identity matrix as a paired-end bed file to {bedfile_output}\n"
+                    )
 
                 if (not args.no_plot) and (not args.grid_only):
                     create_plots(
@@ -1041,7 +1044,7 @@ def main():
 
             for i in range(len(sequences)):
                 for j in range(i + 1, len(sequences)):
-                    #Larger = x, smaller = y. This is pre-sorted earlier.
+                    # Larger = x, smaller = y. This is pre-sorted earlier.
                     larger_seq = sequences[i][1]
                     smaller_seq = sequences[j][1]
                     larger_length = len(larger_seq)
@@ -1115,7 +1118,7 @@ def main():
                             seq_list[j],
                             False,
                             larger_seq_start_pos,
-                            smaller_seq_start_pos
+                            smaller_seq_start_pos,
                         )
                         if args.grid or args.grid_only:
                             grid_val_doubles.append(bed)
@@ -1143,7 +1146,9 @@ def main():
                             with open(bedfile_output, "w") as bedfile:
                                 for row in bed:
                                     bedfile.write("\t".join(map(str, row)) + "\n")
-                            print(f"Saved comparative matrix as a paired-end bed file to {bedfile_output}\n")
+                            print(
+                                f"Saved comparative matrix as a paired-end bed file to {bedfile_output}\n"
+                            )
 
                         if (not args.no_plot) and (not args.grid_only):
                             create_plots(

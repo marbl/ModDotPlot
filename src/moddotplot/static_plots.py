@@ -88,17 +88,31 @@ def check_pascal(single_val, double_val):
         )
         sys.exit(8)
 
-def generate_ini_file(bedfile, ininame, chrom, color_value="bed_rgb", x_axis=True, display="collapsed"):
+
+def generate_ini_file(
+    bedfile, ininame, chrom, color_value="bed_rgb", x_axis=True, display="collapsed"
+):
     try:
         thing = chrom.split(":")[0]
-        sections = ["[spacer]", "# height of space in cm (optional)", "height = 0.5", "", 
-                    f"[{thing}]", f"file = {bedfile}", f"Title=", 
-                    "height = 1", f"display = {display}", f"color = {color_value}", 
-                    "labels = false", "fontsize = 10", "file_type = bed"]
-        
+        sections = [
+            "[spacer]",
+            "# height of space in cm (optional)",
+            "height = 0.5",
+            "",
+            f"[{thing}]",
+            f"file = {bedfile}",
+            f"Title=",
+            "height = 1",
+            f"display = {display}",
+            f"color = {color_value}",
+            "labels = false",
+            "fontsize = 10",
+            "file_type = bed",
+        ]
+
         if x_axis:
             sections.insert(0, "[x-axis]")
-        
+
         ini_content = "\n".join(sections)
         with open(f"{ininame}.ini", "w") as file:
             file.write(ini_content)
@@ -107,41 +121,60 @@ def generate_ini_file(bedfile, ininame, chrom, color_value="bed_rgb", x_axis=Tru
     except Exception as err:
         print(f"Error producing ini file: {err}\n")
         return None
-    
+
 
 def read_annotation_bed(filepath):
     """Reads a BED file into a Pandas DataFrame and ensures correct formatting."""
-    col_names = ["chrom", "start", "end", "name", "score", "strand", 
-                 "thickStart", "thickEnd", "itemRgb"]  # Include additional fields
-    
+    col_names = [
+        "chrom",
+        "start",
+        "end",
+        "name",
+        "score",
+        "strand",
+        "thickStart",
+        "thickEnd",
+        "itemRgb",
+    ]  # Include additional fields
+
     df = pd.read_csv(filepath, sep="\t", comment="#", header=None)
 
     # Ensure at least three required columns exist
     if df.shape[1] < 3:
-        raise ValueError("Invalid BED file: must have at least 3 columns (chrom, start, end).")
-    
+        raise ValueError(
+            "Invalid BED file: must have at least 3 columns (chrom, start, end)."
+        )
+
     # Rename only the expected columns
-    df.columns = col_names[:df.shape[1]]
-    
+    df.columns = col_names[: df.shape[1]]
+
     # Ensure start and end columns contain valid integers
     if df["start"].isna().any() or df["end"].isna().any():
-        raise ValueError("Invalid BED file: 'start' and 'end' columns must be integers and contain no missing values.")
+        raise ValueError(
+            "Invalid BED file: 'start' and 'end' columns must be integers and contain no missing values."
+        )
 
     return df
 
-def run_pygenometracks(inifile, region, output_file, width):
 
+def run_pygenometracks(inifile, region, output_file, width):
     output_dir = os.path.dirname(output_file)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)  # Create directory if it doesn't exist
 
-    trp = PlotTracks(inifile, width, fig_height=None,
-                     fontsize=10, dpi=300,
-                     track_label_width=0.05,
-                     plot_regions=region, plot_width=width)
+    trp = PlotTracks(
+        inifile,
+        width,
+        fig_height=None,
+        fontsize=10,
+        dpi=300,
+        track_label_width=0.05,
+        plot_regions=region,
+        plot_width=width,
+    )
 
     return trp
-    
+
 
 def reverse_pascal(double_vals):
     if len(double_vals) == 1:
@@ -426,7 +459,7 @@ def make_dot(
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(min_val),int(max_val))
+        breaks = generate_breaks(int(min_val), int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -472,8 +505,12 @@ def make_dot(
         + scale_color_discrete(guide=False)
         + scale_fill_manual(values=new_hexcodes, guide=False)
         + common_theme
-        + scale_x_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
+        + scale_x_continuous(
+            labels=make_scale, limits=[min_val, max_val], breaks=breaks
+        )
+        + scale_y_continuous(
+            labels=make_scale, limits=[min_val, max_val], breaks=breaks
+        )
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
         + labs(x=x_label, y="", title=title_name)
@@ -765,8 +802,12 @@ def make_tri(
             )  # Ensure full opacity
             + scale_fill_manual(values=new_hexcodes, guide=False)
             + scale_color_discrete(guide=False)
-            + scale_x_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
+            + scale_x_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
+            + scale_y_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
             + coord_fixed(ratio=1)
             + labs(x=x_label, y="", title=title_name)
             + theme(
@@ -826,8 +867,12 @@ def make_tri(
             )  # Ensure full opacity
             + scale_fill_manual(values=new_hexcodes, guide=False)
             + scale_color_discrete(guide=False)
-            + scale_x_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
+            + scale_x_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
+            + scale_y_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
             + coord_fixed(ratio=1)
             + labs(x=x_label, y="", title=title_name)
             + theme(
@@ -855,8 +900,12 @@ def make_tri(
             )
             + scale_color_discrete(guide=False)
             + scale_fill_manual(values=new_hexcodes, guide=False)
-            + scale_x_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[min_val, max_val], breaks=breaks)
+            + scale_x_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
+            + scale_y_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
             + coord_fixed(ratio=1)
             + labs(x="", y="", title="")
             + theme(
@@ -974,7 +1023,9 @@ def rotate_rasterized_tri(svg_path, shift_x, shift_y):
     # Save the modified SVG back to the same file
     tree.write(svg_path)
 
+
 from lxml import etree
+
 
 def append_svg(svg1_path, svg2_path, output_path):
     """Appends SVG2 to the bottom of SVG1 without modifying its width."""
@@ -1014,6 +1065,7 @@ def get_svg_size(svg_path):
     fig = sg.fromfile(svg_path)
     return fig.get_size()
 
+
 def merge_svgs(svg1_path, svg2_path, output_path):
     """Merges two SVG files into a single SVG file.
 
@@ -1023,13 +1075,13 @@ def merge_svgs(svg1_path, svg2_path, output_path):
         output_path: Path to save the merged SVG file.
     """
     # Create figure and subplots
-    
-    w,l = get_svg_size(svg1_path)
-    print(w,l)
-    w2,l2 = get_svg_size(svg2_path)
-    print(w2,l2)
-    #fig = sg.SVGFigure("780pt", "432pt")
-    #fig = sg.SVGFigure(810, 450)
+
+    w, l = get_svg_size(svg1_path)
+    print(w, l)
+    w2, l2 = get_svg_size(svg2_path)
+    print(w2, l2)
+    # fig = sg.SVGFigure("780pt", "432pt")
+    # fig = sg.SVGFigure(810, 450)
     fig = sg.SVGFigure("110pt", "100pt")
     # Load the two SVG files
     svg1 = sg.fromfile(svg1_path).getroot()
@@ -1045,6 +1097,7 @@ def merge_svgs(svg1_path, svg2_path, output_path):
     # Save the merged SVG to a new file
     fig.save(output_path)
     print(get_svg_size(output_path))
+
 
 def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
     if not breaks:
@@ -1498,7 +1551,7 @@ def create_plots(
     axes_tick_number,
     vector_format,
     deraster,
-    annotation
+    annotation,
 ):
     df = read_df(
         sdf,
@@ -1523,24 +1576,33 @@ def create_plots(
         print(f"Generating ini file for annotation track:\n")
         iniprefix = plot_filename
         inifile = generate_ini_file(
-            bedfile = annotation,
-            ininame = iniprefix,
-            chrom = name_x,
+            bedfile=annotation,
+            ininame=iniprefix,
+            chrom=name_x,
         )
         min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
         max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
-        region = [(name_x.split(":")[0],min_val,max_val)]
+        region = [(name_x.split(":")[0], min_val, max_val)]
         if inifile:
             bed_track = run_pygenometracks(
                 inifile=inifile,
                 region=region,
                 output_file=f"{iniprefix}_ANNOTATION.{vector_format}",
-                width=width*2.05
+                width=width * 2.05,
             )
             name_x.split(":")[0]
-            bed_track.plot(f"{iniprefix}_ANNOTATION.{vector_format}",name_x.split(":")[0],min_val,max_val)
-            bed_track.plot(f"{iniprefix}_ANNOTATION.png",name_x.split(":")[0],min_val,max_val)
-            print(f"\nAnnotation track saved to {iniprefix}_ANNOTATION.{vector_format} & {iniprefix}_ANNOTATION.png\n")
+            bed_track.plot(
+                f"{iniprefix}_ANNOTATION.{vector_format}",
+                name_x.split(":")[0],
+                min_val,
+                max_val,
+            )
+            bed_track.plot(
+                f"{iniprefix}_ANNOTATION.png", name_x.split(":")[0], min_val, max_val
+            )
+            print(
+                f"\nAnnotation track saved to {iniprefix}_ANNOTATION.{vector_format} & {iniprefix}_ANNOTATION.png\n"
+            )
 
     if is_pairwise:
         heatmap = make_dot(
@@ -1640,7 +1702,7 @@ def create_plots(
             width,
             False,
         )
-            
+
         ggsave(
             full_plot,
             width=width,
@@ -1669,7 +1731,7 @@ def create_plots(
             filename=f"{tri_prefix}.svg",
             verbose=False,
         )
-        
+
         # These scaling values were determined thorugh much trial and error. Please don't delete :)
         if deraster:
             scaling_values = (46.62 * width, -3.75 * width)
@@ -1677,8 +1739,9 @@ def create_plots(
                 f"{tri_prefix}.svg", scaling_values[0], scaling_values[1]
             )
             if annotation:
-                '''merge_svgs(f"{plot_filename}_TRI.{vector_format}","test.svg", "test2.svg")
-                append_svg(f"{plot_filename}_TRI.{vector_format}", "test.svg", "test2.svg")'''
+                """merge_svgs(f"{plot_filename}_TRI.{vector_format}","test.svg", "test2.svg")
+                append_svg(f"{plot_filename}_TRI.{vector_format}", "test.svg", "test2.svg")
+                """
             try:
                 cairosvg.svg2png(
                     url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.png", dpi=dpi
