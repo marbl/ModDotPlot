@@ -5,6 +5,7 @@ from moddotplot.parse_fasta import (
     getInputHeaders,
     isValidFasta,
     extractFiles,
+    extractRegion,
 )
 
 from moddotplot.estimate_identity import (
@@ -35,7 +36,7 @@ def get_parser():
     """
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="ModDotPlot: Visualization of Complex Repeat Structures",
+        description="ModDotPlot: Visualization of Tandem Repeats",
     )
     subparsers = parser.add_subparsers(
         dest="command", help="Choose mode: interactive or static"
@@ -176,8 +177,8 @@ def get_parser():
     )
 
     static_input_group.add_argument(
-        "-b",
-        "--bed",
+        "-l",
+        "--load",
         default=argparse.SUPPRESS,
         help="Path to input paired-end bed file(s). Exclusively used in static mode.",
         nargs="+",
@@ -196,6 +197,8 @@ def get_parser():
     static_window_size_group = static_parser.add_mutually_exclusive_group(
         required=False
     )
+
+    static_parser.add_argument("-b", "--bed", default=None, help="Bed file annotation.")
 
     static_parser.add_argument(
         "-k", "--kmer", default=21, type=int, help="k-mer length."
@@ -268,7 +271,7 @@ def get_parser():
     )
 
     static_parser.add_argument(
-        "--no-bed", action="store_true", help="Skip output of bed file."
+        "--no-bedpe", action="store_true", help="Skip output of paired-end bed file."
     )
 
     static_parser.add_argument(
@@ -280,7 +283,7 @@ def get_parser():
     )
 
     static_parser.add_argument(
-        "--width", default=18, type=float, help="Plot width (also height for _FULL)."
+        "--width", default=9, type=float, help="Plot width (also height for _FULL)."
     )
 
     static_parser.add_argument("--dpi", default=300, type=int, help="Plot dpi.")
@@ -430,6 +433,7 @@ def main():
                 config = json.load(f)
                 # TODO: Remove args that are interactive only
                 args.fasta = config.get("fasta")
+                args.load = config.get("load")
                 args.bed = config.get("bed")
 
                 # Distance matrix commands
@@ -443,7 +447,7 @@ def main():
                 args.compare = config.get("compare", args.compare)
                 args.compare_only = config.get("compare_only", args.compare_only)
 
-                args.no_bed = config.get("no_bed", args.no_bed)
+                args.no_bedpe = config.get("no_bedpe", args.no_bedpe)
                 args.no_plot = config.get("no_plot", args.no_plot)
                 args.no_hist = config.get("no_hist", args.no_hist)
                 args.width = config.get("width", args.width)
@@ -457,18 +461,13 @@ def main():
                 args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
                 args.breakpoints = config.get("breakpoints", args.breakpoints)
                 args.bin_freq = config.get("bin_freq", args.bin_freq)
-
-        #
-        """if args.grid or args.grid_only:
-            if not (args.compare or args.compare_only) and not args.bed:
-                print(
-                    f"Option --grid was selected, but no comparative plots will be produced. Please rerun ModDotPlot with the `--compare` or `--compare-only` option.\n"
-                )
-                sys.exit(10)"""
+                args.axes_limits = config.get("axes_limits", args.axes_limits)
+                args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
+                args.vector = config.get("vector", args.vector)
+                args.deraster = config.get("deraster", args.deraster)
 
         # -----------INPUT COMMAND VALIDATION-----------
         # TODO: More tests!
-        # Validation for breakpoints command
         if args.breakpoints:
             # Check that start value for breakpoints = identity threshold value
             if float(args.breakpoints[0]) != float(args.identity):
@@ -483,15 +482,15 @@ def main():
                 sys.exit(2)
 
         # -----------BEDFILE INPUT FOR STATIC MODE-----------
-        if hasattr(args, "bed") and args.bed:
+        if hasattr(args, "load") and args.load:
             if args.grid or args.grid_only:
                 single_vals = []
                 double_vals = []
                 single_val_name = []
                 double_val_name = []
                 xlim_val_grid = 0
-            for bed in args.bed:
-                # If args.bed is provided as input, run static mode directly from the bed file. Skip counting input k-mers.
+            for bed in args.load:
+                # If args.load is provided as input, run static mode directly from the paired-end bed file. Skip counting input k-mers.
                 df = read_df_from_file(bed)
 
                 unique_query_names = df["#query_name"].unique()
@@ -529,6 +528,7 @@ def main():
                             axes_tick_number=args.axes_number,
                             vector_format=args.vector,
                             deraster=args.deraster,
+                            annotation=args.bed,
                         )
                     if args.grid or args.grid_only:
                         single_vals.append(df)
@@ -566,6 +566,7 @@ def main():
                             axes_tick_number=args.axes_number,
                             vector_format=args.vector,
                             deraster=args.deraster,
+                            annotation=args.bed,
                         )
                     if args.grid or args.grid_only:
                         double_vals.append(df)
@@ -929,6 +930,11 @@ def main():
             for i in range(len(sequences)):
                 seq_length = len(sequences[i][1])
                 seq_name = sequences[i][0]
+                seq_range = extractRegion(seq_name)
+                if not seq_range:
+                    seq_start_pos = 1
+                else:
+                    seq_start_pos = int(seq_range[1])
                 win = args.window
                 res = args.resolution
                 if args.window:
@@ -972,24 +978,33 @@ def main():
                     expectation,
                 )
                 bed = convertMatrixToBed(
-                    self_mat, win, args.identity, seq_name, seq_name, True
+                    self_mat,
+                    win,
+                    args.identity,
+                    seq_name,
+                    seq_name,
+                    True,
+                    seq_start_pos,
+                    seq_start_pos,
                 )
                 if args.grid or args.grid_only:
                     grid_val_singles.append(bed)
                     grid_val_single_names.append(seq_name)
 
-                if not args.no_bed:
+                if not args.no_bedpe:
                     # Log saving bed file
                     if not args.output_dir:
-                        bedfile_output = seq_name + ".bed"
+                        bedfile_output = seq_name + ".bedpe"
                     else:
                         bedfile_output = os.path.join(
-                            args.output_dir, seq_name + ".bed"
+                            args.output_dir, seq_name + ".bedpe"
                         )
                     with open(bedfile_output, "w") as bedfile:
                         for row in bed:
                             bedfile.write("\t".join(map(str, row)) + "\n")
-                    print(f"Saved bed file to {bedfile_output}\n")
+                    print(
+                        f"Saved self-identity matrix as a paired-end bed file to {bedfile_output}\n"
+                    )
 
                 if (not args.no_plot) and (not args.grid_only):
                     create_plots(
@@ -1012,6 +1027,7 @@ def main():
                         axes_tick_number=args.axes_number,
                         vector_format=args.vector,
                         deraster=args.deraster,
+                        annotation=args.bed,
                     )
 
         # -----------COMPUTE COMPARATIVE PLOTS-----------
@@ -1028,12 +1044,23 @@ def main():
 
             for i in range(len(sequences)):
                 for j in range(i + 1, len(sequences)):
+                    # Larger = x, smaller = y. This is pre-sorted earlier.
                     larger_seq = sequences[i][1]
                     smaller_seq = sequences[j][1]
                     larger_length = len(larger_seq)
                     smaller_length = len(smaller_seq)
                     larger_seq_name = sequences[i][0]
                     smaller_seq_name = sequences[j][0]
+                    larger_seq_range = extractRegion(larger_seq_name)
+                    if not larger_seq_range:
+                        larger_seq_start_pos = 1
+                    else:
+                        larger_seq_start_pos = int(larger_seq_range[1])
+                    smaller_seq_range = extractRegion(smaller_seq_name)
+                    if not larger_seq_range:
+                        smaller_seq_start_pos = 1
+                    else:
+                        smaller_seq_start_pos = int(smaller_seq_range[1])
                     win = args.window
                     res = args.resolution
                     if args.window:
@@ -1090,6 +1117,8 @@ def main():
                             seq_list[i],
                             seq_list[j],
                             False,
+                            larger_seq_start_pos,
+                            smaller_seq_start_pos,
                         )
                         if args.grid or args.grid_only:
                             grid_val_doubles.append(bed)
@@ -1097,14 +1126,14 @@ def main():
                                 [larger_seq_name, smaller_seq_name]
                             )
                             xlim_val_grid = max(larger_length, xlim_val_grid)
-                        if not args.no_bed:
+                        if not args.no_bedpe:
                             # Log saving bed file
                             if not args.output_dir:
                                 bedfile_output = (
                                     larger_seq_name
                                     + "_"
                                     + smaller_seq_name
-                                    + "_COMPARE.bed"
+                                    + "_COMPARE.bedpe"
                                 )
                             else:
                                 bedfile_output = os.path.join(
@@ -1112,12 +1141,14 @@ def main():
                                     larger_seq_name
                                     + "_"
                                     + smaller_seq_name
-                                    + "_COMPARE.bed",
+                                    + "_COMPARE.bedpe",
                                 )
                             with open(bedfile_output, "w") as bedfile:
                                 for row in bed:
                                     bedfile.write("\t".join(map(str, row)) + "\n")
-                            print(f"Saved bed file to {bedfile_output}\n")
+                            print(
+                                f"Saved comparative matrix as a paired-end bed file to {bedfile_output}\n"
+                            )
 
                         if (not args.no_plot) and (not args.grid_only):
                             create_plots(
@@ -1140,6 +1171,7 @@ def main():
                                 axes_tick_number=args.axes_number,
                                 vector_format=args.vector,
                                 deraster=args.deraster,
+                                annotation=args.bed,
                             )
 
             if args.grid or args.grid_only:

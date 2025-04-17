@@ -128,7 +128,7 @@ def partitionOverlaps(
         try:
             kmer_list.append(lst[delta_start_index:delta_end_index])
         except Exception as e:
-            print("test")
+            print("Error in appending list of kmers...\n")
             print(e)
             kmer_list.append(lst[delta_start_index:seq_len])
         counter += win
@@ -167,7 +167,7 @@ def convertToModimizers(
 
 
 def convertMatrixToBed(
-    matrix, window_size, id_threshold, x_name, y_name, self_identity
+    matrix, window_size, id_threshold, x_name, y_name, self_identity, x_offset, y_offset
 ):
     bed = [
         (
@@ -187,10 +187,10 @@ def convertMatrixToBed(
             value = matrix[x, y]
             if (not self_identity) or (self_identity and x <= y):
                 if value >= id_threshold / 100:
-                    start_x = x * window_size + 1
-                    end_x = (x + 1) * window_size
-                    start_y = y * window_size + 1
-                    end_y = (y + 1) * window_size
+                    start_x = x * window_size + x_offset
+                    end_x = start_x + window_size - 1
+                    start_y = y * window_size + y_offset
+                    end_y = start_y + window_size - 1
 
                     bed.append(
                         (

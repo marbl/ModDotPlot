@@ -12,6 +12,24 @@ import gzip
 tab_b = bytes.maketrans(b"ACTG", b"TGAC")
 
 
+def extractRegion(seq_name):
+    """Check if seq_name contains a region and extract the bounds."""
+    # Define the regular expression to match the format "chrY:50-3000"
+    region_pattern = r"([a-zA-Z0-9]+):(\d+)-(\d+)"
+
+    match = re.match(region_pattern, seq_name)
+    if match:
+        # Extract chromosome, lower bound, and upper bound
+        chrom = match.group(1)
+        lower_bound = int(match.group(2))
+        upper_bound = int(match.group(3))
+
+        return chrom, lower_bound, upper_bound
+    else:
+        # No region found
+        return None
+
+
 def generateKmersFromFasta(seq: Sequence[str], k: int, quiet: bool) -> Iterable[int]:
     n = len(seq)
     if not quiet:

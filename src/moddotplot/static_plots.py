@@ -27,6 +27,7 @@ from plotnine import (
     theme_minimal,
     geom_raster,
 )
+import svgutils.transform as sg
 import cairosvg
 import pandas as pd
 import numpy as np
@@ -38,7 +39,9 @@ import xml.etree.ElementTree as ET
 import sys
 import re
 from moddotplot.parse_fasta import printProgressBar
-
+from lxml import etree
+from pygenometracks.utilities import get_region
+import matplotlib.pyplot as plt
 from moddotplot.const import (
     DIVERGING_PALETTES,
     QUALITATIVE_PALETTES,
@@ -46,6 +49,18 @@ from moddotplot.const import (
 )
 from typing import List
 from palettable.colorbrewer import qualitative, sequential, diverging
+import logging
+
+# Set log level BEFORE importing pygenometracks
+for name in logging.root.manager.loggerDict:
+    if name.startswith("pygenometracks"):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
+        logging.getLogger(name).propagate = False  # Don't pass to root logger
+
+# Also make sure the root logger isn’t outputting debug messages
+logging.basicConfig(level=logging.CRITICAL)
+
+from pygenometracks.tracksClass import PlotTracks
 
 
 def is_plot_empty(p):
@@ -72,6 +87,93 @@ def check_pascal(single_val, double_val):
             f"Missing bed files required to create grid. Please verify all bed files are included."
         )
         sys.exit(8)
+
+
+def generate_ini_file(
+    bedfile, ininame, chrom, color_value="bed_rgb", x_axis=True, display="collapsed"
+):
+    try:
+        thing = chrom.split(":")[0]
+        sections = [
+            "[spacer]",
+            "# height of space in cm (optional)",
+            "height = 0.5",
+            "",
+            f"[{thing}]",
+            f"file = {bedfile}",
+            f"Title=",
+            "height = 1",
+            f"display = {display}",
+            f"color = {color_value}",
+            "labels = false",
+            "fontsize = 10",
+            "file_type = bed",
+        ]
+
+        if x_axis:
+            sections.insert(0, "[x-axis]")
+
+        ini_content = "\n".join(sections)
+        with open(f"{ininame}.ini", "w") as file:
+            file.write(ini_content)
+        print(f"Successfully generated {ininame}.ini\n")
+        return f"{ininame}.ini"
+    except Exception as err:
+        print(f"Error producing ini file: {err}\n")
+        return None
+
+
+def read_annotation_bed(filepath):
+    """Reads a BED file into a Pandas DataFrame and ensures correct formatting."""
+    col_names = [
+        "chrom",
+        "start",
+        "end",
+        "name",
+        "score",
+        "strand",
+        "thickStart",
+        "thickEnd",
+        "itemRgb",
+    ]  # Include additional fields
+
+    df = pd.read_csv(filepath, sep="\t", comment="#", header=None)
+
+    # Ensure at least three required columns exist
+    if df.shape[1] < 3:
+        raise ValueError(
+            "Invalid BED file: must have at least 3 columns (chrom, start, end)."
+        )
+
+    # Rename only the expected columns
+    df.columns = col_names[: df.shape[1]]
+
+    # Ensure start and end columns contain valid integers
+    if df["start"].isna().any() or df["end"].isna().any():
+        raise ValueError(
+            "Invalid BED file: 'start' and 'end' columns must be integers and contain no missing values."
+        )
+
+    return df
+
+
+def run_pygenometracks(inifile, region, output_file, width):
+    output_dir = os.path.dirname(output_file)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)  # Create directory if it doesn't exist
+
+    trp = PlotTracks(
+        inifile,
+        width,
+        fig_height=None,
+        fontsize=10,
+        dpi=300,
+        track_label_width=0.05,
+        plot_regions=region,
+        plot_width=width,
+    )
+
+    return trp
 
 
 def reverse_pascal(double_vals):
@@ -189,7 +291,7 @@ def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
     else:
         breaks = [bot + i * interval for i in range(ncolors + 1)]
     if custom_breakpoints:
-        breaks = np.asfarray(custom_breakpoints)
+        np.asarray(custom_breakpoints, dtype=np.float64)
     labels = np.arange(len(breaks) - 1)
     # corner case of only one %id value
     if len(breaks) == 1:
@@ -281,23 +383,27 @@ def read_df(
     return df
 
 
-def generate_breaks(number, min_breaks=5, max_breaks=9):
+def generate_breaks(min_number, max_number, min_breaks=5, max_breaks=9):
     # Determine the order of magnitude
-    magnitude = 10 ** int(
-        math.floor(math.log10(number))
-    )  # Base power of 10 (e.g., 10M, 1M, 100K)
-    threshold = math.ceil(number / magnitude)
+    difference = max_number - min_number
+
+    magnitude = 10 ** int(math.floor(math.log10(difference)))
+    threshold = math.ceil(difference / magnitude)
 
     while threshold > max_breaks:
         magnitude *= 2
-        threshold = math.ceil(number / magnitude)
+        threshold = math.ceil(difference / magnitude)
 
     while threshold < min_breaks:
         magnitude /= 2
-        threshold = math.ceil(number / magnitude)
+        threshold = math.ceil(difference / magnitude)
+
+    # Round down min_number to the nearest multiple of magnitude
+    min_aligned = int(min_number // magnitude * magnitude)
 
     # Generate breakpoints
-    breaks = list(range(0, int((threshold * magnitude) + magnitude), int(magnitude)))
+    upper_bound = int(min_aligned + (threshold + 1) * magnitude)
+    breaks = list(range(min_aligned, upper_bound, int(magnitude)))
 
     return breaks
 
@@ -348,11 +454,12 @@ def make_dot(
     if not xlim:
         xlim = 0
     # Determine maximum genomic position for scaling
+    min_val = min(sdf["q_st"].min(), sdf["r_st"].min())
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(max_val))
+        breaks = generate_breaks(int(min_val), int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -398,8 +505,12 @@ def make_dot(
         + scale_color_discrete(guide=False)
         + scale_fill_manual(values=new_hexcodes, guide=False)
         + common_theme
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+        + scale_x_continuous(
+            labels=make_scale, limits=[min_val, max_val], breaks=breaks
+        )
+        + scale_y_continuous(
+            labels=make_scale, limits=[min_val, max_val], breaks=breaks
+        )
         + coord_fixed(ratio=1)
         + facet_grid("r ~ q")
         + labs(x=x_label, y="", title=title_name)
@@ -448,11 +559,12 @@ def make_dot_grid(
     if not xlim:
         xlim = 0
     # Determine maximum genomic position for scaling
+    min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(max_val))
+        breaks = generate_breaks(int(min_val), int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -543,11 +655,12 @@ def make_dot_final(
     if not xlim:
         xlim = 0
     # Determine maximum genomic position for scaling
+    min_val = min(sdf["q_st"].min(), sdf["r_st"].min())
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(max_val))
+        breaks = generate_breaks(int(min_val), int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -657,11 +770,12 @@ def make_tri(
     if not xlim:
         xlim = 0
     # Determine maximum genomic position for scaling
+    min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
     max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
 
     # If user provides breaks, convert to ints
     if not breaks:
-        breaks = generate_breaks(int(max_val))
+        breaks = generate_breaks(int(min_val), int(max_val))
     else:
         [int(x) for x in breaks]
     xlim = xlim or 0
@@ -688,8 +802,12 @@ def make_tri(
             )  # Ensure full opacity
             + scale_fill_manual(values=new_hexcodes, guide=False)
             + scale_color_discrete(guide=False)
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_x_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
+            + scale_y_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
             + coord_fixed(ratio=1)
             + labs(x=x_label, y="", title=title_name)
             + theme(
@@ -749,8 +867,12 @@ def make_tri(
             )  # Ensure full opacity
             + scale_fill_manual(values=new_hexcodes, guide=False)
             + scale_color_discrete(guide=False)
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_x_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
+            + scale_y_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
             + coord_fixed(ratio=1)
             + labs(x=x_label, y="", title=title_name)
             + theme(
@@ -778,8 +900,12 @@ def make_tri(
             )
             + scale_color_discrete(guide=False)
             + scale_fill_manual(values=new_hexcodes, guide=False)
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
+            + scale_x_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
+            + scale_y_continuous(
+                labels=make_scale, limits=[min_val, max_val], breaks=breaks
+            )
             + coord_fixed(ratio=1)
             + labs(x="", y="", title="")
             + theme(
@@ -896,6 +1022,81 @@ def rotate_rasterized_tri(svg_path, shift_x, shift_y):
 
     # Save the modified SVG back to the same file
     tree.write(svg_path)
+
+
+from lxml import etree
+
+
+def append_svg(svg1_path, svg2_path, output_path):
+    """Appends SVG2 to the bottom of SVG1 without modifying its width."""
+    # Load SVG1 and SVG2
+    tree1 = etree.parse(svg1_path)
+    root1 = tree1.getroot()
+
+    tree2 = etree.parse(svg2_path)
+    root2 = tree2.getroot()
+
+    # Extract width and height of SVG1
+    width1 = float(root1.get("width", "0").replace("pt", ""))
+    height1 = float(root1.get("height", "0").replace("pt", ""))
+
+    # Extract width and height of SVG2
+    width2 = float(root2.get("width", "0").replace("pt", ""))
+    height2 = float(root2.get("height", "0").replace("pt", ""))
+
+    # Update SVG1 height to accommodate SVG2
+    new_height = height1 + height2
+    root1.set("height", f"{new_height}pt")
+
+    # Create a translation group for SVG2 and shift it down
+    group = etree.Element("g", attrib={"transform": f"translate(0,{height1 + 400})"})
+    for child in root2:
+        group.append(child)
+
+    # Append translated SVG2 to SVG1
+    root1.append(group)
+
+    # Save the new merged SVG
+    tree1.write(output_path, pretty_print=True, xml_declaration=True, encoding="utf-8")
+
+
+def get_svg_size(svg_path):
+    """Returns the width and height of an SVG file."""
+    fig = sg.fromfile(svg_path)
+    return fig.get_size()
+
+
+def merge_svgs(svg1_path, svg2_path, output_path):
+    """Merges two SVG files into a single SVG file.
+
+    Args:
+        svg1_path: Path to the first SVG file.
+        svg2_path: Path to the second SVG file.
+        output_path: Path to save the merged SVG file.
+    """
+    # Create figure and subplots
+
+    w, l = get_svg_size(svg1_path)
+    print(w, l)
+    w2, l2 = get_svg_size(svg2_path)
+    print(w2, l2)
+    # fig = sg.SVGFigure("780pt", "432pt")
+    # fig = sg.SVGFigure(810, 450)
+    fig = sg.SVGFigure("110pt", "100pt")
+    # Load the two SVG files
+    svg1 = sg.fromfile(svg1_path).getroot()
+    svg2 = sg.fromfile(svg2_path).getroot()
+
+    # Optionally, adjust the position and size of the loaded SVGs
+    svg1.moveto(0, 0)
+    svg2.moveto(0, 600)
+
+    # Append the loaded SVGs to the figure
+    fig.append([svg1, svg2])
+
+    # Save the merged SVG to a new file
+    fig.save(output_path)
+    print(get_svg_size(output_path))
 
 
 def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
@@ -1350,6 +1551,7 @@ def create_plots(
     axes_tick_number,
     vector_format,
     deraster,
+    annotation,
 ):
     df = read_df(
         sdf,
@@ -1368,6 +1570,39 @@ def create_plots(
     histy = make_hist(
         sdf, palette, palette_orientation, custom_colors, custom_breakpoints
     )
+
+    # Just doing triangle plots for now.
+    if annotation:
+        print(f"Generating ini file for annotation track:\n")
+        iniprefix = plot_filename
+        inifile = generate_ini_file(
+            bedfile=annotation,
+            ininame=iniprefix,
+            chrom=name_x,
+        )
+        min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
+        max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
+        region = [(name_x.split(":")[0], min_val, max_val)]
+        if inifile:
+            bed_track = run_pygenometracks(
+                inifile=inifile,
+                region=region,
+                output_file=f"{iniprefix}_ANNOTATION.{vector_format}",
+                width=width * 2.05,
+            )
+            name_x.split(":")[0]
+            bed_track.plot(
+                f"{iniprefix}_ANNOTATION.{vector_format}",
+                name_x.split(":")[0],
+                min_val,
+                max_val,
+            )
+            bed_track.plot(
+                f"{iniprefix}_ANNOTATION.png", name_x.split(":")[0], min_val, max_val
+            )
+            print(
+                f"\nAnnotation track saved to {iniprefix}_ANNOTATION.{vector_format} & {iniprefix}_ANNOTATION.png\n"
+            )
 
     if is_pairwise:
         heatmap = make_dot(
@@ -1467,6 +1702,7 @@ def create_plots(
             width,
             False,
         )
+
         ggsave(
             full_plot,
             width=width,
@@ -1502,6 +1738,10 @@ def create_plots(
             rotate_vectorized_tri(
                 f"{tri_prefix}.svg", scaling_values[0], scaling_values[1]
             )
+            if annotation:
+                """merge_svgs(f"{plot_filename}_TRI.{vector_format}","test.svg", "test2.svg")
+                append_svg(f"{plot_filename}_TRI.{vector_format}", "test.svg", "test2.svg")
+                """
             try:
                 cairosvg.svg2png(
                     url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.png", dpi=dpi
