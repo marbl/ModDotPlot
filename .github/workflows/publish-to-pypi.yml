@@ -33,13 +33,13 @@ jobs:
   publish-to-pypi:
     name: >-
       Publish Python 🐍 distribution 📦 to PyPI
-    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'  # publish on tag pushes or main branch pushes
     needs:
     - build
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/<package-name>  # Replace <package-name> with your PyPI project name
+      url: https://pypi.org/p/ModDotPlot
     permissions:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
 
@@ -56,6 +56,7 @@ jobs:
     name: >-
       Sign the Python 🐍 distribution 📦 with Sigstore
       and upload them to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')  # only create GitHub releases for tag pushes
     needs:
     - publish-to-pypi
     runs-on: ubuntu-latest
