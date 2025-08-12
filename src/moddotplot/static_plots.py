@@ -110,8 +110,8 @@ def generate_ini_file(
             "file_type = bed",
         ]
 
-        if x_axis:
-            sections.insert(0, "[x-axis]")
+        '''if x_axis:
+            sections.insert(0, "[x-axis]")'''
 
         ini_content = "\n".join(sections)
         with open(f"{ininame}.ini", "w") as file:
@@ -172,8 +172,55 @@ def run_pygenometracks(inifile, region, output_file, width):
         plot_regions=region,
         plot_width=width,
     )
+    
+    # Extract the chromosome, start, and end from the region
+    chrom, start, end = region[0]
 
+    
+    # Call the plot method directly to generate the image
+    fig = trp.plot(output_file, chrom, start, end)
+
+    
     return trp
+
+
+def test_pygenometracks_direct(inifile, chrom, start, end, output_file, width=40):
+    """
+    Direct test function to call PlotTracks.plot() without any coordinate validation.
+    This bypasses the region checking that happens during PlotTracks initialization.
+    
+    Args:
+        inifile: Path to the tracks configuration file
+        chrom: Chromosome name
+        start: Start coordinate 
+        end: End coordinate
+        output_file: Output image file path
+        width: Figure width in cm
+    """
+    
+    output_dir = os.path.dirname(output_file)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # Create a dummy region for initialization (this gets overridden in plot())
+    dummy_region = [(chrom, 1, 1000)]
+    
+    trp = PlotTracks(
+        inifile,
+        width,
+        fig_height=None,
+        fontsize=10,
+        dpi=300,
+        track_label_width=0.05,
+        plot_regions=dummy_region,
+        plot_width=width,
+    )
+    
+    
+    # Call plot() directly with your desired coordinates
+    fig = trp.plot(output_file, chrom, start, end)
+
+    return fig
 
 
 def reverse_pascal(double_vals):
@@ -1061,43 +1108,48 @@ def append_svg(svg1_path, svg2_path, output_path):
 
 
 def get_svg_size(svg_path):
-    """Returns the width and height of an SVG file."""
-    fig = sg.fromfile(svg_path)
-    return fig.get_size()
+    """Helper to extract width and height of an SVG in pt units."""
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+    width = root.get("width")
+    height = root.get("height")
+    return width, height
 
+
+def parse_size(size_str):
+    """Convert '648pt' or '800px' -> float(648)."""
+    return float(re.sub(r'[a-zA-Z]+', '', size_str))
 
 def merge_svgs(svg1_path, svg2_path, output_path):
-    """Merges two SVG files into a single SVG file.
+    """Merges two SVG files into a single SVG file with proper size."""
+    
+    w1, h1 = get_svg_size(svg1_path)
+    w2, h2 = get_svg_size(svg2_path)
 
-    Args:
-        svg1_path: Path to the first SVG file.
-        svg2_path: Path to the second SVG file.
-        output_path: Path to save the merged SVG file.
-    """
-    # Create figure and subplots
+    # Ensure they are floats
+    w1, h1 = parse_size(w1), parse_size(h1)
+    w2, h2 = parse_size(w2), parse_size(h2)
+    print(w1,h1,w2,h2)
+    # Determine total size
+    total_width = max(w1, w2)
+    total_height = h1 + h2
 
-    w, l = get_svg_size(svg1_path)
-    print(w, l)
-    w2, l2 = get_svg_size(svg2_path)
-    print(w2, l2)
-    # fig = sg.SVGFigure("780pt", "432pt")
-    # fig = sg.SVGFigure(810, 450)
-    fig = sg.SVGFigure("110pt", "100pt")
-    # Load the two SVG files
+    # Create figure
+    fig = sg.SVGFigure(f"{total_width}px", f"{total_height}px")
+
+    # Load SVGs
     svg1 = sg.fromfile(svg1_path).getroot()
     svg2 = sg.fromfile(svg2_path).getroot()
 
-    # Optionally, adjust the position and size of the loaded SVGs
-    svg1.moveto(0, 0)
-    svg2.moveto(0, 600)
+    # Position
+    svg1.moveto(0, -300)
+    svg2.moveto(38, 300)
 
-    # Append the loaded SVGs to the figure
+    # Append and save
     fig.append([svg1, svg2])
-
-    # Save the merged SVG to a new file
+    fig.set_size((f"{total_width}px", f"{total_height}px"))
     fig.save(output_path)
-    print(get_svg_size(output_path))
-
 
 def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
     if not breaks:
@@ -1582,7 +1634,9 @@ def create_plots(
         )
         min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
         max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
-        region = [(name_x.split(":")[0], min_val, max_val)]
+        if not xlim:
+            xlim = max_val
+        region = [(name_x.split(":")[0], min_val, xlim)]
         if inifile:
             bed_track = run_pygenometracks(
                 inifile=inifile,
@@ -1595,10 +1649,10 @@ def create_plots(
                 f"{iniprefix}_ANNOTATION.{vector_format}",
                 name_x.split(":")[0],
                 min_val,
-                max_val,
+                xlim,
             )
             bed_track.plot(
-                f"{iniprefix}_ANNOTATION.png", name_x.split(":")[0], min_val, max_val
+                f"{iniprefix}_ANNOTATION.png", name_x.split(":")[0], min_val, xlim
             )
             print(
                 f"\nAnnotation track saved to {iniprefix}_ANNOTATION.{vector_format} & {iniprefix}_ANNOTATION.png\n"
@@ -1731,7 +1785,6 @@ def create_plots(
             filename=f"{tri_prefix}.svg",
             verbose=False,
         )
-
         # These scaling values were determined thorugh much trial and error. Please don't delete :)
         if deraster:
             scaling_values = (46.62 * width, -3.75 * width)
@@ -1759,7 +1812,11 @@ def create_plots(
                 )
             except:
                 print(f"Error installing cairosvg. Unable to convert svg file. \n")
-
+        if annotation:
+            merge_svgs(f"{tri_prefix}.svg",f"{iniprefix}_ANNOTATION.svg", f"{tri_prefix}_ANNOTATED.svg")
+            cairosvg.svg2pdf(
+                        url=f"{tri_prefix}_ANNOTATED.svg", write_to=f"{tri_prefix}_ANNOTATED.pdf"
+                    )
         # Convert from svg to selected vector format. Ignore error if user has issues with cairosvg.
         try:
             if vector_format != "svg":
