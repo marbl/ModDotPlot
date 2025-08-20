@@ -74,7 +74,7 @@ Finally, confirm that the installation was installed correctly and that your ver
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
- v0.9.6
+ v0.9.7
 
 usage: moddotplot [-h] {interactive,static} ...
 
