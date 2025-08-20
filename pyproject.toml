@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ModDotPlot"
-version = "0.9.5"
+version = "0.9.6"
 requires-python = ">= 3.7"
 dependencies = [
   "pysam",
@@ -21,6 +21,7 @@ dependencies = [
   "cairosvg",
   "pygenometracks",
   "svgutils",
+  "cooler",
 ]
 authors = [
   {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"},
@@ -30,7 +31,7 @@ authors = [
 maintainers = [
   {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"}
 ]
-readme = {file = "README.txt", content-type = "text/markdown"}
+readme = {file = "README.md", content-type = "text/markdown"}
 license = {file = "LICENSE"}
 keywords = ["dotplot", "sketching", "modimizer", "heatmap"]
 

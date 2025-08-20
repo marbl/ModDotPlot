@@ -13,6 +13,7 @@ from moddotplot.estimate_identity import (
     selfContainmentMatrix,
     pairwiseContainmentMatrix,
     convertMatrixToBed,
+    convertMatrixToCool,
     createSelfMatrix,
     createPairwiseMatrix,
     partitionOverlaps,
@@ -27,6 +28,7 @@ import json
 import numpy as np
 import pickle
 import os
+import cooler
 
 
 def get_parser():
@@ -268,6 +270,10 @@ def get_parser():
         choices=["sequential", "size"],
         default="sequential",
         help="Order in which sequences appear in the comparative plot. Default is 'sequential': First file on x-axis, second file on y-axis. Another option is 'size': The larger sequence on the x-axis and the smaller on y-axis.",
+    )
+
+    static_parser.add_argument(
+        "--cooler", action="store_true", help="Output matrix to cooler file."
     )
 
     static_parser.add_argument(
@@ -924,7 +930,7 @@ def main():
 
         # Create output directory, if doesn't exist:
         if (args.output_dir) and not os.path.exists(args.output_dir):
-            os.makedirs(args.output_dir)
+            os.makedirs(args.output_dir, exist_ok=True)
         # -----------COMPUTE SELF-IDENTITY PLOTS-----------
         if not args.compare_only:
             for i in range(len(sequences)):
@@ -991,14 +997,45 @@ def main():
                     grid_val_singles.append(bed)
                     grid_val_single_names.append(seq_name)
 
+                if args.cooler:
+                    try:
+                        cooler_path = "."
+                        if not args.output_dir:
+                            cooler_path = os.path.join(cooler_path, seq_name)
+                        else:
+                            cooler_path = os.path.join(args.output_dir, seq_name)
+                        os.makedirs(cooler_path, exist_ok=True)
+                        cooler_output = os.path.join(cooler_path, seq_name + ".cooler")
+                        convertMatrixToCool(
+                            matrix=self_mat,
+                            window_size=win,
+                            id_threshold=args.identity,
+                            x_name=seq_name,
+                            y_name=seq_name,
+                            self_identity=True,
+                            x_offset=seq_start_pos,
+                            y_offset=seq_start_pos,
+                            chromsizes=seq_length,
+                            output_cool=cooler_output,
+                        )
+                        print(
+                            f"Saved self-identity matrix as a cooler file to {cooler_output}\n"
+                        )
+                    except Exception as e:
+                        print(f"Error creating cooler file: {e}")
+
                 if not args.no_bedpe:
                     # Log saving bed file
+                    bedpe_path = "."
                     if not args.output_dir:
-                        bedfile_output = seq_name + ".bedpe"
+                        bedpe_path = os.path.join(bedpe_path, seq_name)
+                        os.makedirs(bedpe_path, exist_ok=True)
+                        bedfile_output = os.path.join(seq_name, seq_name + ".bedpe")
                     else:
-                        bedfile_output = os.path.join(
-                            args.output_dir, seq_name + ".bedpe"
-                        )
+                        bedpe_path = os.path.join(args.output_dir, seq_name)
+                        os.makedirs(bedpe_path, exist_ok=True)
+                        bedfile_output = os.path.join(bedpe_path, seq_name + ".bedpe")
+
                     with open(bedfile_output, "w") as bedfile:
                         for row in bed:
                             bedfile.write("\t".join(map(str, row)) + "\n")
@@ -1009,7 +1046,7 @@ def main():
                 if (not args.no_plot) and (not args.grid_only):
                     create_plots(
                         sdf=[bed],
-                        directory=args.output_dir if args.output_dir else ".",
+                        directory=bedpe_path,
                         name_x=seq_name,
                         name_y=seq_name,
                         palette=args.palette,
@@ -1110,12 +1147,48 @@ def main():
                             f"The pairwise identity matrix for {sequences[i][0]} and {sequences[j][0]} is empty. Skipping.\n"
                         )
                     else:
+                        if args.cooler:
+                            try:
+                                cooler_path = "."
+                                if not args.output_dir:
+                                    cooler_path = os.path.join(
+                                        cooler_path,
+                                        f"{larger_seq_name}_{smaller_seq_name}",
+                                    )
+                                else:
+                                    cooler_path = os.path.join(
+                                        args.output_dir,
+                                        f"{larger_seq_name}_{smaller_seq_name}",
+                                    )
+                                os.makedirs(cooler_path, exist_ok=True)
+                                cooler_output = os.path.join(
+                                    cooler_path,
+                                    f"{larger_seq_name}_{smaller_seq_name}.cooler",
+                                )
+                                convertMatrixToCool(
+                                    matrix=pair_mat,
+                                    window_size=win,
+                                    id_threshold=args.identity,
+                                    x_name=larger_seq_name,
+                                    y_name=smaller_seq_name,
+                                    self_identity=False,
+                                    x_offset=larger_seq_start_pos,
+                                    y_offset=smaller_seq_start_pos,
+                                    chromsizes=larger_length,
+                                    output_cool=cooler_output,
+                                )
+                                print(
+                                    f"Saved comparative matrix as a cooler file to {cooler_output}\n"
+                                )
+                            except Exception as e:
+                                print(f"Error creating pairwise cooler file: {e}")
                         bed = convertMatrixToBed(
                             pair_mat,
                             win,
                             args.identity,
-                            seq_list[i],
-                            seq_list[j],
+                            # check if this is correct
+                            larger_seq_name,
+                            smaller_seq_name,
                             False,
                             larger_seq_start_pos,
                             smaller_seq_start_pos,
@@ -1128,16 +1201,27 @@ def main():
                             xlim_val_grid = max(larger_length, xlim_val_grid)
                         if not args.no_bedpe:
                             # Log saving bed file
+                            bedpe_path = "."
                             if not args.output_dir:
+                                bedfile_prefix = (
+                                    larger_seq_name + "_" + smaller_seq_name
+                                )
+                                bedpe_path = os.path.join(bedpe_path, bedfile_prefix)
+                                os.makedirs(bedpe_path, exist_ok=True)
                                 bedfile_output = (
-                                    larger_seq_name
-                                    + "_"
-                                    + smaller_seq_name
-                                    + "_COMPARE.bedpe"
+                                    bedpe_path,
+                                    bedfile_prefix + "_COMPARE.bedpe",
                                 )
                             else:
+                                bedfile_prefix = (
+                                    larger_seq_name + "_" + smaller_seq_name
+                                )
+                                bedpe_path = os.path.join(
+                                    args.output_dir, bedfile_prefix
+                                )
+                                os.makedirs(bedpe_path, exist_ok=True)
                                 bedfile_output = os.path.join(
-                                    args.output_dir,
+                                    bedpe_path,
                                     larger_seq_name
                                     + "_"
                                     + smaller_seq_name
@@ -1153,7 +1237,7 @@ def main():
                         if (not args.no_plot) and (not args.grid_only):
                             create_plots(
                                 sdf=[bed],
-                                directory=args.output_dir if args.output_dir else ".",
+                                directory=bedpe_path,
                                 name_x=larger_seq_name,
                                 name_y=smaller_seq_name,
                                 palette=args.palette,

@@ -9,6 +9,8 @@ from moddotplot.const import (
 from palettable import colorbrewer
 from typing import List, Set, Dict, Tuple
 import mmh3
+import pandas as pd
+import cooler
 
 from moddotplot.parse_fasta import printProgressBar
 
@@ -206,31 +208,67 @@ def convertMatrixToBed(
     return bed
 
 
-def divide_into_chunks(lst: List[int], res: int) -> List[List[int]]:
+def convertMatrixToCool(
+    matrix,
+    window_size,
+    id_threshold,
+    x_name,
+    y_name,
+    self_identity,
+    x_offset,
+    y_offset,
+    chromsizes,
+    output_cool,
+):
     """
-    Divide a list into approximately equal-sized chunks.
+    Convert a matrix into a .cool file.
 
     Args:
-        lst (List[int]): The input list to be divided.
-        res (int): The desired number of result chunks.
-
-    Returns:
-        List[List[int]]: A list of lists, where each inner list contains elements from the input list.
+        matrix (ndarray): 2D numpy array.
+        window_size (int): Bin/window size in bp.
+        id_threshold (float): Percent identity threshold (0-100).
+        x_name (str): Chromosome name for rows.
+        y_name (str): Chromosome name for columns.
+        self_identity (bool): Whether to include self and upper triangle only.
+        x_offset (int): Genomic offset for x axis (start position).
+        y_offset (int): Genomic offset for y axis (start position).
+        chromsizes (dict): Dict of chromosome lengths, e.g. {"chr1": 248956422}.
+        output_cool (str): Path to save cooler file.
     """
-    chunk_size = len(lst) // res  # Calculate the target chunk size
-    remainder = len(lst) % res  # Calculate the remainder
+    rows, cols = matrix.shape
 
-    chunks = []
-    start = 0
+    # ---- build bin table ----
+    bins = []
+    for i in range(rows):
+        bins.append(
+            (x_name, i * window_size + x_offset, (i + 1) * window_size + x_offset)
+        )
+    for j in range(cols):
+        bins.append(
+            (y_name, j * window_size + y_offset, (j + 1) * window_size + y_offset)
+        )
 
-    for i in range(res):
-        end = (
-            start + chunk_size + (1 if i < remainder else 0)
-        )  # Adjust chunk size for remainder
-        chunks.append(lst[start:end])
-        start = end
+    bins = pd.DataFrame(bins, columns=["chrom", "start", "end"])
 
-    return chunks
+    # ---- build pixel table ----
+    pixels = []
+    for x in range(rows):
+        for y in range(cols):
+            value = matrix[x, y]
+            if (not self_identity) or (self_identity and x <= y):
+                if value >= id_threshold / 100:
+                    bin1_id = x
+                    bin2_id = rows + y  # offset y bins after x bins
+                    pixels.append((bin1_id, bin2_id, float(value)))
+
+    pixels = pd.DataFrame(pixels, columns=["bin1_id", "bin2_id", "count"])
+
+    # ---- write cooler ----
+    cooler.create_cooler(output_cool, bins=bins, pixels=pixels, ordered=True)
+    print(bins)
+    print(pixels)
+
+    return output_cool
 
 
 def binomial_distance(containment_value: float, kmer_value: int) -> float:
