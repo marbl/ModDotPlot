@@ -1978,6 +1978,8 @@ def create_plots(
                     deraster,
                     width,
                 )
+                if os.path.exists(f"{anno_prefix}.svg"):
+                    os.remove(f"{anno_prefix}.svg")
                 try:
                     if vector_format != "svg":
                         if vector_format == "pdf":
