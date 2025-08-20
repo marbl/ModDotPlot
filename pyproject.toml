@@ -21,6 +21,7 @@ dependencies = [
   "cairosvg",
   "pygenometracks",
   "svgutils",
+  "cooler",
 ]
 authors = [
   {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"},
