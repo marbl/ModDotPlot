@@ -1224,14 +1224,14 @@ def merge_annotation_tri(svg1_path, svg2_path, output_path, deraster, width):
 
     # Position
     if deraster:
+        # Its not perfect for width > 18, but good enough
         adjust_svg1 = (0,-5*(h1/6))
-        adjust_svg2 = (h1/30, 5*(h1/6))
+        adjust_svg2 = ((9 - (width/2)), 5*(h1/6))
         svg1.moveto(adjust_svg1[0], adjust_svg1[1])
-        svg2.scale(1.065)
+        svg2.scale(1.077 + (width/1000))
         svg2.moveto(adjust_svg2[0], adjust_svg2[1])
     else:
         adjust_svg1 = (0,-5*(h1/6))
-        #adjust_svg2 = (h1/45 + (width-5), 5*(h1/6))
         adjust_svg2 = (10+(width/4.5), 5*(h1/6))
         svg1.moveto(adjust_svg1[0], adjust_svg1[1])
         svg2.moveto(adjust_svg2[0], adjust_svg2[1])
