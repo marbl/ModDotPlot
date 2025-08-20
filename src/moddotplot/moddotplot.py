@@ -1208,7 +1208,7 @@ def main():
                                 )
                                 bedpe_path = os.path.join(bedpe_path, bedfile_prefix)
                                 os.makedirs(bedpe_path, exist_ok=True)
-                                bedfile_output = (
+                                bedfile_output = os.path.join(
                                     bedpe_path,
                                     bedfile_prefix + "_COMPARE.bedpe",
                                 )
