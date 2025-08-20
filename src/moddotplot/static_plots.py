@@ -31,6 +31,7 @@ import svgutils.transform as sg
 import cairosvg
 import pandas as pd
 import numpy as np
+import glob
 from PIL import Image
 import patchworklib as pw
 import math
@@ -110,8 +111,8 @@ def generate_ini_file(
             "file_type = bed",
         ]
 
-        '''if x_axis:
-            sections.insert(0, "[x-axis]")'''
+        if x_axis:
+            sections.insert(0, "[x-axis]")
 
         ini_content = "\n".join(sections)
         with open(f"{ininame}.ini", "w") as file:
@@ -156,55 +157,170 @@ def read_annotation_bed(filepath):
 
     return df
 
+def make_svg_background_transparent(svg_path, output_path=None):
+    """
+    Makes the background of an SVG file transparent by removing/modifying background fills.
+    
+    Args:
+        svg_path: Path to input SVG file
+        output_path: Path to output SVG file (if None, overwrites input)
+    """
+    import xml.etree.ElementTree as ET
+    import re
+    
+    if output_path is None:
+        output_path = svg_path
+    
+    # Parse the SVG
+    tree = ET.parse(svg_path)
+    root = tree.getroot()
+    
+    # Define SVG namespace
+    ns = {"svg": "http://www.w3.org/2000/svg"}
+    
+    # Remove background rectangles/paths that cover the entire canvas
+    # Get SVG dimensions for comparison
+    width = root.get('width', '0')
+    height = root.get('height', '0')
+    
+    # Extract numeric values
+    width_num = float(re.sub(r'[a-zA-Z%]+', '', width)) if width != '0' else 0
+    height_num = float(re.sub(r'[a-zA-Z%]+', '', height)) if height != '0' else 0
+    
+    # Find and modify background elements
+    elements_to_modify = []
+    
+    # Check all paths, rectangles, and other elements
+    for elem in root.iter():
+        if elem.tag.endswith('path') or elem.tag.endswith('rect') or elem.tag.endswith('polygon'):
+            # Check if this element has a background-like fill
+            style = elem.get('style', '')
+            fill = elem.get('fill', '')
+            
+            # Look for background colors (light colors, white, etc.)
+            background_colors = ['#ffffff', '#f0ffff', 'white', 'lightblue', 'lightgray', 'lightgrey']
+            
+            is_background = False
+            current_fill = None
+            
+            if 'fill:' in style:
+                # Extract fill from style
+                fill_match = re.search(r'fill:\s*([^;]+)', style)
+                if fill_match:
+                    current_fill = fill_match.group(1).strip()
+            elif fill:
+                current_fill = fill
+            
+            if current_fill and any(bg_color in current_fill.lower() for bg_color in background_colors):
+                is_background = True
+            
+            # For paths, check if it covers a large area (likely background)
+            if elem.tag.endswith('path'):
+                d = elem.get('d', '')
+                # Simple heuristic: if path starts at 0,0 and covers large area, it's likely background
+                if 'M 0' in d and current_fill:
+                    is_background = True
+            
+            # For rectangles, check if it covers the full canvas
+            if elem.tag.endswith('rect'):
+                x = float(elem.get('x', 0))
+                y = float(elem.get('y', 0))
+                w = float(elem.get('width', 0))
+                h = float(elem.get('height', 0))
+                
+                # If rectangle covers most/all of the canvas, it's likely background
+                if x <= 1 and y <= 1 and w >= width_num * 0.9 and h >= height_num * 0.9:
+                    is_background = True
+            
+            if is_background:
+                elements_to_modify.append(elem)
+    
+    # Modify the background elements
+    for elem in elements_to_modify:
+        style = elem.get('style', '')
+        
+        if 'fill:' in style:
+            # Replace fill in style
+            new_style = re.sub(r'fill:\s*[^;]+', 'fill: transparent', style)
+            elem.set('style', new_style)
+        elif elem.get('fill'):
+            # Replace fill attribute
+            elem.set('fill', 'transparent')
+        
+    
+    # Save the modified SVG
+    tree.write(output_path, encoding='unicode', xml_declaration=True)
+
+def make_all_svg_backgrounds_transparent(directory):
+    """
+    Makes all SVG files in a directory have transparent backgrounds.
+    """
+    
+    svg_files = glob.glob(os.path.join(directory, "*.svg"))
+    
+    for svg_file in svg_files:
+        make_svg_background_transparent(svg_file)
+    
+    print(f"Processed {len(svg_files)} SVG files")
+
 
 def run_pygenometracks(inifile, region, output_file, width):
     output_dir = os.path.dirname(output_file)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)  # Create directory if it doesn't exist
 
-    trp = PlotTracks(
-        inifile,
-        width,
-        fig_height=None,
-        fontsize=10,
-        dpi=300,
-        track_label_width=0.05,
-        plot_regions=region,
-        plot_width=width,
-    )
-    
-    # Extract the chromosome, start, and end from the region
-    chrom, start, end = region[0]
+    try:
+        trp = PlotTracks(
+            inifile,
+            width,
+            fig_height=None,
+            fontsize=10,
+            dpi=300,
+            track_label_width=0.05,
+            plot_regions=region,
+            plot_width=width,
 
-    
-    # Call the plot method directly to generate the image
-    fig = trp.plot(output_file, chrom, start, end)
+        )
 
-    
-    return trp
+        # Extract the chromosome, start, and end from the region
+        chrom, start, end = region[0]
+
+        # Call the plot method directly to generate the image
+        fig = trp.plot(output_file, chrom, start, end)
+
+        return trp
+        
+    except Exception as e:
+        if "No valid intervals were found" in str(e):
+            print(f"No valid intervals found in BED file for region {region[0]}")
+            print("This is expected when the BED file doesn't overlap with the query region.")
+            return None
+        else:
+            print(f"Error in run_pygenometracks: {e}")
+            raise e
 
 
 def test_pygenometracks_direct(inifile, chrom, start, end, output_file, width=40):
     """
     Direct test function to call PlotTracks.plot() without any coordinate validation.
     This bypasses the region checking that happens during PlotTracks initialization.
-    
+
     Args:
         inifile: Path to the tracks configuration file
         chrom: Chromosome name
-        start: Start coordinate 
+        start: Start coordinate
         end: End coordinate
         output_file: Output image file path
         width: Figure width in cm
     """
-    
+
     output_dir = os.path.dirname(output_file)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    
+
     # Create a dummy region for initialization (this gets overridden in plot())
     dummy_region = [(chrom, 1, 1000)]
-    
+
     trp = PlotTracks(
         inifile,
         width,
@@ -215,8 +331,7 @@ def test_pygenometracks_direct(inifile, chrom, start, end, output_file, width=40
         plot_regions=dummy_region,
         plot_width=width,
     )
-    
-    
+
     # Call plot() directly with your desired coordinates
     fig = trp.plot(output_file, chrom, start, end)
 
@@ -284,42 +399,6 @@ def make_scale(vals: list) -> list:
     else:
         return make_m(scaled)
 
-
-def overlap_axis(rotated_plot, filename, prefix):
-    scale_factor = math.sqrt(2) + 0.04
-    new_width = int(rotated_plot.width / scale_factor)
-    new_height = int(rotated_plot.height / scale_factor)
-    resized_rotated_plot = rotated_plot.resize((new_width, new_height), Image.LANCZOS)
-
-    # Step 3: Overlay the resized rotated heatmap onto the original axes
-
-    # Open the original heatmap with axes
-    image_with_axes = Image.open(filename)
-
-    # Create a blank image with the same size as the original
-    final_image = Image.new("RGBA", image_with_axes.size)
-
-    # Calculate the position to center the resized rotated image within the original plot area
-    x_offset = (final_image.width - resized_rotated_plot.width) // 2
-    y_offset = (final_image.height - resized_rotated_plot.height) // 2
-    y_offset += 2400
-    x_offset += 30
-
-    # Paste the original image with axes onto the final image
-    final_image.paste(image_with_axes, (0, 0))
-
-    # Paste the resized rotated plot onto the final image
-    final_image.paste(resized_rotated_plot, (x_offset, y_offset), resized_rotated_plot)
-    width, height = final_image.size
-    cropped_image = final_image.crop((0, height // 2.6, width, height))
-
-    # Save or show the final image
-    cropped_image.save(f"{prefix}_TRI.png")
-    cropped_image.save(f"{prefix}_TRI.pdf", "PDF", resolution=100.0)
-
-    # Remove temp files
-    if os.path.exists(filename):
-        os.remove(filename)
 
 
 def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
@@ -1110,6 +1189,7 @@ def append_svg(svg1_path, svg2_path, output_path):
 def get_svg_size(svg_path):
     """Helper to extract width and height of an SVG in pt units."""
     import xml.etree.ElementTree as ET
+
     tree = ET.parse(svg_path)
     root = tree.getroot()
     width = root.get("width")
@@ -1119,37 +1199,51 @@ def get_svg_size(svg_path):
 
 def parse_size(size_str):
     """Convert '648pt' or '800px' -> float(648)."""
-    return float(re.sub(r'[a-zA-Z]+', '', size_str))
+    return float(re.sub(r"[a-zA-Z]+", "", size_str))
 
-def merge_svgs(svg1_path, svg2_path, output_path):
+
+def merge_annotation_tri(svg1_path, svg2_path, output_path, deraster, width):
     """Merges two SVG files into a single SVG file with proper size."""
-    
+
     w1, h1 = get_svg_size(svg1_path)
     w2, h2 = get_svg_size(svg2_path)
 
     # Ensure they are floats
     w1, h1 = parse_size(w1), parse_size(h1)
     w2, h2 = parse_size(w2), parse_size(h2)
-    print(w1,h1,w2,h2)
     # Determine total size
     total_width = max(w1, w2)
     total_height = h1 + h2
-
     # Create figure
     fig = sg.SVGFigure(f"{total_width}px", f"{total_height}px")
 
     # Load SVGs
     svg1 = sg.fromfile(svg1_path).getroot()
     svg2 = sg.fromfile(svg2_path).getroot()
+    make_svg_background_transparent(svg2_path)
 
     # Position
-    svg1.moveto(0, -300)
-    svg2.moveto(38, 300)
+    if deraster:
+        adjust_svg1 = (0,-5*(h1/6))
+        adjust_svg2 = (h1/30, 5*(h1/6))
+        svg1.moveto(adjust_svg1[0], adjust_svg1[1])
+        svg2.scale(1.065)
+        svg2.moveto(adjust_svg2[0], adjust_svg2[1])
+    else:
+        adjust_svg1 = (0,-5*(h1/6))
+        #adjust_svg2 = (h1/45 + (width-5), 5*(h1/6))
+        adjust_svg2 = (10+(width/4.5), 5*(h1/6))
+        svg1.moveto(adjust_svg1[0], adjust_svg1[1])
+        svg2.moveto(adjust_svg2[0], adjust_svg2[1])
+        scaling_factor = width/2
+        svg2.scale(1.034 + (scaling_factor/1000))
+
 
     # Append and save
     fig.append([svg1, svg2])
     fig.set_size((f"{total_width}px", f"{total_height}px"))
     fig.save(output_path)
+
 
 def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
     if not breaks:
@@ -1615,9 +1709,11 @@ def create_plots(
         from_file,
     )
     sdf = df
-    plot_filename = f"{directory}/{name_x}"
+
+    plot_filename = os.path.join(directory, name_x)
+
     if is_pairwise:
-        plot_filename = f"{directory}/{name_x}_{name_y}"
+        plot_filename = os.path.join(directory, f"{name_x}_{name_y}")
 
     histy = make_hist(
         sdf, palette, palette_orientation, custom_colors, custom_breakpoints
@@ -1638,25 +1734,42 @@ def create_plots(
             xlim = max_val
         region = [(name_x.split(":")[0], min_val, xlim)]
         if inifile:
-            bed_track = run_pygenometracks(
-                inifile=inifile,
-                region=region,
-                output_file=f"{iniprefix}_ANNOTATION.{vector_format}",
-                width=width * 2.05,
-            )
-            name_x.split(":")[0]
-            bed_track.plot(
-                f"{iniprefix}_ANNOTATION.{vector_format}",
-                name_x.split(":")[0],
-                min_val,
-                xlim,
-            )
-            bed_track.plot(
-                f"{iniprefix}_ANNOTATION.png", name_x.split(":")[0], min_val, xlim
-            )
-            print(
-                f"\nAnnotation track saved to {iniprefix}_ANNOTATION.{vector_format} & {iniprefix}_ANNOTATION.png\n"
-            )
+            try:
+                # Check if the BED file has valid intervals for this region first
+                bed_df = read_annotation_bed(annotation)
+                chrom_name = name_x.split(":")[0]
+                
+                # Filter for the chromosome and region of interest
+                valid_intervals = bed_df[
+                    (bed_df['chrom'] == chrom_name) & 
+                    (bed_df['end'] >= min_val) & 
+                    (bed_df['start'] <= xlim)
+                ]
+                
+                if valid_intervals.empty:
+                    print(f"No valid intervals found in {annotation} for region {chrom_name}:{min_val}-{xlim}.\n")
+                    print("Skipping annotation track generation.\n")
+                else:
+                    bed_track = run_pygenometracks(
+                        inifile=inifile,
+                        region=region,
+                        output_file=f"{iniprefix}_ANNOTATION_TRACK.svg",
+                        width=width * 2.05,
+                    )
+                    bed_track.plot(
+                        f"{iniprefix}_ANNOTATION_TRACK.svg",
+                        name_x.split(":")[0],
+                        min_val,
+                        xlim,
+                    )
+                    bed_track.plot(
+                        f"{iniprefix}_ANNOTATION_TRACK.png", name_x.split(":")[0], min_val, xlim
+                    )
+                    print(f"\nAnnotation track saved to {iniprefix}_ANNOTATION_TRACK\n")
+
+            except Exception as e:
+                print(f"Error processing annotation file {annotation}: {e}\n")
+                print("Skipping annotation track generation.\n")
 
     if is_pairwise:
         heatmap = make_dot(
@@ -1729,7 +1842,7 @@ def create_plots(
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
         if deraster:
-            print(f"Derasterization turned off. This may take a while...\n")
+            print(f"Producing dotplots with derasterization turned off. This may take a while...\n")
         tri_plot = make_tri(
             sdf,
             plot_filename,
@@ -1756,7 +1869,6 @@ def create_plots(
             width,
             False,
         )
-
         ggsave(
             full_plot,
             width=width,
@@ -1785,6 +1897,24 @@ def create_plots(
             filename=f"{tri_prefix}.svg",
             verbose=False,
         )
+        if annotation:
+            anno_prefix = f"{plot_filename}_PRE_ANNOTATED"
+            annotated_tri = tri_plot[0] + theme(
+                axis_title_x = element_blank(),
+                axis_line_x = element_blank(),
+                axis_text_x = element_blank(),
+                axis_ticks_minor_x = element_blank(),
+                axis_ticks=element_blank(),
+            )
+            ggsave(
+                annotated_tri,
+                width=width,
+                height=width,
+                dpi=dpi,
+                format="svg",
+                filename=f"{anno_prefix}.svg",
+                verbose=False,
+            )
         # These scaling values were determined thorugh much trial and error. Please don't delete :)
         if deraster:
             scaling_values = (46.62 * width, -3.75 * width)
@@ -1792,9 +1922,9 @@ def create_plots(
                 f"{tri_prefix}.svg", scaling_values[0], scaling_values[1]
             )
             if annotation:
-                """merge_svgs(f"{plot_filename}_TRI.{vector_format}","test.svg", "test2.svg")
-                append_svg(f"{plot_filename}_TRI.{vector_format}", "test.svg", "test2.svg")
-                """
+                rotate_vectorized_tri(
+                    f"{anno_prefix}.svg", scaling_values[0], scaling_values[1]
+                )
             try:
                 cairosvg.svg2png(
                     url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.png", dpi=dpi
@@ -1806,6 +1936,11 @@ def create_plots(
             rotate_rasterized_tri(
                 f"{tri_prefix}.svg", scaling_values[0], scaling_values[1]
             )
+            if annotation:
+                if annotation:
+                    rotate_rasterized_tri(
+                        f"{anno_prefix}.svg", scaling_values[0], scaling_values[1]
+                    )
             try:
                 cairosvg.svg2png(
                     url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.png", dpi=dpi
@@ -1813,10 +1948,44 @@ def create_plots(
             except:
                 print(f"Error installing cairosvg. Unable to convert svg file. \n")
         if annotation:
-            merge_svgs(f"{tri_prefix}.svg",f"{iniprefix}_ANNOTATION.svg", f"{tri_prefix}_ANNOTATED.svg")
-            cairosvg.svg2pdf(
-                        url=f"{tri_prefix}_ANNOTATED.svg", write_to=f"{tri_prefix}_ANNOTATED.pdf"
-                    )
+            # Only merge if annotation was successfully created
+            if os.path.exists(f"{iniprefix}_ANNOTATION_TRACK.svg"):
+                make_svg_background_transparent(f"{iniprefix}_ANNOTATION_TRACK.svg")
+                merge_annotation_tri(
+                    f"{anno_prefix}.svg",
+                    f"{iniprefix}_ANNOTATION_TRACK.svg",
+                    f"{tri_prefix}_ANNOTATED.svg",
+                    deraster,
+                    width
+                )
+                try:
+                    if vector_format != "svg":
+                        if vector_format == "pdf":
+                            cairosvg.svg2pdf(
+                                url=f"{tri_prefix}_ANNOTATED.svg",
+                                write_to=f"{tri_prefix}_ANNOTATED.pdf",
+                            )
+                            cairosvg.svg2pdf(
+                                url=f"{iniprefix}_ANNOTATION_TRACK.svg",
+                                write_to=f"{iniprefix}_ANNOTATION_TRACK.pdf",
+                            )
+                        elif vector_format == "ps":
+                            cairosvg.svg2ps(
+                                url=f"{tri_prefix}_ANNOTATED.svg",
+                                write_to=f"{tri_prefix}_ANNOTATED.ps",
+                            )
+                            cairosvg.svg2ps(
+                                url=f"{tri_prefix}_ANNOTATION_TRACK.svg",
+                                write_to=f"{tri_prefix}_ANNOTATION_TRACK.ps",
+                            )
+                        if os.path.exists(f"{iniprefix}_ANNOTATION_TRACK.svg"):
+                            os.remove(f"{iniprefix}_ANNOTATION_TRACK.svg")
+                        if os.path.exists(f"{tri_prefix}_ANNOTATED.svg"):
+                            os.remove(f"{tri_prefix}_ANNOTATED.svg")
+                except Exception as e:
+                    print(f"Error converting annotated SVG: {e}")
+            else:
+                print("Annotation file not created, skipping merge step.")
         # Convert from svg to selected vector format. Ignore error if user has issues with cairosvg.
         try:
             if vector_format != "svg":
