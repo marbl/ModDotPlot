@@ -930,7 +930,7 @@ def main():
 
         # Create output directory, if doesn't exist:
         if (args.output_dir) and not os.path.exists(args.output_dir):
-            os.makedirs(args.output_dir,exist_ok=True)
+            os.makedirs(args.output_dir, exist_ok=True)
         # -----------COMPUTE SELF-IDENTITY PLOTS-----------
         if not args.compare_only:
             for i in range(len(sequences)):
@@ -982,7 +982,7 @@ def main():
                     args.identity,
                     args.ambiguous,
                     expectation,
-                )         
+                )
                 bed = convertMatrixToBed(
                     self_mat,
                     win,
@@ -1004,22 +1004,19 @@ def main():
                             cooler_path = os.path.join(cooler_path, seq_name)
                         else:
                             cooler_path = os.path.join(args.output_dir, seq_name)
-                        os.makedirs(cooler_path,exist_ok=True)
-                        cooler_output = os.path.join(
-                            cooler_path,
-                            seq_name + ".cooler"
-                        )
+                        os.makedirs(cooler_path, exist_ok=True)
+                        cooler_output = os.path.join(cooler_path, seq_name + ".cooler")
                         convertMatrixToCool(
-                            matrix = self_mat,
-                            window_size = win,
-                            id_threshold = args.identity,
-                            x_name = seq_name,
-                            y_name = seq_name,
+                            matrix=self_mat,
+                            window_size=win,
+                            id_threshold=args.identity,
+                            x_name=seq_name,
+                            y_name=seq_name,
                             self_identity=True,
                             x_offset=seq_start_pos,
                             y_offset=seq_start_pos,
                             chromsizes=seq_length,
-                            output_cool=cooler_output
+                            output_cool=cooler_output,
                         )
                         print(
                             f"Saved self-identity matrix as a cooler file to {cooler_output}\n"
@@ -1032,18 +1029,13 @@ def main():
                     bedpe_path = "."
                     if not args.output_dir:
                         bedpe_path = os.path.join(bedpe_path, seq_name)
-                        os.makedirs(bedpe_path,exist_ok=True)
-                        bedfile_output = os.path.join(
-                            seq_name,
-                            seq_name + ".bedpe"
-                            )
+                        os.makedirs(bedpe_path, exist_ok=True)
+                        bedfile_output = os.path.join(seq_name, seq_name + ".bedpe")
                     else:
                         bedpe_path = os.path.join(args.output_dir, seq_name)
-                        os.makedirs(bedpe_path,exist_ok=True)
-                        bedfile_output = os.path.join(
-                            bedpe_path, seq_name + ".bedpe"
-                        )
-                    
+                        os.makedirs(bedpe_path, exist_ok=True)
+                        bedfile_output = os.path.join(bedpe_path, seq_name + ".bedpe")
+
                     with open(bedfile_output, "w") as bedfile:
                         for row in bed:
                             bedfile.write("\t".join(map(str, row)) + "\n")
@@ -1159,25 +1151,31 @@ def main():
                             try:
                                 cooler_path = "."
                                 if not args.output_dir:
-                                    cooler_path = os.path.join(cooler_path, f"{larger_seq_name}_{smaller_seq_name}")
+                                    cooler_path = os.path.join(
+                                        cooler_path,
+                                        f"{larger_seq_name}_{smaller_seq_name}",
+                                    )
                                 else:
-                                    cooler_path = os.path.join(args.output_dir, f"{larger_seq_name}_{smaller_seq_name}")
-                                os.makedirs(cooler_path,exist_ok=True)
+                                    cooler_path = os.path.join(
+                                        args.output_dir,
+                                        f"{larger_seq_name}_{smaller_seq_name}",
+                                    )
+                                os.makedirs(cooler_path, exist_ok=True)
                                 cooler_output = os.path.join(
                                     cooler_path,
-                                    f"{larger_seq_name}_{smaller_seq_name}.cooler"
+                                    f"{larger_seq_name}_{smaller_seq_name}.cooler",
                                 )
                                 convertMatrixToCool(
-                                    matrix = pair_mat,
-                                    window_size = win,
-                                    id_threshold = args.identity,
-                                    x_name = larger_seq_name,
-                                    y_name = smaller_seq_name,
+                                    matrix=pair_mat,
+                                    window_size=win,
+                                    id_threshold=args.identity,
+                                    x_name=larger_seq_name,
+                                    y_name=smaller_seq_name,
                                     self_identity=False,
                                     x_offset=larger_seq_start_pos,
                                     y_offset=smaller_seq_start_pos,
                                     chromsizes=larger_length,
-                                    output_cool=cooler_output
+                                    output_cool=cooler_output,
                                 )
                                 print(
                                     f"Saved comparative matrix as a cooler file to {cooler_output}\n"
@@ -1188,7 +1186,7 @@ def main():
                             pair_mat,
                             win,
                             args.identity,
-                            #check if this is correct
+                            # check if this is correct
                             larger_seq_name,
                             smaller_seq_name,
                             False,
@@ -1206,25 +1204,22 @@ def main():
                             bedpe_path = "."
                             if not args.output_dir:
                                 bedfile_prefix = (
-                                    larger_seq_name
-                                    + "_"
-                                    + smaller_seq_name
+                                    larger_seq_name + "_" + smaller_seq_name
                                 )
                                 bedpe_path = os.path.join(bedpe_path, bedfile_prefix)
                                 os.makedirs(bedpe_path, exist_ok=True)
                                 bedfile_output = (
                                     bedpe_path,
-                                    bedfile_prefix
-                                    + "_COMPARE.bedpe"
+                                    bedfile_prefix + "_COMPARE.bedpe",
                                 )
                             else:
                                 bedfile_prefix = (
-                                    larger_seq_name
-                                    + "_"
-                                    + smaller_seq_name
+                                    larger_seq_name + "_" + smaller_seq_name
                                 )
-                                bedpe_path = os.path.join(args.output_dir, bedfile_prefix)
-                                os.makedirs(bedpe_path,exist_ok=True)
+                                bedpe_path = os.path.join(
+                                    args.output_dir, bedfile_prefix
+                                )
+                                os.makedirs(bedpe_path, exist_ok=True)
                                 bedfile_output = os.path.join(
                                     bedpe_path,
                                     larger_seq_name

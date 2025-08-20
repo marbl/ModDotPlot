@@ -207,9 +207,18 @@ def convertMatrixToBed(
                     )
     return bed
 
+
 def convertMatrixToCool(
-    matrix, window_size, id_threshold, x_name, y_name,
-    self_identity, x_offset, y_offset, chromsizes, output_cool
+    matrix,
+    window_size,
+    id_threshold,
+    x_name,
+    y_name,
+    self_identity,
+    x_offset,
+    y_offset,
+    chromsizes,
+    output_cool,
 ):
     """
     Convert a matrix into a .cool file.
@@ -231,9 +240,13 @@ def convertMatrixToCool(
     # ---- build bin table ----
     bins = []
     for i in range(rows):
-        bins.append((x_name, i * window_size + x_offset, (i+1) * window_size + x_offset))
+        bins.append(
+            (x_name, i * window_size + x_offset, (i + 1) * window_size + x_offset)
+        )
     for j in range(cols):
-        bins.append((y_name, j * window_size + y_offset, (j+1) * window_size + y_offset))
+        bins.append(
+            (y_name, j * window_size + y_offset, (j + 1) * window_size + y_offset)
+        )
 
     bins = pd.DataFrame(bins, columns=["chrom", "start", "end"])
 
@@ -251,17 +264,11 @@ def convertMatrixToCool(
     pixels = pd.DataFrame(pixels, columns=["bin1_id", "bin2_id", "count"])
 
     # ---- write cooler ----
-    cooler.create_cooler(
-        output_cool,
-        bins=bins,
-        pixels=pixels,
-        ordered=True
-    )
+    cooler.create_cooler(output_cool, bins=bins, pixels=pixels, ordered=True)
     print(bins)
     print(pixels)
 
     return output_cool
-
 
 
 def binomial_distance(containment_value: float, kmer_value: int) -> float:

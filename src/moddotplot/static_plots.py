@@ -157,110 +157,124 @@ def read_annotation_bed(filepath):
 
     return df
 
+
 def make_svg_background_transparent(svg_path, output_path=None):
     """
     Makes the background of an SVG file transparent by removing/modifying background fills.
-    
+
     Args:
         svg_path: Path to input SVG file
         output_path: Path to output SVG file (if None, overwrites input)
     """
     import xml.etree.ElementTree as ET
     import re
-    
+
     if output_path is None:
         output_path = svg_path
-    
+
     # Parse the SVG
     tree = ET.parse(svg_path)
     root = tree.getroot()
-    
+
     # Define SVG namespace
     ns = {"svg": "http://www.w3.org/2000/svg"}
-    
+
     # Remove background rectangles/paths that cover the entire canvas
     # Get SVG dimensions for comparison
-    width = root.get('width', '0')
-    height = root.get('height', '0')
-    
+    width = root.get("width", "0")
+    height = root.get("height", "0")
+
     # Extract numeric values
-    width_num = float(re.sub(r'[a-zA-Z%]+', '', width)) if width != '0' else 0
-    height_num = float(re.sub(r'[a-zA-Z%]+', '', height)) if height != '0' else 0
-    
+    width_num = float(re.sub(r"[a-zA-Z%]+", "", width)) if width != "0" else 0
+    height_num = float(re.sub(r"[a-zA-Z%]+", "", height)) if height != "0" else 0
+
     # Find and modify background elements
     elements_to_modify = []
-    
+
     # Check all paths, rectangles, and other elements
     for elem in root.iter():
-        if elem.tag.endswith('path') or elem.tag.endswith('rect') or elem.tag.endswith('polygon'):
+        if (
+            elem.tag.endswith("path")
+            or elem.tag.endswith("rect")
+            or elem.tag.endswith("polygon")
+        ):
             # Check if this element has a background-like fill
-            style = elem.get('style', '')
-            fill = elem.get('fill', '')
-            
+            style = elem.get("style", "")
+            fill = elem.get("fill", "")
+
             # Look for background colors (light colors, white, etc.)
-            background_colors = ['#ffffff', '#f0ffff', 'white', 'lightblue', 'lightgray', 'lightgrey']
-            
+            background_colors = [
+                "#ffffff",
+                "#f0ffff",
+                "white",
+                "lightblue",
+                "lightgray",
+                "lightgrey",
+            ]
+
             is_background = False
             current_fill = None
-            
-            if 'fill:' in style:
+
+            if "fill:" in style:
                 # Extract fill from style
-                fill_match = re.search(r'fill:\s*([^;]+)', style)
+                fill_match = re.search(r"fill:\s*([^;]+)", style)
                 if fill_match:
                     current_fill = fill_match.group(1).strip()
             elif fill:
                 current_fill = fill
-            
-            if current_fill and any(bg_color in current_fill.lower() for bg_color in background_colors):
+
+            if current_fill and any(
+                bg_color in current_fill.lower() for bg_color in background_colors
+            ):
                 is_background = True
-            
+
             # For paths, check if it covers a large area (likely background)
-            if elem.tag.endswith('path'):
-                d = elem.get('d', '')
+            if elem.tag.endswith("path"):
+                d = elem.get("d", "")
                 # Simple heuristic: if path starts at 0,0 and covers large area, it's likely background
-                if 'M 0' in d and current_fill:
+                if "M 0" in d and current_fill:
                     is_background = True
-            
+
             # For rectangles, check if it covers the full canvas
-            if elem.tag.endswith('rect'):
-                x = float(elem.get('x', 0))
-                y = float(elem.get('y', 0))
-                w = float(elem.get('width', 0))
-                h = float(elem.get('height', 0))
-                
+            if elem.tag.endswith("rect"):
+                x = float(elem.get("x", 0))
+                y = float(elem.get("y", 0))
+                w = float(elem.get("width", 0))
+                h = float(elem.get("height", 0))
+
                 # If rectangle covers most/all of the canvas, it's likely background
                 if x <= 1 and y <= 1 and w >= width_num * 0.9 and h >= height_num * 0.9:
                     is_background = True
-            
+
             if is_background:
                 elements_to_modify.append(elem)
-    
+
     # Modify the background elements
     for elem in elements_to_modify:
-        style = elem.get('style', '')
-        
-        if 'fill:' in style:
+        style = elem.get("style", "")
+
+        if "fill:" in style:
             # Replace fill in style
-            new_style = re.sub(r'fill:\s*[^;]+', 'fill: transparent', style)
-            elem.set('style', new_style)
-        elif elem.get('fill'):
+            new_style = re.sub(r"fill:\s*[^;]+", "fill: transparent", style)
+            elem.set("style", new_style)
+        elif elem.get("fill"):
             # Replace fill attribute
-            elem.set('fill', 'transparent')
-        
-    
+            elem.set("fill", "transparent")
+
     # Save the modified SVG
-    tree.write(output_path, encoding='unicode', xml_declaration=True)
+    tree.write(output_path, encoding="unicode", xml_declaration=True)
+
 
 def make_all_svg_backgrounds_transparent(directory):
     """
     Makes all SVG files in a directory have transparent backgrounds.
     """
-    
+
     svg_files = glob.glob(os.path.join(directory, "*.svg"))
-    
+
     for svg_file in svg_files:
         make_svg_background_transparent(svg_file)
-    
+
     print(f"Processed {len(svg_files)} SVG files")
 
 
@@ -279,7 +293,6 @@ def run_pygenometracks(inifile, region, output_file, width):
             track_label_width=0.05,
             plot_regions=region,
             plot_width=width,
-
         )
 
         # Extract the chromosome, start, and end from the region
@@ -289,11 +302,13 @@ def run_pygenometracks(inifile, region, output_file, width):
         fig = trp.plot(output_file, chrom, start, end)
 
         return trp
-        
+
     except Exception as e:
         if "No valid intervals were found" in str(e):
             print(f"No valid intervals found in BED file for region {region[0]}")
-            print("This is expected when the BED file doesn't overlap with the query region.")
+            print(
+                "This is expected when the BED file doesn't overlap with the query region."
+            )
             return None
         else:
             print(f"Error in run_pygenometracks: {e}")
@@ -398,7 +413,6 @@ def make_scale(vals: list) -> list:
         return make_g(scaled)
     else:
         return make_m(scaled)
-
 
 
 def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
@@ -1225,19 +1239,18 @@ def merge_annotation_tri(svg1_path, svg2_path, output_path, deraster, width):
     # Position
     if deraster:
         # Its not perfect for width > 18, but good enough
-        adjust_svg1 = (0,-5*(h1/6))
-        adjust_svg2 = ((9 - (width/2)), 5*(h1/6))
+        adjust_svg1 = (0, -5 * (h1 / 6))
+        adjust_svg2 = ((9 - (width / 2)), 5 * (h1 / 6))
         svg1.moveto(adjust_svg1[0], adjust_svg1[1])
-        svg2.scale(1.077 + (width/1000))
+        svg2.scale(1.077 + (width / 1000))
         svg2.moveto(adjust_svg2[0], adjust_svg2[1])
     else:
-        adjust_svg1 = (0,-5*(h1/6))
-        adjust_svg2 = (10+(width/4.5), 5*(h1/6))
+        adjust_svg1 = (0, -5 * (h1 / 6))
+        adjust_svg2 = (10 + (width / 4.5), 5 * (h1 / 6))
         svg1.moveto(adjust_svg1[0], adjust_svg1[1])
         svg2.moveto(adjust_svg2[0], adjust_svg2[1])
-        scaling_factor = width/2
-        svg2.scale(1.034 + (scaling_factor/1000))
-
+        scaling_factor = width / 2
+        svg2.scale(1.034 + (scaling_factor / 1000))
 
     # Append and save
     fig.append([svg1, svg2])
@@ -1738,16 +1751,18 @@ def create_plots(
                 # Check if the BED file has valid intervals for this region first
                 bed_df = read_annotation_bed(annotation)
                 chrom_name = name_x.split(":")[0]
-                
+
                 # Filter for the chromosome and region of interest
                 valid_intervals = bed_df[
-                    (bed_df['chrom'] == chrom_name) & 
-                    (bed_df['end'] >= min_val) & 
-                    (bed_df['start'] <= xlim)
+                    (bed_df["chrom"] == chrom_name)
+                    & (bed_df["end"] >= min_val)
+                    & (bed_df["start"] <= xlim)
                 ]
-                
+
                 if valid_intervals.empty:
-                    print(f"No valid intervals found in {annotation} for region {chrom_name}:{min_val}-{xlim}.\n")
+                    print(
+                        f"No valid intervals found in {annotation} for region {chrom_name}:{min_val}-{xlim}.\n"
+                    )
                     print("Skipping annotation track generation.\n")
                 else:
                     bed_track = run_pygenometracks(
@@ -1763,7 +1778,10 @@ def create_plots(
                         xlim,
                     )
                     bed_track.plot(
-                        f"{iniprefix}_ANNOTATION_TRACK.png", name_x.split(":")[0], min_val, xlim
+                        f"{iniprefix}_ANNOTATION_TRACK.png",
+                        name_x.split(":")[0],
+                        min_val,
+                        xlim,
                     )
                     print(f"\nAnnotation track saved to {iniprefix}_ANNOTATION_TRACK\n")
 
@@ -1842,7 +1860,9 @@ def create_plots(
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
         if deraster:
-            print(f"Producing dotplots with derasterization turned off. This may take a while...\n")
+            print(
+                f"Producing dotplots with derasterization turned off. This may take a while...\n"
+            )
         tri_plot = make_tri(
             sdf,
             plot_filename,
@@ -1900,10 +1920,10 @@ def create_plots(
         if annotation:
             anno_prefix = f"{plot_filename}_PRE_ANNOTATED"
             annotated_tri = tri_plot[0] + theme(
-                axis_title_x = element_blank(),
-                axis_line_x = element_blank(),
-                axis_text_x = element_blank(),
-                axis_ticks_minor_x = element_blank(),
+                axis_title_x=element_blank(),
+                axis_line_x=element_blank(),
+                axis_text_x=element_blank(),
+                axis_ticks_minor_x=element_blank(),
                 axis_ticks=element_blank(),
             )
             ggsave(
@@ -1956,7 +1976,7 @@ def create_plots(
                     f"{iniprefix}_ANNOTATION_TRACK.svg",
                     f"{tri_prefix}_ANNOTATED.svg",
                     deraster,
-                    width
+                    width,
                 )
                 try:
                     if vector_format != "svg":
