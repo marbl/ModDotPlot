@@ -942,7 +942,7 @@ def main():
                 seq_length = len(sequences[i][1])
                 seq_name = sequences[i][0]
                 seq_range = extractRegion(seq_name)
-                #If region, then I only want to use the subsequence.
+                # If region, then I only want to use the subsequence.
                 try:
                     if args.region:
                         subseq_start_pos = None
@@ -954,18 +954,26 @@ def main():
                                 subseq_end_pos = upper_bound
                                 seq_start_pos = lower_bound
                                 # Validate bounds
-                                print(f"Using region {seq_name}:{subseq_start_pos}-{subseq_end_pos}\n")
+                                print(
+                                    f"Using region {seq_name}:{subseq_start_pos}-{subseq_end_pos}\n"
+                                )
                                 # Change sequence length, and use a subsequence instead.
-                                seq_length = subseq_end_pos - subseq_start_pos + 1 - args.kmer
+                                seq_length = (
+                                    subseq_end_pos - subseq_start_pos + 1 - args.kmer
+                                )
                                 seq_range = seq_name, subseq_start_pos, subseq_end_pos
-                                seq_name = f"{seq_name}:{subseq_start_pos}-{subseq_end_pos}"
+                                seq_name = (
+                                    f"{seq_name}:{subseq_start_pos}-{subseq_end_pos}"
+                                )
                         if not subseq_end_pos or not subseq_start_pos:
                             print(
                                 f"Error: region {args.region} not found in {seq_name}. Will use entire sequence.\n"
                             )
                             seq_range = None
                 except Exception as e:
-                    print(f"Error obtaining region for {seq_name}. Will use entire sequence: {e}\n")
+                    print(
+                        f"Error obtaining region for {seq_name}. Will use entire sequence: {e}\n"
+                    )
                 if not seq_range:
                     seq_start_pos = 1
                 else:
@@ -1002,7 +1010,9 @@ def main():
                 print(f"\tModimizer sketch size: {expectation}\n")
                 print(f"\tPlot Resolution r: {res}\n")
                 if args.region and seq_range:
-                    subseq = sequences[i][1][subseq_start_pos:(subseq_end_pos - args.kmer +1)]
+                    subseq = sequences[i][1][
+                        subseq_start_pos : (subseq_end_pos - args.kmer + 1)
+                    ]
                     self_mat = createSelfMatrix(
                         seq_length,
                         subseq,
@@ -1153,10 +1163,21 @@ def main():
                                     larger_subseq_end_pos = upper_bound
                                     larger_seq_start_pos = lower_bound
                                     # Validate bounds
-                                    print(f"Using region {larger_seq_name}:{larger_subseq_start_pos}-{larger_subseq_end_pos}\n")
+                                    print(
+                                        f"Using region {larger_seq_name}:{larger_subseq_start_pos}-{larger_subseq_end_pos}\n"
+                                    )
                                     # Change sequence length, and use a subsequence instead.
-                                    larger_length = larger_subseq_end_pos - larger_subseq_start_pos + 1 - args.kmer
-                                    larger_seq_range = larger_seq_name, larger_subseq_start_pos, larger_subseq_end_pos
+                                    larger_length = (
+                                        larger_subseq_end_pos
+                                        - larger_subseq_start_pos
+                                        + 1
+                                        - args.kmer
+                                    )
+                                    larger_seq_range = (
+                                        larger_seq_name,
+                                        larger_subseq_start_pos,
+                                        larger_subseq_end_pos,
+                                    )
                                     larger_seq_name = f"{larger_seq_name}:{larger_subseq_start_pos}-{larger_subseq_end_pos}"
 
                                 if chrom == smaller_seq_name:
@@ -1164,10 +1185,21 @@ def main():
                                     smaller_subseq_end_pos = upper_bound
                                     smaller_seq_start_pos = lower_bound
                                     # Validate bounds
-                                    print(f"Using region {smaller_seq_name}:{smaller_subseq_start_pos}-{smaller_subseq_end_pos}\n")
+                                    print(
+                                        f"Using region {smaller_seq_name}:{smaller_subseq_start_pos}-{smaller_subseq_end_pos}\n"
+                                    )
                                     # Change sequence length, and use a subsequence instead.
-                                    smaller_length = smaller_subseq_end_pos - smaller_subseq_start_pos + 1 - args.kmer
-                                    smaller_seq_range = smaller_seq_name, smaller_subseq_start_pos, smaller_subseq_end_pos
+                                    smaller_length = (
+                                        smaller_subseq_end_pos
+                                        - smaller_subseq_start_pos
+                                        + 1
+                                        - args.kmer
+                                    )
+                                    smaller_seq_range = (
+                                        smaller_seq_name,
+                                        smaller_subseq_start_pos,
+                                        smaller_subseq_end_pos,
+                                    )
                                     smaller_seq_name = f"{smaller_seq_name}:{smaller_subseq_start_pos}-{smaller_subseq_end_pos}"
                             # This is wrong. Might be fine to leave alone
                             if not larger_subseq_end_pos or not larger_subseq_start_pos:
@@ -1176,7 +1208,9 @@ def main():
                                 )
                                 seq_range = None
                     except Exception as e:
-                        print(f"Error obtaining region for {seq_name}. Will use entire sequence: {e}\n")
+                        print(
+                            f"Error obtaining region for {seq_name}. Will use entire sequence: {e}\n"
+                        )
 
                     win = args.window
                     res = args.resolution
@@ -1209,12 +1243,20 @@ def main():
 
                     if args.region and (larger_seq_range or smaller_seq_range):
                         if larger_seq_range:
-                            larger_subseq = larger_seq[larger_subseq_start_pos:(larger_subseq_end_pos - args.kmer +1)]
+                            larger_subseq = larger_seq[
+                                larger_subseq_start_pos : (
+                                    larger_subseq_end_pos - args.kmer + 1
+                                )
+                            ]
                         else:
                             larger_subseq = larger_seq
 
                         if smaller_seq_range:
-                            smaller_subseq = smaller_seq[smaller_subseq_start_pos:(smaller_subseq_end_pos - args.kmer +1)]
+                            smaller_subseq = smaller_seq[
+                                smaller_subseq_start_pos : (
+                                    smaller_subseq_end_pos - args.kmer + 1
+                                )
+                            ]
                         else:
                             smaller_subseq = smaller_seq
 
