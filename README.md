@@ -35,11 +35,11 @@ If you use ModDotPlot for your research, please cite our software!
 
 ## About
 
-_ModDotPlot_ is a dot plot visualization tool designed for large sequences and whole genomes. _ModDotPlot_ is the spiritual successor to [StainedGlass](https://mrvollger.github.io/StainedGlass/). The core algorithm breaks an input sequence down into intervals of sketched *k*-mers called **mod**imizers, and rapidly approximating the Average Nucleotide Identity between pairwise combinations of these intervals. This significantly reduces the computational time required to produce these plots, enough to view multiple layers of resolution in real time!
+_ModDotPlot_ is a dot plot visualization tool designed for large sequences and whole genomes. _ModDotPlot_ is the spiritual successor to [StainedGlass](https://mrvollger.github.io/StainedGlass/). The core algorithm breaks an input sequence down into intervals of sketched *k*-mers called **mod**imizers. This enables the rapid approximation of the Average Nucleotide Identity between pairwise combinations of the intervals!
 
 ![](images/demo.gif)
 
-If you're interested in learning more about ModDotPlot and tandem repeats, you can watch my in-depth [YouTube video tutorial](https://www.youtube.com/watch?v=_7sQaljB_ys&t=2321s&pp=ygUXYWxleCBzd2VldGVuIG1vZGRvdHBsb3Q%3D) from the [BioDiversity Genomics Academy](https://thebgacademy.org).
+If you're interested in learning more about _ModDotPlot_ and how to visualize tandem repeats, we have an in-depth [YouTube video tutorial](https://www.youtube.com/watch?v=_7sQaljB_ys&t=2321s&pp=ygUXYWxleCBzd2VldGVuIG1vZGRvdHBsb3Q%3D) hosted by the [BioDiversity Genomics Academy](https://thebgacademy.org).
 
 --- 
 
@@ -74,7 +74,7 @@ Finally, confirm that the installation was installed correctly and that your ver
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
- v0.9.7
+ v0.9.8
 
 usage: moddotplot [-h] {interactive,static} ...
 
