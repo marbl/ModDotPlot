@@ -942,6 +942,8 @@ def main():
                 seq_length = len(sequences[i][1])
                 seq_name = sequences[i][0]
                 seq_range = extractRegion(seq_name)
+                if seq_range:
+                    seq_name = seq_range[0]
                 # If region, then I only want to use the subsequence.
                 try:
                     if args.region:
@@ -954,6 +956,14 @@ def main():
                                 subseq_end_pos = upper_bound
                                 seq_start_pos = lower_bound
                                 # Validate bounds
+                                if subseq_start_pos < 1 or subseq_end_pos > seq_length:
+                                    print(
+                                        f"Error: region {region} is out of bounds for {seq_name}. Will use entire sequence.\n"
+                                    )
+                                    subseq_start_pos = 1
+                                    subseq_end_pos = seq_length
+                                    seq_name = sequences[i][0]
+                                    break
                                 print(
                                     f"Using region {seq_name}:{subseq_start_pos}-{subseq_end_pos}\n"
                                 )
@@ -1146,11 +1156,13 @@ def main():
                         larger_seq_start_pos = 1
                     else:
                         larger_seq_start_pos = int(larger_seq_range[1])
+                        larger_seq_name = larger_seq_range[0]
                     smaller_seq_range = extractRegion(smaller_seq_name)
-                    if not larger_seq_range:
+                    if not smaller_seq_range:
                         smaller_seq_start_pos = 1
                     else:
                         smaller_seq_start_pos = int(smaller_seq_range[1])
+                        smaller_seq_name = smaller_seq_range[0]
 
                     try:
                         if args.region:
@@ -1163,6 +1175,17 @@ def main():
                                     larger_subseq_end_pos = upper_bound
                                     larger_seq_start_pos = lower_bound
                                     # Validate bounds
+                                    if (
+                                        larger_seq_start_pos < 1
+                                        or larger_subseq_end_pos > larger_length
+                                    ):
+                                        print(
+                                            f"Error: region {region} is out of bounds for {larger_seq_name}. Will use entire sequence.\n"
+                                        )
+                                        larger_subseq_start_pos = 1
+                                        larger_subseq_end_pos = larger_length
+                                        larger_seq_name = sequences[i][0]
+                                        break
                                     print(
                                         f"Using region {larger_seq_name}:{larger_subseq_start_pos}-{larger_subseq_end_pos}\n"
                                     )
@@ -1185,6 +1208,17 @@ def main():
                                     smaller_subseq_end_pos = upper_bound
                                     smaller_seq_start_pos = lower_bound
                                     # Validate bounds
+                                    if (
+                                        smaller_seq_start_pos < 1
+                                        or smaller_subseq_end_pos > smaller_length
+                                    ):
+                                        print(
+                                            f"Error: region {region} is out of bounds for {smaller_seq_name}. Will use entire sequence.\n"
+                                        )
+                                        smaller_subseq_start_pos = 1
+                                        smaller_subseq_end_pos = smaller_length
+                                        smaller_seq_name = sequences[j][0]
+                                        break
                                     print(
                                         f"Using region {smaller_seq_name}:{smaller_subseq_start_pos}-{smaller_subseq_end_pos}\n"
                                     )
