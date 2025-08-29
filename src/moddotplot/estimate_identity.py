@@ -351,6 +351,9 @@ def selfContainmentMatrix(
     n = len(mod_set)
     progress_thresholds = round(n / 77)
 
+    if progress_thresholds == 0:
+        progress_thresholds = 1
+
     printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     containment_matrix = np.empty((n, n))
 
@@ -409,6 +412,8 @@ def pairwiseContainmentMatrix(
     """
     n = max(len(mod_set_y), len(mod_set_x))
     progress_thresholds = round(n / 77)
+    if progress_thresholds == 0:
+        progress_thresholds = 1
 
     if not supress_progress:
         printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
