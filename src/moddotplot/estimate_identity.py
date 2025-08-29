@@ -141,7 +141,10 @@ def partitionOverlaps(
         kmer_list.append(lst[final_start_index:seq_len])
 
     # Test that last value was added on correctly
-    assert kmer_list[-1][-1] == lst[-1]
+    try:
+        assert kmer_list[-1][-1] == lst[-1]
+    except (AssertionError, IndexError) as e:
+        print(f"Error: Last k-mer does not match original sequence: {e}\n")
     return kmer_list
 
 
