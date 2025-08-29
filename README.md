@@ -35,7 +35,7 @@ If you use ModDotPlot for your research, please cite our software!
 
 ## About
 
-_ModDotPlot_ is a dot plot visualization tool designed for large sequences and whole genomes. _ModDotPlot_ is the spiritual successor to [StainedGlass](https://mrvollger.github.io/StainedGlass/). The core algorithm breaks an input sequence down into intervals of sketched *k*-mers called **mod**imizers. This enables the rapid approximation of the Average Nucleotide Identity between pairwise combinations of the intervals!
+_ModDotPlot_ is a dot plot visualization tool designed to be used at scale, both for smaller sequences and whole genomes. _ModDotPlot_ is the spiritual successor to [StainedGlass](https://mrvollger.github.io/StainedGlass/). The core algorithm breaks an input sequence down into intervals of sketched *k*-mers called **mod**imizers. This enables the rapid approximation of the Average Nucleotide Identity between combinations of intervals! 
 
 ![](images/demo.gif)
 
@@ -78,7 +78,7 @@ Finally, confirm that the installation was installed correctly and that your ver
 
 usage: moddotplot [-h] {interactive,static} ...
 
-ModDotPlot: Visualization of Complex Repeat Structures
+ModDotPlot: Visualization of Tandem Repeats
 
 positional arguments:
   {interactive,static}  Choose mode: interactive or static
@@ -86,7 +86,7 @@ positional arguments:
     static              Static mode commands
 
 options:
-  -h, --help            show this help message and exit`
+  -h, --help            show this help message and exit
   ```
 --- 
 
@@ -119,7 +119,7 @@ _ModDotPlot_ supports highly customizable plotting features in static mode. See 
 moddotplot interactive <ARGS>
 ```
 
-Running _ModDotPlot_ in interactive mode will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot (this should happen automatically, but depending on your environment you might need to copy and paste this URL into your web browser). Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info).
+Running _ModDotPlot_ in interactive mode will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot (this should happen automatically, but depending on your environment you might need to copy and paste this URL into your web browser). Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info, and [Sample run - Port Forwarding](#sample-run---port-forwarding) for tips on running interactive mode on an HPC environment).
 
 --- 
 
@@ -223,9 +223,17 @@ By default, vectorized outputs rasterize the actual dotplot (not the axis). This
 
 Window size. Unlike interactive mode, only one matrix will be created, so this represents the *only* window size. Default is set to `n/1000` (eg. 3000bp for a 3Mbp sequence). 
 
+`--region <list of strs>`
+
+Plot only a particular range for a given sequence. Syntax is UCSC style (chr:start-end).
+
 `--palette <str>`
 
-List of accepted palettes can be found [here](https://jiffyclub.github.io/palettable/colorbrewer/). The syntax is to have the name of the palette, followed by an underscore with the number of colors, eg. `OrRd_8`. Default is `Spectral_11`.
+List of accepted palettes can be found [here](https://jiffyclub.github.io/palettable/colorbrewer/). Palettes are segregated into 3 types: _Diverging_, _Qualitative_, and _Sequential_. Syntax is the name of the palette, followed by an underscore and the number of colors, eg. `OrRd_8`. Default is  `Spectral_11`.
+
+`--breakpoints <list of ints>`
+
+Add custom identity threshold breakpoints. Note that the number of breakpoints must be equal to the number of colors + 1, otherwise an error will occur. 
 
 `--palette-orientation <bool>`
 
@@ -234,10 +242,6 @@ Flip sequential order of color palette. Set to `-` by default for divergent pale
 `--color <list of hexcodes>`
 
 List of custom colors in hexcode format can be entered sequentially, mapped from low to high identity. 
-
-`--breakpoints <list of ints>`
-
-Add custom identity threshold breakpoints. Note that the number of breakpoints must be equal to the number of colors + 1.
 
 `-t / --axes-ticks <list of ints>`
 
@@ -463,3 +467,5 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 - Mac users might encounter the following unexpected command line output: `/bin/sh: lscpu: command not found`. This is a known issue with Plotnine, the Python plotting library used by ModDotPlot. This can be safely ignored.
 
 - If you encounter an error with the following traceback: `rv = reductor(4) TypeError: cannot pickle 'generator' object`, ths means that you have a newer version of Plotnine that is incompatible with ModDotPlot. Please uninstall plotnine and reinstall version 0.12.4 `pip install plotnine==0.12.4`. 
+
+- The error ` UserWarning: h5py is running against HDF5 1.xx.x when it was built against 1.xx.x, this may cause problems` is due to the h5py library used by cooler having conflicting versions in the dependency tree. This can also be safely ignored, but if you want to remove this message run `pip uninstall -y h5py` `pip install --no-binary=h5py h5py`
