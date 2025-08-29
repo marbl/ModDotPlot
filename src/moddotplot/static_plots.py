@@ -1980,6 +1980,11 @@ def create_plots(
                 )
                 if os.path.exists(f"{anno_prefix}.svg"):
                     os.remove(f"{anno_prefix}.svg")
+                cairosvg.svg2png(
+                    url=f"{tri_prefix}_ANNOTATED.svg",
+                    write_to=f"{tri_prefix}_ANNOTATED.png",
+                    dpi=dpi,
+                )
                 try:
                     if vector_format != "svg":
                         if vector_format == "pdf":

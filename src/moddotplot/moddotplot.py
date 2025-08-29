@@ -28,7 +28,6 @@ import json
 import numpy as np
 import pickle
 import os
-import cooler
 
 
 def get_parser():
@@ -231,6 +230,13 @@ def get_parser():
     )
 
     static_parser.add_argument(
+        "--region",
+        default=None,
+        help="Genomic region to analyze. Syntax is seq_id:start-end (e.g. chr1:100000-200000).",
+        nargs="+",
+    )
+
+    static_parser.add_argument(
         "-id",
         "--identity",
         default=86.0,
@@ -405,7 +411,6 @@ def main():
             axes = []
             for i in range(len(matrices)):
                 matrix_axes = []
-                counter = 0
                 for matrix in matrices[i]:
                     x_axis = [
                         j * round(metadata[i]["x_size"] / matrix.shape[0])
@@ -937,6 +942,48 @@ def main():
                 seq_length = len(sequences[i][1])
                 seq_name = sequences[i][0]
                 seq_range = extractRegion(seq_name)
+                if seq_range:
+                    seq_name = seq_range[0]
+                # If region, then I only want to use the subsequence.
+                try:
+                    if args.region:
+                        subseq_start_pos = None
+                        subseq_end_pos = None
+                        for region in args.region:
+                            chrom, lower_bound, upper_bound = extractRegion(region)
+                            if chrom == seq_name:
+                                subseq_start_pos = lower_bound
+                                subseq_end_pos = upper_bound
+                                seq_start_pos = lower_bound
+                                # Validate bounds
+                                if subseq_start_pos < 1 or subseq_end_pos > seq_length:
+                                    print(
+                                        f"Error: region {region} is out of bounds for {seq_name}. Will use entire sequence.\n"
+                                    )
+                                    subseq_start_pos = 1
+                                    subseq_end_pos = seq_length
+                                    seq_name = sequences[i][0]
+                                    break
+                                print(
+                                    f"Using region {seq_name}:{subseq_start_pos}-{subseq_end_pos}\n"
+                                )
+                                # Change sequence length, and use a subsequence instead.
+                                seq_length = (
+                                    subseq_end_pos - subseq_start_pos + 1 - args.kmer
+                                )
+                                seq_range = seq_name, subseq_start_pos, subseq_end_pos
+                                seq_name = (
+                                    f"{seq_name}:{subseq_start_pos}-{subseq_end_pos}"
+                                )
+                        if not subseq_end_pos or not subseq_start_pos:
+                            print(
+                                f"Error: region {args.region} not found in {seq_name}. Will use entire sequence.\n"
+                            )
+                            seq_range = None
+                except Exception as e:
+                    print(
+                        f"Error obtaining region for {seq_name}. Will use entire sequence: {e}\n"
+                    )
                 if not seq_range:
                     seq_start_pos = 1
                 else:
@@ -972,17 +1019,33 @@ def main():
                 print(f"\tWindow size w: {win}\n")
                 print(f"\tModimizer sketch size: {expectation}\n")
                 print(f"\tPlot Resolution r: {res}\n")
-                self_mat = createSelfMatrix(
-                    seq_length,
-                    sequences[i][1],
-                    win,
-                    seq_sparsity,
-                    args.delta,
-                    args.kmer,
-                    args.identity,
-                    args.ambiguous,
-                    expectation,
-                )
+                if args.region and seq_range:
+                    subseq = sequences[i][1][
+                        subseq_start_pos : (subseq_end_pos - args.kmer + 1)
+                    ]
+                    self_mat = createSelfMatrix(
+                        seq_length,
+                        subseq,
+                        win,
+                        seq_sparsity,
+                        args.delta,
+                        args.kmer,
+                        args.identity,
+                        args.ambiguous,
+                        expectation,
+                    )
+                else:
+                    self_mat = createSelfMatrix(
+                        seq_length,
+                        sequences[i][1],
+                        win,
+                        seq_sparsity,
+                        args.delta,
+                        args.kmer,
+                        args.identity,
+                        args.ambiguous,
+                        expectation,
+                    )
                 bed = convertMatrixToBed(
                     self_mat,
                     win,
@@ -1093,11 +1156,96 @@ def main():
                         larger_seq_start_pos = 1
                     else:
                         larger_seq_start_pos = int(larger_seq_range[1])
+                        larger_seq_name = larger_seq_range[0]
                     smaller_seq_range = extractRegion(smaller_seq_name)
-                    if not larger_seq_range:
+                    if not smaller_seq_range:
                         smaller_seq_start_pos = 1
                     else:
                         smaller_seq_start_pos = int(smaller_seq_range[1])
+                        smaller_seq_name = smaller_seq_range[0]
+
+                    try:
+                        if args.region:
+                            subseq_start_pos = None
+                            subseq_end_pos = None
+                            for region in args.region:
+                                chrom, lower_bound, upper_bound = extractRegion(region)
+                                if chrom == larger_seq_name:
+                                    larger_subseq_start_pos = lower_bound
+                                    larger_subseq_end_pos = upper_bound
+                                    larger_seq_start_pos = lower_bound
+                                    # Validate bounds
+                                    if (
+                                        larger_seq_start_pos < 1
+                                        or larger_subseq_end_pos > larger_length
+                                    ):
+                                        print(
+                                            f"Error: region {region} is out of bounds for {larger_seq_name}. Will use entire sequence.\n"
+                                        )
+                                        larger_subseq_start_pos = 1
+                                        larger_subseq_end_pos = larger_length
+                                        larger_seq_name = sequences[i][0]
+                                        break
+                                    print(
+                                        f"Using region {larger_seq_name}:{larger_subseq_start_pos}-{larger_subseq_end_pos}\n"
+                                    )
+                                    # Change sequence length, and use a subsequence instead.
+                                    larger_length = (
+                                        larger_subseq_end_pos
+                                        - larger_subseq_start_pos
+                                        + 1
+                                        - args.kmer
+                                    )
+                                    larger_seq_range = (
+                                        larger_seq_name,
+                                        larger_subseq_start_pos,
+                                        larger_subseq_end_pos,
+                                    )
+                                    larger_seq_name = f"{larger_seq_name}:{larger_subseq_start_pos}-{larger_subseq_end_pos}"
+
+                                if chrom == smaller_seq_name:
+                                    smaller_subseq_start_pos = lower_bound
+                                    smaller_subseq_end_pos = upper_bound
+                                    smaller_seq_start_pos = lower_bound
+                                    # Validate bounds
+                                    if (
+                                        smaller_seq_start_pos < 1
+                                        or smaller_subseq_end_pos > smaller_length
+                                    ):
+                                        print(
+                                            f"Error: region {region} is out of bounds for {smaller_seq_name}. Will use entire sequence.\n"
+                                        )
+                                        smaller_subseq_start_pos = 1
+                                        smaller_subseq_end_pos = smaller_length
+                                        smaller_seq_name = sequences[j][0]
+                                        break
+                                    print(
+                                        f"Using region {smaller_seq_name}:{smaller_subseq_start_pos}-{smaller_subseq_end_pos}\n"
+                                    )
+                                    # Change sequence length, and use a subsequence instead.
+                                    smaller_length = (
+                                        smaller_subseq_end_pos
+                                        - smaller_subseq_start_pos
+                                        + 1
+                                        - args.kmer
+                                    )
+                                    smaller_seq_range = (
+                                        smaller_seq_name,
+                                        smaller_subseq_start_pos,
+                                        smaller_subseq_end_pos,
+                                    )
+                                    smaller_seq_name = f"{smaller_seq_name}:{smaller_subseq_start_pos}-{smaller_subseq_end_pos}"
+                            # This is wrong. Might be fine to leave alone
+                            if not larger_subseq_end_pos or not larger_subseq_start_pos:
+                                print(
+                                    f"Error: region {args.region} not found in {seq_name}. Will use entire sequence.\n"
+                                )
+                                seq_range = None
+                    except Exception as e:
+                        print(
+                            f"Error obtaining region for {seq_name}. Will use entire sequence: {e}\n"
+                        )
+
                     win = args.window
                     res = args.resolution
                     if args.window:
@@ -1117,7 +1265,6 @@ def main():
                         f"Computing pairwise identity matrix for {larger_seq_name} and {smaller_seq_name}... \n"
                     )
                     # TODO: Logging here
-                    # print(f"\tSparsity value s: {seq_sparsity}\n")
                     print(
                         f"\tSequence length {larger_seq_name}: {larger_length + args.kmer - 1}\n"
                     )
@@ -1128,19 +1275,52 @@ def main():
                     print(f"\tModimizer sketch size: {expectation}\n")
                     print(f"\tPlot Resolution r: {res}\n")
 
-                    pair_mat = createPairwiseMatrix(
-                        smaller_length,
-                        larger_length,
-                        smaller_seq,
-                        larger_seq,
-                        win,
-                        seq_sparsity,
-                        args.delta,
-                        args.kmer,
-                        args.identity,
-                        args.ambiguous,
-                        expectation,
-                    )
+                    if args.region and (larger_seq_range or smaller_seq_range):
+                        if larger_seq_range:
+                            larger_subseq = larger_seq[
+                                larger_subseq_start_pos : (
+                                    larger_subseq_end_pos - args.kmer + 1
+                                )
+                            ]
+                        else:
+                            larger_subseq = larger_seq
+
+                        if smaller_seq_range:
+                            smaller_subseq = smaller_seq[
+                                smaller_subseq_start_pos : (
+                                    smaller_subseq_end_pos - args.kmer + 1
+                                )
+                            ]
+                        else:
+                            smaller_subseq = smaller_seq
+
+                        pair_mat = createPairwiseMatrix(
+                            smaller_length,
+                            larger_length,
+                            smaller_subseq,
+                            larger_subseq,
+                            win,
+                            seq_sparsity,
+                            args.delta,
+                            args.kmer,
+                            args.identity,
+                            args.ambiguous,
+                            expectation,
+                        )
+                    else:
+                        pair_mat = createPairwiseMatrix(
+                            smaller_length,
+                            larger_length,
+                            smaller_seq,
+                            larger_seq,
+                            win,
+                            seq_sparsity,
+                            args.delta,
+                            args.kmer,
+                            args.identity,
+                            args.ambiguous,
+                            expectation,
+                        )
                     # Throw error if the matrix is empty
                     if np.all(pair_mat == 0) and (not (args.grid or args.grid_only)):
                         print(
