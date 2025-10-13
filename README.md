@@ -88,6 +88,9 @@ positional arguments:
 options:
   -h, --help            show this help message and exit
   ```
+
+(Note that running `moddotplot -h` might take a while at first! This is because the Python interpreter is compiling source code into the __pycache__ directory. Subsequent runs will use the pre-compiled code and thus load much faster!)
+
 --- 
 
 ## Usage
