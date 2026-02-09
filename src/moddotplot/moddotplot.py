@@ -647,7 +647,10 @@ def main():
     # -----------LOAD SEQUENCES INTO MEMORY-----------
     kmer_list = []
     for i in fasta_list:
-        kmer_list.append(readKmersFromFile(i, args.kmer, False))
+        if args.forward:
+            kmer_list.append(readKmersFromFile(i, args.kmer, False, True))
+        else:
+            kmer_list.append(readKmersFromFile(i, args.kmer, False, False))
     k_list = [item for sublist in kmer_list for item in sublist]
     # Throw error if compare only selected with one sequence.
     if len(k_list) < 2 and args.compare_only:
