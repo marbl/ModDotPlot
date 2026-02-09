@@ -317,6 +317,18 @@ def get_parser():
     )
 
     static_parser.add_argument(
+        "--forward",
+        action="store_true",
+        help="Enforce forward only k-mers instead of canonical k-mers. Warning: only use if you want strand-specific output!"
+    )
+
+    static_parser.add_argument(
+        "--plot-direction",
+        action="store_true",
+        help="Create a plot containing the direction of each k-mer array (relative to the first array). Arrays with inversions will be highlighted in blue (forward) and pink (reverse)."
+    )
+
+    static_parser.add_argument(
         "--colors",
         default=None,
         nargs="+",
