@@ -158,6 +158,10 @@ Each partition takes into account a fraction of its neighboring partitions k-mer
 
 Modimizer sketch size. Must be lower than window size `w`. A lower sketch size means less k-mers to compare (and faster runtime), at the expense of lower accuracy. Recommended to be kept >= 1000.
 
+`--forward <bool>`
+
+Use forward k-mers only, instead of the default of canonical k-mers. Warning: this will give strand specific output.
+
 `-r / --resolution <int>`
 
 Dotplot resolution. This corresponds to the number of windows each input sequence is partitioned into. Default is 1000. Overrides the `--window` parameter.
