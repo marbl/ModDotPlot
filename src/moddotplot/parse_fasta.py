@@ -37,7 +37,9 @@ def extractRegion(seq_name):
     return None
 
 
-def generateKmersFromFasta(seq: Sequence[str], k: int, quiet: bool) -> Iterable[int]:
+def generateKmersFromFasta(
+    seq: Sequence[str], k: int, quiet: bool, fw_only: bool
+) -> Iterable[int]:
     n = len(seq)
     if not quiet:
         progress_thresholds = round(n / 77)
@@ -60,11 +62,12 @@ def generateKmersFromFasta(seq: Sequence[str], k: int, quiet: bool) -> Iterable[
         # Remove case sensitivity
         kmer = seq[i : i + k].upper()
         fh = mmh3.hash(kmer)
-
-        # Calculate reverse complement hash directly without the need for translation
-        rc = mmh3.hash(kmer[::-1].translate(tab_b))
-
-        yield fh if fh < rc else rc
+        if fw_only:
+            yield fh
+        else:
+            # Calculate reverse complement hash directly without the need for translation
+            rc = mmh3.hash(kmer[::-1].translate(tab_b))
+            yield fh if fh < rc else rc
 
 
 def isValidFasta(file_path):
@@ -151,7 +154,9 @@ def printProgressBar(
         print()
 
 
-def readKmersFromFile(filename: str, ksize: int, quiet: bool) -> List[List[int]]:
+def readKmersFromFile(
+    filename: str, ksize: int, quiet: bool, fw_only: bool
+) -> List[List[int]]:
     """
     Given a filename and an integer k, returns a list of all k-mers found in the sequences in the file.
     """
@@ -161,7 +166,9 @@ def readKmersFromFile(filename: str, ksize: int, quiet: bool) -> List[List[int]]
     for seq_id in seq.references:
         print(f"Retrieving k-mers from {seq_id}.... \n")
         kmers_for_seq = []
-        for kmer_hash in generateKmersFromFasta(seq.fetch(seq_id), ksize, quiet):
+        for kmer_hash in generateKmersFromFasta(
+            seq.fetch(seq_id), ksize, quiet, fw_only
+        ):
             kmers_for_seq.append(kmer_hash)
         all_kmers.append(kmers_for_seq)
         print(f"\n{seq_id} k-mers retrieved! \n")

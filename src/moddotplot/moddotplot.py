@@ -317,6 +317,18 @@ def get_parser():
     )
 
     static_parser.add_argument(
+        "--forward",
+        action="store_true",
+        help="Enforce forward only k-mers instead of canonical k-mers. Warning: only use if you want strand-specific output!",
+    )
+
+    static_parser.add_argument(
+        "--plot-direction",
+        action="store_true",
+        help="Create a plot containing the direction of each k-mer array (relative to the first array). Arrays with inversions will be highlighted in blue (forward) and pink (reverse).",
+    )
+
+    static_parser.add_argument(
         "--colors",
         default=None,
         nargs="+",
@@ -635,7 +647,10 @@ def main():
     # -----------LOAD SEQUENCES INTO MEMORY-----------
     kmer_list = []
     for i in fasta_list:
-        kmer_list.append(readKmersFromFile(i, args.kmer, False))
+        if args.forward:
+            kmer_list.append(readKmersFromFile(i, args.kmer, False, True))
+        else:
+            kmer_list.append(readKmersFromFile(i, args.kmer, False, False))
     k_list = [item for sublist in kmer_list for item in sublist]
     # Throw error if compare only selected with one sequence.
     if len(k_list) < 2 and args.compare_only:
