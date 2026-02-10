@@ -37,7 +37,9 @@ def extractRegion(seq_name):
     return None
 
 
-def generateKmersFromFasta(seq: Sequence[str], k: int, quiet: bool, fw_only: bool) -> Iterable[int]:
+def generateKmersFromFasta(
+    seq: Sequence[str], k: int, quiet: bool, fw_only: bool
+) -> Iterable[int]:
     n = len(seq)
     if not quiet:
         progress_thresholds = round(n / 77)
@@ -152,7 +154,9 @@ def printProgressBar(
         print()
 
 
-def readKmersFromFile(filename: str, ksize: int, quiet: bool, fw_only: bool) -> List[List[int]]:
+def readKmersFromFile(
+    filename: str, ksize: int, quiet: bool, fw_only: bool
+) -> List[List[int]]:
     """
     Given a filename and an integer k, returns a list of all k-mers found in the sequences in the file.
     """
@@ -162,7 +166,9 @@ def readKmersFromFile(filename: str, ksize: int, quiet: bool, fw_only: bool) -> 
     for seq_id in seq.references:
         print(f"Retrieving k-mers from {seq_id}.... \n")
         kmers_for_seq = []
-        for kmer_hash in generateKmersFromFasta(seq.fetch(seq_id), ksize, quiet, fw_only):
+        for kmer_hash in generateKmersFromFasta(
+            seq.fetch(seq_id), ksize, quiet, fw_only
+        ):
             kmers_for_seq.append(kmer_hash)
         all_kmers.append(kmers_for_seq)
         print(f"\n{seq_id} k-mers retrieved! \n")
