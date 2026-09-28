@@ -4,23 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ModDotPlot"
-version = "0.9.9"
-requires-python = ">= 3.7"
+version = "1.0.0"
+requires-python = ">=3.8,<3.13"
 dependencies = [
-  "pysam",
   "pandas",
+  "matplotlib",
   "plotly",
   "dash",
   "plotnine==0.12.4",
   "palettable",
-  "mmh3",
   "setproctitle",
   "numpy",
+  "scipy",
   "pillow",
-  "patchworklib==0.6.3",
-  "cairosvg",
-  "pygenometracks",
-  "svgutils",
   "cooler",
 ]
 authors = [
@@ -42,5 +38,6 @@ moddotplot = "moddotplot.__main__:main"
 # development dependency groups
 test = [
     "pytest",
-    "pytest-cov"
+    "pytest-cov",
+    "tomli>=1.1; python_version < '3.11'",
 ]

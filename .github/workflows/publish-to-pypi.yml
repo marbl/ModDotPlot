@@ -1,53 +1,156 @@
-name: Publish Python 🐍 distribution 📦 to PyPI and TestPyPI
+name: Publish release to PyPI
 
-on: push
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    name: Build distribution 📦
+  verify:
+    name: Verify release and run tests
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MPLBACKEND: Agg
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        persist-credentials: false
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.x"
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-    - name: Install pypa/build
-      run: >-
-        python3 -m
-        pip install
-        build
-        --user
-    - name: Build a binary wheel and a source tarball
-      run: python3 -m build
-    - name: Store the distribution packages
-      uses: actions/upload-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-  publish-to-pypi:
-    name: >-
-      Publish Python 🐍 distribution 📦 to PyPI
-    if: startsWith(github.ref, 'refs/tags/')  # only publish to PyPI on tag pushes
+      - name: Verify tag matches the package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          python -c
+          "import os, pathlib, tomllib;
+          version = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'];
+          tag = os.environ['RELEASE_TAG'];
+          assert tag == f'v{version}', f'tag {tag!r} does not match package version v{version}'"
+
+      - name: Install package and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[test]"
+
+      - name: Run the release test suite
+        run: python -m pytest
+
+  sdist:
+    name: Build source distribution
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install packaging tools
+        run: python -m pip install build twine
+
+      - name: Build source distribution
+        run: python -m build --sdist --outdir dist
+
+      - name: Validate distribution metadata
+        run: python -m twine check --strict dist/*
+
+      - name: Store source distribution for publication
+        uses: actions/upload-artifact@v7
+        with:
+          name: source-distribution
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  wheels:
+    name: Build wheel (${{ matrix.os }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-15-intel
+          - windows-latest
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The extension uses CPython's stable ABI. Building once with CPython 3.9
+      # produces a cp38-abi3 wheel that supports every Python version declared
+      # by the package without compiling the same binary repeatedly.
+      - name: Build stable-ABI wheel
+        uses: pypa/cibuildwheel@v4.2.0
+        env:
+          CIBW_BUILD: "cp39-*"
+          CIBW_SKIP: "*-musllinux_*"
+          CIBW_ARCHS_MACOS: universal2
+          CIBW_TEST_COMMAND: >-
+            python -c "from moddotplot import _nthash;
+            hashes, mask = _nthash.hash_kmers('ACGTACGT', 3, True);
+            assert len(hashes) == 48 and mask == b''"
+        with:
+          output-dir: wheelhouse
+
+      - name: Store wheel for publication
+        uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.os }}
+          path: wheelhouse/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish distributions to PyPI
     needs:
-    - build
+      - sdist
+      - wheels
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/ModDotPlot
+      url: https://pypi.org/project/ModDotPlot
     permissions:
-      id-token: write  # IMPORTANT: mandatory for trusted publishing
+      id-token: write
 
     steps:
-    - name: Download all the dists
-      uses: actions/download-artifact@v4
-      with:
-        name: python-package-distributions
-        path: dist/
-    - name: Publish distribution 📦 to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Download validated distributions
+        uses: actions/download-artifact@v8
+        with:
+          path: dist/
+          pattern: "*"
+          merge-multiple: true
+
+      - name: Check distribution metadata
+        run: |
+          python -m pip install twine
+          python -m twine check --strict dist/*
+
+      - name: Publish distributions with Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true
+          print-hash: true

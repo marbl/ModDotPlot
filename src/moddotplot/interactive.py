@@ -21,6 +21,55 @@ log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
 
 
+def figure_to_bed(figure, default_identity=86.0):
+    """Convert the heatmap in a Dash figure into BEDPE rows.
+
+    The interactive callback receives a JSON-compatible Plotly figure rather
+    than the original matrix metadata, so derive the window and coordinate
+    offsets from the trace axes.  Keeping this logic outside the callback also
+    makes the export path independently testable.
+    """
+    trace = figure["data"][0]
+    matrix = np.asarray(trace["z"], dtype=float)
+
+    positive_values = matrix[np.isfinite(matrix) & (matrix > 0)]
+    identity = (
+        float(np.min(positive_values))
+        if positive_values.size
+        else float(default_identity)
+    )
+
+    x_values = np.asarray(trace.get("x", []), dtype=float)
+    y_values = np.asarray(trace.get("y", []), dtype=float)
+    window_size = float(trace.get("dx", 0))
+    if x_values.size > 1:
+        window_size = float(x_values[1] - x_values[0])
+    elif y_values.size > 1:
+        window_size = float(y_values[1] - y_values[0])
+    if window_size <= 0:
+        raise ValueError("Unable to determine a positive window size from the plot")
+
+    x_offset = float(x_values[0]) if x_values.size else float(trace.get("x0", 0))
+    y_offset = float(y_values[0]) if y_values.size else float(trace.get("y0", 0))
+    layout = figure.get("layout", {})
+    x_name = layout.get("xaxis", {}).get("title", {}).get("text", "x")
+    y_name = layout.get("yaxis", {}).get("title", {}).get("text", "y")
+    self_identity = x_name == y_name
+    filename = f"{x_name}.bedpe" if self_identity else f"{x_name}-{y_name}.bedpe"
+
+    rows = convertMatrixToBed(
+        matrix,
+        window_size,
+        identity,
+        x_name,
+        y_name,
+        self_identity,
+        x_offset,
+        y_offset,
+    )
+    return rows, filename
+
+
 def find_closest_elements(value, sorted_list):
     # Initialize variables to store the indices of the closest elements
     closest_index1 = None
@@ -290,7 +339,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                             ),
                             html.Div(
                                 html.Button(
-                                    "Save Matrix to Bed File",
+                                    "Save Matrix to BEDPE File",
                                     id="save-bed",
                                     n_clicks=0,
                                     disabled=False,
@@ -1345,29 +1394,10 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
     def save_bed(n_clicks, figure):
         global clicked_values
         if n_clicks > 0:
-            window_size = figure["data"][0]["x"][1] - figure["data"][0]["x"][0]
             try:
-                identity = round(
-                    min([val for val in figure["data"][0]["z"][0] if val > 0])
-                )
-                x_axis_name = figure["layout"]["xaxis"]["title"]["text"]
-                y_axis_name = figure["layout"]["yaxis"]["title"]["text"]
-                if x_axis_name == y_axis_name:
-                    selfy = True
-                    title_hi = x_axis_name + ".bed"
-                else:
-                    selfy = False
-                    title_hi = x_axis_name + "-" + y_axis_name + ".bed"
-            except:
-                identity = 86
-                x_axis_name = "x"
-                y_axis_name = "y"
-                selfy = False
-                title_hi = "x-y.bed"
-            pls = np.array(figure["data"][0]["z"])
-            tr = convertMatrixToBed(
-                pls, window_size, identity, x_axis_name, y_axis_name, selfy
-            )
+                tr, title_hi = figure_to_bed(figure)
+            except (KeyError, TypeError, ValueError) as error:
+                return f"Unable to save BEDPE file: {error}", 0
             if not output_dir:
                 bedfile_output = os.path.join("./", title_hi)
             else:
@@ -1377,7 +1407,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
             with open(bedfile_output, "w") as bedfile:
                 for row in tr:
                     bedfile.write("\t".join(map(str, row)) + "\n")
-            msg = f"Saved bed file to {bedfile_output}\n"
+            msg = f"Saved BEDPE file to {bedfile_output}\n"
             return msg, 0  # Make sure to return a tuple of values for the outputs
         else:
             return (

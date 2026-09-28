@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 from moddotplot.parse_fasta import (
+    HASH_ALGORITHM,
     readKmersFromFile,
     getInputHeaders,
     isValidFasta,
@@ -16,6 +17,9 @@ from moddotplot.estimate_identity import (
     convertMatrixToCool,
     createSelfMatrix,
     createPairwiseMatrix,
+    create_self_matrix_from_sketches,
+    create_pairwise_matrix_from_sketches,
+    ModimizerSketchCache,
     partitionOverlaps,
 )
 from moddotplot.interactive import run_dash
@@ -23,11 +27,34 @@ from moddotplot.const import ASCII_ART, VERSION
 
 import argparse
 import math
-from moddotplot.static_plots import read_df_from_file, create_plots, create_grid
 import json
 import numpy as np
 import pickle
 import os
+
+
+# Static plotting pulls in the Plotnine and Matplotlib stacks. Keep those
+# imports behind the static command boundary so ``--help`` and interactive
+# mode do not pay their startup cost.
+read_df_from_file = None
+create_plots = None
+create_grid = None
+create_direction_plot = None
+
+
+def _load_static_plotting():
+    global read_df_from_file, create_plots, create_grid, create_direction_plot
+
+    from moddotplot import static_plots
+
+    if read_df_from_file is None:
+        read_df_from_file = static_plots.read_df_from_file
+    if create_plots is None:
+        create_plots = static_plots.create_plots
+    if create_grid is None:
+        create_grid = static_plots.create_grid
+    if create_direction_plot is None:
+        create_direction_plot = static_plots.create_direction_plot
 
 
 def get_parser():
@@ -40,7 +67,7 @@ def get_parser():
         description="ModDotPlot: Visualization of Tandem Repeats",
     )
     subparsers = parser.add_subparsers(
-        dest="command", help="Choose mode: interactive or static"
+        dest="command", required=True, help="Choose mode: interactive or static"
     )
     interactive_parser = subparsers.add_parser(
         "interactive", help="Interactive mode commands"
@@ -112,7 +139,7 @@ def get_parser():
         "--delta",
         default=0.5,
         type=float,
-        help="Fraction of neighboring partition to include in identity estimation. Must be between 0 and 1, use > 0.5 is not recommended.",
+        help="Fraction of each neighboring window included when estimating identity. Default: 0.5.",
     )
 
     interactive_parser.add_argument(
@@ -151,7 +178,13 @@ def get_parser():
     interactive_parser.add_argument(
         "--ambiguous",
         action="store_true",
-        help="Preserve diagonal when handling strings of ambiguous homopolymers (eg. long runs of N's).",
+        help="Include k-mer windows containing non-ACGTU IUPAC bases instead of masking them.",
+    )
+
+    interactive_parser.add_argument(
+        "--forward",
+        action="store_true",
+        help="Enforce forward only k-mers instead of canonical k-mers. Warning: only use if you want strand-specific output!",
     )
 
     interactive_parser.add_argument(
@@ -249,7 +282,7 @@ def get_parser():
         "--delta",
         default=0.5,
         type=float,
-        help="Fraction of neighboring partition to include in identity estimation. Must be between 0 and 1, use > 0.5 is not recommended.",
+        help="Fraction of each neighboring window included when estimating identity. Default: 0.5.",
     )
 
     static_parser.add_argument(
@@ -330,6 +363,8 @@ def get_parser():
 
     static_parser.add_argument(
         "--colors",
+        "--color",
+        dest="colors",
         default=None,
         nargs="+",
         help="Use a custom color palette, entered in either hexcode or rgb format.",
@@ -374,7 +409,7 @@ def get_parser():
     static_parser.add_argument(
         "--ambiguous",
         action="store_true",
-        help="Preserve diagonal when handling strings of ambiguous homopolymers (eg. long runs of N's).",
+        help="Include k-mer windows containing non-ACGTU IUPAC bases instead of masking them.",
     )
 
     static_parser.add_argument(
@@ -405,10 +440,122 @@ def get_parser():
     return parser
 
 
+def _apply_static_config(args, config):
+    """Apply static-mode JSON configuration values to parsed arguments."""
+    # TODO: Remove args that are interactive only
+    args.fasta = config.get("fasta")
+    args.load = config.get("load")
+    args.bed = config.get("bed")
+
+    # Distance matrix commands
+    args.kmer = config.get("kmer", args.kmer)
+    args.modimizer = config.get("modimizer", args.modimizer)
+    args.resolution = config.get("resolution", args.resolution)
+    args.window = config.get("window", args.window)
+    args.region = config.get("region", args.region)
+    args.identity = config.get("identity", args.identity)
+    args.delta = config.get("delta", args.delta)
+    args.output_dir = config.get("output_dir", args.output_dir)
+    args.compare = config.get("compare", args.compare)
+    args.compare_only = config.get("compare_only", args.compare_only)
+    args.compare_order = config.get("compare_order", args.compare_order)
+
+    args.cooler = config.get("cooler", args.cooler)
+    args.no_bedpe = config.get("no_bedpe", args.no_bedpe)
+    args.no_plot = config.get("no_plot", args.no_plot)
+    args.no_hist = config.get("no_hist", args.no_hist)
+    args.width = config.get("width", args.width)
+    args.axes_limits = config.get("axes_limits", args.axes_limits)
+    args.dpi = config.get("dpi", args.dpi)
+    args.palette = config.get("palette", args.palette)
+    args.palette_orientation = config.get(
+        "palette_orientation", args.palette_orientation
+    )
+    args.colors = config.get("colors", config.get("color", args.colors))
+    args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
+    args.axes_number = config.get("axes_number", args.axes_number)
+    args.breakpoints = config.get("breakpoints", args.breakpoints)
+    args.bin_freq = config.get("bin_freq", args.bin_freq)
+    args.forward = config.get("forward", args.forward)
+    args.plot_direction = config.get("plot_direction", args.plot_direction)
+    args.ambiguous = config.get("ambiguous", args.ambiguous)
+    args.grid = config.get("grid", args.grid)
+    args.grid_only = config.get("grid_only", args.grid_only)
+    args.vector = config.get("vector", args.vector)
+    args.deraster = config.get("deraster", args.deraster)
+
+    return args
+
+
+def _parse_region_arguments(region_arguments, sequence_names):
+    """Validate CLI regions and index them by their exact FASTA identifier."""
+
+    if not region_arguments:
+        return {}
+    if isinstance(region_arguments, str):
+        region_arguments = [region_arguments]
+
+    available_names = {
+        parsed[0] if (parsed := extractRegion(name)) else name
+        for name in sequence_names
+    }
+    regions = {}
+    for value in region_arguments:
+        parsed = extractRegion(value)
+        if not parsed:
+            raise ValueError(f"invalid region {value!r}; expected FASTA_ID:start-end")
+        sequence_name, start, end = parsed
+        if start < 1 or end < start:
+            raise ValueError(
+                f"invalid region {value!r}; coordinates must satisfy 1 <= start <= end"
+            )
+        if sequence_name not in available_names:
+            raise ValueError(f"region {value!r} does not match any FASTA identifier")
+        if sequence_name in regions:
+            raise ValueError(
+                f"multiple regions were provided for FASTA identifier {sequence_name!r}"
+            )
+        regions[sequence_name] = parsed
+    return regions
+
+
+def _slice_kmers_for_region(kmers, region, kmer_size, sequence_start=1):
+    """Return the exact k-mer slice for a 1-based inclusive base interval."""
+
+    _sequence_name, start, end = region
+    sequence_base_length = len(kmers) + kmer_size - 1
+    sequence_end = sequence_start + sequence_base_length - 1
+    if start < sequence_start or end > sequence_end:
+        raise ValueError(
+            f"region {start}-{end} is outside the available interval "
+            f"{sequence_start}-{sequence_end}"
+        )
+    region_base_length = end - start + 1
+    if region_base_length < kmer_size:
+        raise ValueError(
+            f"region length {region_base_length} is shorter than k-mer size {kmer_size}"
+        )
+
+    # A base interval [start, end] contains k-mers beginning at genomic
+    # positions start through end - k + 1, inclusive. Translate those positions
+    # into the available sequence's zero-based coordinates.
+    local_start = start - sequence_start
+    local_stop = end - sequence_start - kmer_size + 2
+    selected = kmers[local_start:local_stop]
+    expected_count = region_base_length - kmer_size + 1
+    if len(selected) != expected_count:
+        raise ValueError(
+            f"region produced {len(selected)} k-mers; expected {expected_count}"
+        )
+    return selected
+
+
 def main():
     print(ASCII_ART)
     print(f"v{VERSION} \n")
     args = get_parser().parse_args()
+    if args.command == "static":
+        _load_static_plotting()
     # -----------MUTUALLY EXCLUSIVE: INTERACTIVE OR STATIC MODE-----------
     if args.command == "interactive":
         print(f"Running ModDotPlot in interactive mode\n")
@@ -454,42 +601,16 @@ def main():
         if args.config:
             with open(args.config, "r") as f:
                 config = json.load(f)
-                # TODO: Remove args that are interactive only
-                args.fasta = config.get("fasta")
-                args.load = config.get("load")
-                args.bed = config.get("bed")
-
-                # Distance matrix commands
-                args.kmer = config.get("kmer", args.kmer)
-                args.modimizer = config.get("modimizer", args.modimizer)
-                args.resolution = config.get("resolution", args.resolution)
-                args.window = config.get("window", args.window)
-                args.identity = config.get("identity", args.identity)
-                args.delta = config.get("delta", args.delta)
-                args.output_dir = config.get("output_dir", args.output_dir)
-                args.compare = config.get("compare", args.compare)
-                args.compare_only = config.get("compare_only", args.compare_only)
-
-                args.no_bedpe = config.get("no_bedpe", args.no_bedpe)
-                args.no_plot = config.get("no_plot", args.no_plot)
-                args.no_hist = config.get("no_hist", args.no_hist)
-                args.width = config.get("width", args.width)
-                args.axes_limits = config.get("axes_limits", args.axes_limits)
-                args.dpi = config.get("dpi", args.dpi)
-                args.palette = config.get("palette", args.palette)
-                args.palette_orientation = config.get(
-                    "palette_orientation", args.palette_orientation
-                )
-                args.colors = config.get("color", args.colors)
-                args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
-                args.breakpoints = config.get("breakpoints", args.breakpoints)
-                args.bin_freq = config.get("bin_freq", args.bin_freq)
-                args.axes_limits = config.get("axes_limits", args.axes_limits)
-                args.axes_ticks = config.get("axes_ticks", args.axes_ticks)
-                args.vector = config.get("vector", args.vector)
-                args.deraster = config.get("deraster", args.deraster)
+                _apply_static_config(args, config)
 
         # -----------INPUT COMMAND VALIDATION-----------
+        if args.plot_direction and getattr(args, "load", None):
+            print(
+                "Error: --plot-direction requires FASTA input because strand "
+                "orientation cannot be recovered from a BEDPE file.\n"
+            )
+            sys.exit(2)
+
         # TODO: More tests!
         if args.breakpoints:
             # Check that start value for breakpoints = identity threshold value
@@ -582,7 +703,7 @@ def main():
                             is_freq=args.bin_freq,
                             xlim=args.axes_limits,
                             custom_colors=args.colors,
-                            custom_breakpoints=args.axes_ticks,
+                            custom_breakpoints=args.breakpoints,
                             from_file=df,
                             is_pairwise=True,
                             axes_labels=args.axes_ticks,
@@ -615,23 +736,25 @@ def main():
                     is_freq=args.bin_freq,
                     xlim=xlim_val_grid,
                     custom_colors=args.colors,
-                    custom_breakpoints=args.axes_ticks,
+                    custom_breakpoints=args.breakpoints,
                     axes_label=args.axes_ticks,
                     is_bed=True,
                     width=args.width,
                     breaks=args.axes_ticks,
                     deraster=args.deraster,
                     vector_format=args.vector,
+                    dpi=args.dpi,
                 )
             sys.exit(0)
 
     # -----------INPUT SEQUENCE VALIDATION-----------
     seq_list = []
     fasta_list = args.fasta.copy()
+    fasta_headers = {}
     for i in args.fasta:
         try:
-            isValidFasta(i)
             headers = getInputHeaders(i)
+            fasta_headers[i] = headers
 
             if len(headers) > 1:
                 print(f"File {i} contains multiple fasta entries.\n")
@@ -644,14 +767,65 @@ def main():
             )
             fasta_list.remove(i)
 
+    try:
+        region_by_name = _parse_region_arguments(
+            getattr(args, "region", None), seq_list
+        )
+    except ValueError as error:
+        print(f"Error: {error}.\n")
+        sys.exit(2)
+
     # -----------LOAD SEQUENCES INTO MEMORY-----------
     kmer_list = []
     for i in fasta_list:
         if args.forward:
-            kmer_list.append(readKmersFromFile(i, args.kmer, False, True))
+            kmer_list.append(
+                readKmersFromFile(
+                    i,
+                    args.kmer,
+                    False,
+                    True,
+                    args.ambiguous,
+                    region_by_name,
+                    fasta_headers[i],
+                )
+            )
         else:
-            kmer_list.append(readKmersFromFile(i, args.kmer, False, False))
+            kmer_list.append(
+                readKmersFromFile(
+                    i,
+                    args.kmer,
+                    False,
+                    False,
+                    args.ambiguous,
+                    region_by_name,
+                    fasta_headers[i],
+                )
+            )
     k_list = [item for sublist in kmer_list for item in sublist]
+
+    # Direction plots need both canonical and forward-only hashes.  Load the
+    # opposite representation only when requested so normal runs retain their
+    # existing memory footprint.
+    direction_k_list = None
+    if args.command == "static" and args.plot_direction:
+        alternate_kmer_list = [
+            readKmersFromFile(
+                path,
+                args.kmer,
+                False,
+                not args.forward,
+                args.ambiguous,
+                region_by_name,
+                fasta_headers[path],
+            )
+            for path in fasta_list
+        ]
+        direction_k_list = [item for sublist in alternate_kmer_list for item in sublist]
+        if len(direction_k_list) != len(k_list):
+            raise ValueError(
+                "Canonical and forward-only FASTA parsing produced different sequence counts"
+            )
     # Throw error if compare only selected with one sequence.
     if len(k_list) < 2 and args.compare_only:
         print(
@@ -661,8 +835,8 @@ def main():
 
     # -----------LAUNCH INTERACTIVE MODE-----------
     if args.command == "interactive":
-        # Single sequence, can set window length immediately.
-        hgi = len(max(k_list))
+        # Use the longest sequence to size the shared interactive image pyramid.
+        hgi = max(len(kmers) for kmers in k_list)
         hgi = hgi + args.kmer - 1
         min_window_size = 0
         window_lengths = []
@@ -784,6 +958,8 @@ def main():
                         "max_window_size": window_lengths[-1],
                         "resolution": args.resolution,
                         "kmer_length": args.kmer,
+                        "hash_algorithm": HASH_ALGORITHM,
+                        "format_version": 2,
                         "title": f"{seq_list[j]}",
                         "sparsities": sparsities,
                     }
@@ -878,6 +1054,8 @@ def main():
                     "max_window_size": window_lengths[-1],
                     "resolution": args.resolution,
                     "kmer_length": args.kmer,
+                    "hash_algorithm": HASH_ALGORITHM,
+                    "format_version": 2,
                     "title": f"{larger_name}-{smaller_name}",
                     "sparsities": sparsities,
                 }
@@ -940,13 +1118,43 @@ def main():
         if args.grid or args.grid_only:
             grid_val_singles = []
             grid_val_single_names = []
-        new_sequences = list(zip(seq_list, k_list))
+        if direction_k_list is None:
+            new_sequences = list(zip(seq_list, k_list))
+        else:
+            new_sequences = list(zip(seq_list, k_list, direction_k_list))
         if args.compare_order == "size":
             sequences = sorted(new_sequences, key=lambda seq: len(seq[1]), reverse=True)
         else:
             sequences = new_sequences
+
+        # Record exact base-coordinate bounds independently of sparse hits.
+        # Renderers must not infer these bounds from BEDPE rows: thresholding
+        # can remove edge windows, and a partial final window can extend past
+        # the selected interval.
+        selected_intervals = []
+        for sequence in sequences:
+            sequence_name = sequence[0]
+            header_range = extractRegion(sequence_name)
+            base_name = header_range[0] if header_range else sequence_name
+            selected_range = region_by_name.get(base_name)
+            if selected_range:
+                interval_start, interval_end = selected_range[1:]
+            else:
+                interval_start = int(header_range[1]) if header_range else 1
+                interval_end = interval_start + len(sequence[1]) + args.kmer - 2
+            selected_intervals.append((interval_start, interval_end))
+        grid_axis_bounds = (
+            min(start for start, _end in selected_intervals),
+            max(end for _start, end in selected_intervals),
+        )
+        sketch_cache = (
+            ModimizerSketchCache(max_entries=2) if args.grid or args.grid_only else None
+        )
         if len(sequences) > 6 and (args.grid or args.grid_only):
-            print("Too many sequences to create a grid. Skipping. \n")
+            print(
+                f"Creating a large {len(sequences)}x{len(sequences)} grid; "
+                "rendering may take additional time and memory.\n"
+            )
 
         # Create output directory, if doesn't exist:
         if (args.output_dir) and not os.path.exists(args.output_dir):
@@ -954,55 +1162,49 @@ def main():
         # -----------COMPUTE SELF-IDENTITY PLOTS-----------
         if not args.compare_only:
             for i in range(len(sequences)):
-                seq_length = len(sequences[i][1])
-                seq_name = sequences[i][0]
-                seq_range = extractRegion(seq_name)
+                sequence_name = sequences[i][0]
+                header_range = extractRegion(sequence_name)
+                base_name = header_range[0] if header_range else sequence_name
+                sequence_start = int(header_range[1]) if header_range else 1
+                seq_range = region_by_name.get(base_name)
+                matrix_sequence = sequences[i][1]
+                alternate_sequence = sequences[i][2] if args.plot_direction else None
+
                 if seq_range:
-                    seq_name = seq_range[0]
-                # If region, then I only want to use the subsequence.
-                try:
-                    if args.region:
-                        subseq_start_pos = None
-                        subseq_end_pos = None
-                        for region in args.region:
-                            chrom, lower_bound, upper_bound = extractRegion(region)
-                            if chrom == seq_name:
-                                subseq_start_pos = lower_bound
-                                subseq_end_pos = upper_bound
-                                seq_start_pos = lower_bound
-                                # Validate bounds
-                                if subseq_start_pos < 1 or subseq_end_pos > seq_length:
-                                    print(
-                                        f"Error: region {region} is out of bounds for {seq_name}. Will use entire sequence.\n"
-                                    )
-                                    subseq_start_pos = 1
-                                    subseq_end_pos = seq_length
-                                    seq_name = sequences[i][0]
-                                    break
-                                print(
-                                    f"Using region {seq_name}:{subseq_start_pos}-{subseq_end_pos}\n"
-                                )
-                                # Change sequence length, and use a subsequence instead.
-                                seq_length = (
-                                    subseq_end_pos - subseq_start_pos + 1 - args.kmer
-                                )
-                                seq_range = seq_name, subseq_start_pos, subseq_end_pos
-                                seq_name = (
-                                    f"{seq_name}:{subseq_start_pos}-{subseq_end_pos}"
-                                )
-                        if not subseq_end_pos or not subseq_start_pos:
-                            print(
-                                f"Error: region {args.region} not found in {seq_name}. Will use entire sequence.\n"
+                    selected_sequence_start = seq_range[1]
+                    try:
+                        matrix_sequence = _slice_kmers_for_region(
+                            matrix_sequence,
+                            seq_range,
+                            args.kmer,
+                            sequence_start=selected_sequence_start,
+                        )
+                        if args.plot_direction:
+                            alternate_sequence = _slice_kmers_for_region(
+                                alternate_sequence,
+                                seq_range,
+                                args.kmer,
+                                sequence_start=selected_sequence_start,
                             )
-                            seq_range = None
-                except Exception as e:
-                    print(
-                        f"Error obtaining region for {seq_name}. Will use entire sequence: {e}\n"
-                    )
-                if not seq_range:
-                    seq_start_pos = 1
+                    except ValueError as error:
+                        print(f"Error: invalid region for {base_name}: {error}.\n")
+                        sys.exit(2)
+                    _, seq_start_pos, subseq_end_pos = seq_range
+                    seq_name = f"{base_name}:{seq_start_pos}-{subseq_end_pos}"
+                    print(f"Using region {seq_name}\n")
                 else:
-                    seq_start_pos = int(seq_range[1])
+                    seq_start_pos = sequence_start
+                    subseq_end_pos = (
+                        seq_start_pos + len(matrix_sequence) + args.kmer - 2
+                    )
+                    seq_name = sequence_name
+
+                plot_axis_bounds = args.axes_limits or (
+                    seq_start_pos,
+                    subseq_end_pos,
+                )
+
+                seq_length = len(matrix_sequence)
                 win = args.window
                 res = args.resolution
                 if args.window:
@@ -1034,13 +1236,11 @@ def main():
                 print(f"\tWindow size w: {win}\n")
                 print(f"\tModimizer sketch size: {expectation}\n")
                 print(f"\tPlot Resolution r: {res}\n")
-                if args.region and seq_range:
-                    subseq = sequences[i][1][
-                        subseq_start_pos : (subseq_end_pos - args.kmer + 1)
-                    ]
+
+                if sketch_cache is None:
                     self_mat = createSelfMatrix(
                         seq_length,
-                        subseq,
+                        matrix_sequence,
                         win,
                         seq_sparsity,
                         args.delta,
@@ -1050,9 +1250,30 @@ def main():
                         expectation,
                     )
                 else:
-                    self_mat = createSelfMatrix(
+                    source_region = (seq_range[1], seq_range[2]) if seq_range else None
+                    prepared_self = sketch_cache.get_or_prepare(
+                        (i, source_region),
                         seq_length,
-                        sequences[i][1],
+                        matrix_sequence,
+                        win,
+                        seq_sparsity,
+                        args.delta,
+                        args.kmer,
+                        args.ambiguous,
+                        expectation,
+                    )
+                    self_mat = create_self_matrix_from_sketches(
+                        prepared_self, args.kmer, args.identity, args.ambiguous
+                    )
+                    # The cache owns the reusable reference. Keeping this loop
+                    # local alive can pin an evicted sketch until all grid
+                    # calculations finish.
+                    del prepared_self
+                direction_self_mat = None
+                if args.plot_direction and not args.no_plot and not args.grid_only:
+                    direction_self_mat = createSelfMatrix(
+                        seq_length,
+                        alternate_sequence,
                         win,
                         seq_sparsity,
                         args.delta,
@@ -1070,6 +1291,8 @@ def main():
                     True,
                     seq_start_pos,
                     seq_start_pos,
+                    subseq_end_pos,
+                    subseq_end_pos,
                 )
                 if args.grid or args.grid_only:
                     grid_val_singles.append(bed)
@@ -1102,17 +1325,13 @@ def main():
                     except Exception as e:
                         print(f"Error creating cooler file: {e}")
 
+                bedpe_path = os.path.join(args.output_dir or ".", seq_name)
+                if (not args.no_bedpe) or ((not args.no_plot) and (not args.grid_only)):
+                    os.makedirs(bedpe_path, exist_ok=True)
+
                 if not args.no_bedpe:
                     # Log saving bed file
-                    bedpe_path = "."
-                    if not args.output_dir:
-                        bedpe_path = os.path.join(bedpe_path, seq_name)
-                        os.makedirs(bedpe_path, exist_ok=True)
-                        bedfile_output = os.path.join(seq_name, seq_name + ".bedpe")
-                    else:
-                        bedpe_path = os.path.join(args.output_dir, seq_name)
-                        os.makedirs(bedpe_path, exist_ok=True)
-                        bedfile_output = os.path.join(bedpe_path, seq_name + ".bedpe")
+                    bedfile_output = os.path.join(bedpe_path, seq_name + ".bedpe")
 
                     with open(bedfile_output, "w") as bedfile:
                         for row in bed:
@@ -1133,7 +1352,7 @@ def main():
                         width=args.width,
                         dpi=args.dpi,
                         is_freq=args.bin_freq,
-                        xlim=args.axes_limits,
+                        xlim=plot_axis_bounds,
                         custom_colors=args.colors,
                         custom_breakpoints=args.breakpoints,
                         from_file=None,
@@ -1144,6 +1363,30 @@ def main():
                         deraster=args.deraster,
                         annotation=args.bed,
                     )
+                    if args.plot_direction:
+                        if args.forward:
+                            canonical_matrix = direction_self_mat
+                            forward_matrix = self_mat
+                        else:
+                            canonical_matrix = self_mat
+                            forward_matrix = direction_self_mat
+                        create_direction_plot(
+                            canonical_matrix=canonical_matrix,
+                            forward_matrix=forward_matrix,
+                            window_size=win,
+                            directory=bedpe_path,
+                            name_x=seq_name,
+                            name_y=seq_name,
+                            self_identity=True,
+                            width=args.width,
+                            dpi=args.dpi,
+                            vector_format=args.vector,
+                            deraster=args.deraster,
+                            xlim=plot_axis_bounds,
+                            axes_labels=args.axes_ticks,
+                            x_offset=seq_start_pos,
+                            y_offset=seq_start_pos,
+                        )
 
         # -----------COMPUTE COMPARATIVE PLOTS-----------
         # TODO: Optimize computations so that largest sequence doesn't need to be redone all the time
@@ -1155,111 +1398,106 @@ def main():
             if args.grid or args.grid_only:
                 grid_val_doubles = []
                 grid_val_double_names = []
-                xlim_val_grid = 0
+                xlim_val_grid = args.axes_limits or grid_axis_bounds
 
             for i in range(len(sequences)):
                 for j in range(i + 1, len(sequences)):
                     # Larger = x, smaller = y. This is pre-sorted earlier.
                     larger_seq = sequences[i][1]
                     smaller_seq = sequences[j][1]
-                    larger_length = len(larger_seq)
-                    smaller_length = len(smaller_seq)
-                    larger_seq_name = sequences[i][0]
-                    smaller_seq_name = sequences[j][0]
-                    larger_seq_range = extractRegion(larger_seq_name)
-                    if not larger_seq_range:
-                        larger_seq_start_pos = 1
-                    else:
-                        larger_seq_start_pos = int(larger_seq_range[1])
-                        larger_seq_name = larger_seq_range[0]
-                    smaller_seq_range = extractRegion(smaller_seq_name)
-                    if not smaller_seq_range:
-                        smaller_seq_start_pos = 1
-                    else:
-                        smaller_seq_start_pos = int(smaller_seq_range[1])
-                        smaller_seq_name = smaller_seq_range[0]
+                    larger_direction_seq = (
+                        sequences[i][2] if args.plot_direction else None
+                    )
+                    smaller_direction_seq = (
+                        sequences[j][2] if args.plot_direction else None
+                    )
+                    larger_sequence_name = sequences[i][0]
+                    smaller_sequence_name = sequences[j][0]
+                    larger_header_range = extractRegion(larger_sequence_name)
+                    smaller_header_range = extractRegion(smaller_sequence_name)
+                    larger_base_name = (
+                        larger_header_range[0]
+                        if larger_header_range
+                        else larger_sequence_name
+                    )
+                    smaller_base_name = (
+                        smaller_header_range[0]
+                        if smaller_header_range
+                        else smaller_sequence_name
+                    )
+                    larger_sequence_start = (
+                        int(larger_header_range[1]) if larger_header_range else 1
+                    )
+                    smaller_sequence_start = (
+                        int(smaller_header_range[1]) if smaller_header_range else 1
+                    )
+                    larger_seq_range = region_by_name.get(larger_base_name)
+                    smaller_seq_range = region_by_name.get(smaller_base_name)
+                    larger_subseq = larger_seq
+                    smaller_subseq = smaller_seq
+                    larger_direction_subseq = larger_direction_seq
+                    smaller_direction_subseq = smaller_direction_seq
+                    larger_seq_start_pos = larger_sequence_start
+                    smaller_seq_start_pos = smaller_sequence_start
+                    larger_seq_end_pos = (
+                        larger_seq_start_pos + len(larger_subseq) + args.kmer - 2
+                    )
+                    smaller_seq_end_pos = (
+                        smaller_seq_start_pos + len(smaller_subseq) + args.kmer - 2
+                    )
+                    larger_seq_name = larger_sequence_name
+                    smaller_seq_name = smaller_sequence_name
 
                     try:
-                        if args.region:
-                            subseq_start_pos = None
-                            subseq_end_pos = None
-                            for region in args.region:
-                                chrom, lower_bound, upper_bound = extractRegion(region)
-                                if chrom == larger_seq_name:
-                                    larger_subseq_start_pos = lower_bound
-                                    larger_subseq_end_pos = upper_bound
-                                    larger_seq_start_pos = lower_bound
-                                    # Validate bounds
-                                    if (
-                                        larger_seq_start_pos < 1
-                                        or larger_subseq_end_pos > larger_length
-                                    ):
-                                        print(
-                                            f"Error: region {region} is out of bounds for {larger_seq_name}. Will use entire sequence.\n"
-                                        )
-                                        larger_subseq_start_pos = 1
-                                        larger_subseq_end_pos = larger_length
-                                        larger_seq_name = sequences[i][0]
-                                        break
-                                    print(
-                                        f"Using region {larger_seq_name}:{larger_subseq_start_pos}-{larger_subseq_end_pos}\n"
-                                    )
-                                    # Change sequence length, and use a subsequence instead.
-                                    larger_length = (
-                                        larger_subseq_end_pos
-                                        - larger_subseq_start_pos
-                                        + 1
-                                        - args.kmer
-                                    )
-                                    larger_seq_range = (
-                                        larger_seq_name,
-                                        larger_subseq_start_pos,
-                                        larger_subseq_end_pos,
-                                    )
-                                    larger_seq_name = f"{larger_seq_name}:{larger_subseq_start_pos}-{larger_subseq_end_pos}"
-
-                                if chrom == smaller_seq_name:
-                                    smaller_subseq_start_pos = lower_bound
-                                    smaller_subseq_end_pos = upper_bound
-                                    smaller_seq_start_pos = lower_bound
-                                    # Validate bounds
-                                    if (
-                                        smaller_seq_start_pos < 1
-                                        or smaller_subseq_end_pos > smaller_length
-                                    ):
-                                        print(
-                                            f"Error: region {region} is out of bounds for {smaller_seq_name}. Will use entire sequence.\n"
-                                        )
-                                        smaller_subseq_start_pos = 1
-                                        smaller_subseq_end_pos = smaller_length
-                                        smaller_seq_name = sequences[j][0]
-                                        break
-                                    print(
-                                        f"Using region {smaller_seq_name}:{smaller_subseq_start_pos}-{smaller_subseq_end_pos}\n"
-                                    )
-                                    # Change sequence length, and use a subsequence instead.
-                                    smaller_length = (
-                                        smaller_subseq_end_pos
-                                        - smaller_subseq_start_pos
-                                        + 1
-                                        - args.kmer
-                                    )
-                                    smaller_seq_range = (
-                                        smaller_seq_name,
-                                        smaller_subseq_start_pos,
-                                        smaller_subseq_end_pos,
-                                    )
-                                    smaller_seq_name = f"{smaller_seq_name}:{smaller_subseq_start_pos}-{smaller_subseq_end_pos}"
-                            # This is wrong. Might be fine to leave alone
-                            if not larger_subseq_end_pos or not larger_subseq_start_pos:
-                                print(
-                                    f"Error: region {args.region} not found in {seq_name}. Will use entire sequence.\n"
+                        if larger_seq_range:
+                            selected_larger_start = larger_seq_range[1]
+                            larger_subseq = _slice_kmers_for_region(
+                                larger_seq,
+                                larger_seq_range,
+                                args.kmer,
+                                sequence_start=selected_larger_start,
+                            )
+                            if args.plot_direction:
+                                larger_direction_subseq = _slice_kmers_for_region(
+                                    larger_direction_seq,
+                                    larger_seq_range,
+                                    args.kmer,
+                                    sequence_start=selected_larger_start,
                                 )
-                                seq_range = None
-                    except Exception as e:
-                        print(
-                            f"Error obtaining region for {seq_name}. Will use entire sequence: {e}\n"
-                        )
+                            _, larger_seq_start_pos, larger_end = larger_seq_range
+                            larger_seq_end_pos = larger_end
+                            larger_seq_name = f"{larger_base_name}:{larger_seq_start_pos}-{larger_end}"
+                            print(f"Using region {larger_seq_name}\n")
+
+                        if smaller_seq_range:
+                            selected_smaller_start = smaller_seq_range[1]
+                            smaller_subseq = _slice_kmers_for_region(
+                                smaller_seq,
+                                smaller_seq_range,
+                                args.kmer,
+                                sequence_start=selected_smaller_start,
+                            )
+                            if args.plot_direction:
+                                smaller_direction_subseq = _slice_kmers_for_region(
+                                    smaller_direction_seq,
+                                    smaller_seq_range,
+                                    args.kmer,
+                                    sequence_start=selected_smaller_start,
+                                )
+                            _, smaller_seq_start_pos, smaller_end = smaller_seq_range
+                            smaller_seq_end_pos = smaller_end
+                            smaller_seq_name = f"{smaller_base_name}:{smaller_seq_start_pos}-{smaller_end}"
+                            print(f"Using region {smaller_seq_name}\n")
+                    except ValueError as error:
+                        print(f"Error: invalid comparison region: {error}.\n")
+                        sys.exit(2)
+
+                    larger_length = len(larger_subseq)
+                    smaller_length = len(smaller_subseq)
+                    pair_axis_bounds = args.axes_limits or (
+                        min(larger_seq_start_pos, smaller_seq_start_pos),
+                        max(larger_seq_end_pos, smaller_seq_end_pos),
+                    )
 
                     win = args.window
                     res = args.resolution
@@ -1290,25 +1528,7 @@ def main():
                     print(f"\tModimizer sketch size: {expectation}\n")
                     print(f"\tPlot Resolution r: {res}\n")
 
-                    if args.region and (larger_seq_range or smaller_seq_range):
-                        if larger_seq_range:
-                            larger_subseq = larger_seq[
-                                larger_subseq_start_pos : (
-                                    larger_subseq_end_pos - args.kmer + 1
-                                )
-                            ]
-                        else:
-                            larger_subseq = larger_seq
-
-                        if smaller_seq_range:
-                            smaller_subseq = smaller_seq[
-                                smaller_subseq_start_pos : (
-                                    smaller_subseq_end_pos - args.kmer + 1
-                                )
-                            ]
-                        else:
-                            smaller_subseq = smaller_seq
-
+                    if sketch_cache is None:
                         pair_mat = createPairwiseMatrix(
                             smaller_length,
                             larger_length,
@@ -1323,11 +1543,54 @@ def main():
                             expectation,
                         )
                     else:
-                        pair_mat = createPairwiseMatrix(
+                        smaller_source_region = (
+                            (smaller_seq_range[1], smaller_seq_range[2])
+                            if smaller_seq_range
+                            else None
+                        )
+                        larger_source_region = (
+                            (larger_seq_range[1], larger_seq_range[2])
+                            if larger_seq_range
+                            else None
+                        )
+                        prepared_smaller = sketch_cache.get_or_prepare(
+                            (j, smaller_source_region),
+                            smaller_length,
+                            smaller_subseq,
+                            win,
+                            seq_sparsity,
+                            args.delta,
+                            args.kmer,
+                            args.ambiguous,
+                            expectation,
+                        )
+                        prepared_larger = sketch_cache.get_or_prepare(
+                            (i, larger_source_region),
+                            larger_length,
+                            larger_subseq,
+                            win,
+                            seq_sparsity,
+                            args.delta,
+                            args.kmer,
+                            args.ambiguous,
+                            expectation,
+                        )
+                        pair_mat = create_pairwise_matrix_from_sketches(
+                            prepared_smaller,
+                            prepared_larger,
+                            args.identity,
+                            args.kmer,
+                        )
+                        # Avoid retaining entries after the bounded cache
+                        # evicts or clears them.
+                        del prepared_smaller, prepared_larger
+                    direction_pair_mat = None
+                    if args.plot_direction and not args.no_plot and not args.grid_only:
+                        direction_pair_mat = createPairwiseMatrix(
                             smaller_length,
                             larger_length,
-                            smaller_seq,
-                            larger_seq,
+                            smaller_direction_subseq,
+                            larger_direction_subseq,
                             win,
                             seq_sparsity,
                             args.delta,
@@ -1336,8 +1599,15 @@ def main():
                             args.ambiguous,
                             expectation,
                         )
+                        canonical_pair_mat = (
+                            direction_pair_mat if args.forward else pair_mat
+                        )
+                    else:
+                        canonical_pair_mat = pair_mat
                     # Throw error if the matrix is empty
-                    if np.all(pair_mat == 0) and (not (args.grid or args.grid_only)):
+                    if np.all(canonical_pair_mat == 0) and not (
+                        args.grid or args.grid_only
+                    ):
                         print(
                             f"The pairwise identity matrix for {sequences[i][0]} and {sequences[j][0]} is empty. Skipping.\n"
                         )
@@ -1387,41 +1657,28 @@ def main():
                             False,
                             larger_seq_start_pos,
                             smaller_seq_start_pos,
+                            larger_seq_end_pos,
+                            smaller_seq_end_pos,
                         )
                         if args.grid or args.grid_only:
                             grid_val_doubles.append(bed)
                             grid_val_double_names.append(
                                 [larger_seq_name, smaller_seq_name]
                             )
-                            xlim_val_grid = max(larger_length, xlim_val_grid)
+                        bedfile_prefix = larger_seq_name + "_" + smaller_seq_name
+                        bedpe_path = os.path.join(
+                            args.output_dir or ".", bedfile_prefix
+                        )
+                        if (not args.no_bedpe) or (
+                            (not args.no_plot) and (not args.grid_only)
+                        ):
+                            os.makedirs(bedpe_path, exist_ok=True)
+
                         if not args.no_bedpe:
                             # Log saving bed file
-                            bedpe_path = "."
-                            if not args.output_dir:
-                                bedfile_prefix = (
-                                    larger_seq_name + "_" + smaller_seq_name
-                                )
-                                bedpe_path = os.path.join(bedpe_path, bedfile_prefix)
-                                os.makedirs(bedpe_path, exist_ok=True)
-                                bedfile_output = os.path.join(
-                                    bedpe_path,
-                                    bedfile_prefix + "_COMPARE.bedpe",
-                                )
-                            else:
-                                bedfile_prefix = (
-                                    larger_seq_name + "_" + smaller_seq_name
-                                )
-                                bedpe_path = os.path.join(
-                                    args.output_dir, bedfile_prefix
-                                )
-                                os.makedirs(bedpe_path, exist_ok=True)
-                                bedfile_output = os.path.join(
-                                    bedpe_path,
-                                    larger_seq_name
-                                    + "_"
-                                    + smaller_seq_name
-                                    + "_COMPARE.bedpe",
-                                )
+                            bedfile_output = os.path.join(
+                                bedpe_path, bedfile_prefix + "_COMPARE.bedpe"
+                            )
                             with open(bedfile_output, "w") as bedfile:
                                 for row in bed:
                                     bedfile.write("\t".join(map(str, row)) + "\n")
@@ -1441,7 +1698,7 @@ def main():
                                 width=args.width,
                                 dpi=args.dpi,
                                 is_freq=args.bin_freq,
-                                xlim=args.axes_limits,
+                                xlim=pair_axis_bounds,
                                 custom_colors=args.colors,
                                 custom_breakpoints=args.breakpoints,
                                 from_file=None,
@@ -1452,8 +1709,37 @@ def main():
                                 deraster=args.deraster,
                                 annotation=args.bed,
                             )
+                            if args.plot_direction:
+                                if args.forward:
+                                    canonical_matrix = direction_pair_mat
+                                    forward_matrix = pair_mat
+                                else:
+                                    canonical_matrix = pair_mat
+                                    forward_matrix = direction_pair_mat
+                                create_direction_plot(
+                                    canonical_matrix=canonical_matrix,
+                                    forward_matrix=forward_matrix,
+                                    window_size=win,
+                                    directory=bedpe_path,
+                                    name_x=larger_seq_name,
+                                    name_y=smaller_seq_name,
+                                    self_identity=False,
+                                    width=args.width,
+                                    dpi=args.dpi,
+                                    vector_format=args.vector,
+                                    deraster=args.deraster,
+                                    xlim=pair_axis_bounds,
+                                    axes_labels=args.axes_ticks,
+                                    x_offset=larger_seq_start_pos,
+                                    y_offset=smaller_seq_start_pos,
+                                )
+
+            if sketch_cache is not None:
+                sketch_cache.clear()
 
             if args.grid or args.grid_only:
+                if args.axes_limits:
+                    xlim_val_grid = args.axes_limits
                 print(f"Creating a {len(sequences)}x{len(sequences)} grid.\n")
                 create_grid(
                     singles=grid_val_singles,
@@ -1466,13 +1752,14 @@ def main():
                     is_freq=args.bin_freq,
                     xlim=xlim_val_grid,
                     custom_colors=args.colors,
-                    custom_breakpoints=args.axes_ticks,
+                    custom_breakpoints=args.breakpoints,
                     axes_label=args.axes_ticks,
                     is_bed=False,
                     width=args.width,
                     breaks=args.axes_ticks,
                     deraster=args.deraster,
                     vector_format=args.vector,
+                    dpi=args.dpi,
                 )
 
 

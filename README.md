@@ -1,7 +1,7 @@
 ![](images/logo.png)
 ---
 [![PyPI](https://img.shields.io/pypi/v/ModDotPlot?color=blue&label=PyPI)](https://pypi.org/project/ModDotPlot/)
-[![CI](https://github.com/marbl/ModDotPlot/actions/workflows/black.yml/badge.svg)](https://github.com/marbl/ModDotPlot/actions/workflows/black.yml)
+[![CI](https://github.com/marbl/ModDotPlot/actions/workflows/ci.yml/badge.svg)](https://github.com/marbl/ModDotPlot/actions/workflows/ci.yml)
 
 - [](#)
 - [Cite](#cite)
@@ -37,6 +37,12 @@ If you use ModDotPlot for your research, please cite our software!
 
 _ModDotPlot_ is a dot plot visualization tool designed to be used at scale, both for smaller sequences and whole genomes. _ModDotPlot_ is the spiritual successor to [StainedGlass](https://mrvollger.github.io/StainedGlass/). The core algorithm breaks an input sequence down into intervals of sketched *k*-mers called **mod**imizers. This enables the rapid approximation of the Average Nucleotide Identity between combinations of intervals! 
 
+Version 1.0.0 uses a bundled [ntHash2](https://github.com/BirolLab/ntHash) implementation for k-mer hashing, replacing the previous `mmh3` runtime dependency. Hash values and exact sketches therefore differ from pre-1.0 releases; regenerate data instead of mixing sketches produced by the two algorithms. Previously saved interactive matrices remain loadable because they contain completed matrices rather than raw hashes.
+
+FASTA parsing and static BED annotation rendering are also built into ModDotPlot in version 1.0.0, replacing the previous `pysam` and `pyGenomeTracks` runtime dependencies. Plain FASTA, gzip-compressed FASTA, and BGZF-compressed FASTA inputs remain supported, and static annotations produce both PNG and the selected SVG, PDF, or PostScript vector format.
+
+Static triangle plots, annotation layouts, and multi-sequence grids are now composed directly with Matplotlib. This replaces the previous `CairoSVG`, `svgutils`, and `patchworklib` image-conversion and SVG-composition dependencies while retaining raster and vector output formats.
+
 ![](images/demo.gif)
 
 If you're interested in learning more about _ModDotPlot_ and how to visualize tandem repeats, we have an in-depth [YouTube video tutorial](https://www.youtube.com/watch?v=_7sQaljB_ys&t=2321s&pp=ygUXYWxleCBzd2VldGVuIG1vZGRvdHBsb3Q%3D) hosted by the [BioDiversity Genomics Academy](https://thebgacademy.org).
@@ -45,7 +51,7 @@ If you're interested in learning more about _ModDotPlot_ and how to visualize ta
 
 ## Installation
 
-_ModDotPlot_ can be installed by running `pip install moddotplot`. It requires Python 3.7+ to run. Alternatively, you can download the current release from GitHub by using:
+_ModDotPlot_ can be installed by running `pip install moddotplot`. Version 1.0.0 supports Python 3.8 through 3.12; Python 3.13 and newer are not supported by the pinned plotting stack. Alternatively, you can download the current release from GitHub by using:
 
 ```
 git clone https://github.com/marbl/ModDotPlot.git
@@ -74,7 +80,7 @@ Finally, confirm that the installation was installed correctly and that your ver
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
- v0.9.8
+ v1.0.0
 
 usage: moddotplot [-h] {interactive,static} ...
 
@@ -111,7 +117,7 @@ Running _ModDotPlot_ in static mode quickly create plots under the specified out
 
 ![](images/moddotplot_output.png)
 
-All plots and histograms are output in a vectorized (default: `.svg`) and rasterized `.png` image. [Plotnine](https://plotnine.readthedocs.io/en/v0.12.4/) is the Python plotting library used, with [CairoSVG](https://cairosvg.org) used for converting between image formats.
+Plots and histograms are output as both rasterized `.png` images and vector graphics (default: `.svg`). [Plotnine](https://plotnine.readthedocs.io/en/v0.12.4/) provides the primary plotting interface, while Matplotlib directly renders triangle plots, annotation layouts, multi-sequence grids, and each requested output format.
 
 _ModDotPlot_ supports highly customizable plotting features in static mode. See [static mode commands](#static-mode-commands) for a complete list of features.
 
@@ -136,7 +142,7 @@ Fasta files to input. Multifasta files are accepted. Interactive mode will only 
 
 `-b / --bed <.bed file>`
 
-Input bedfile used for dotplot annotation (note: this is not the same as the paired-end bed file produced by ModDotPlot). If selected, this will produce an annotated bedtrack image `_ANNOTATION_TRACK.svg` in static mode, and open an IGV js track in the interactive mode Dash application. The name in the bedfile must match the name of the fasta sequence header in order to produce a correct bed track.
+Input bedfile used for dotplot annotation (note: this is not the same as the paired-end bed file produced by ModDotPlot). If selected, this will produce an annotated bedtrack image `_ANNOTATION_TRACK` as PNG and in the selected vector format in static mode, and open an IGV js track in the interactive mode Dash application. The name in the bedfile must match the name of the fasta sequence header in order to produce a correct bed track.
 
 `-k / --kmer <int>`
 
@@ -152,7 +158,7 @@ Minimum sequence identity cutoff threshold. Default is 86. While it is possible 
 
 `--delta <float>`
 
-Each partition takes into account a fraction of its neighboring partitions k-mers. This is to avoid sub-optimal identity scores when partitons don't overlap identically. Default is 0.5, and the accepted range is between 0 and 1. Anything greater than 0.5 is not recommended.
+Each partition includes a fraction of the adjacent windows' k-mers when estimating identity. This recovers repetitive matches that straddle different window boundaries. The default is 0.5, and the accepted range is between 0 and 1; values greater than 0.5 are not recommended. Set this to 0 only when strictly core-local comparisons are desired.
 
 `-m / --modimizer <int>`
 
@@ -176,7 +182,7 @@ If set when 2 or more sequences are input into ModDotPlot, this will show an A v
 
 `--ambiguous <bool>`
 
-By default, k-mers that are homopolymers of ambiguous IUPAC codes (eg. NNNNNNNNNNN’s) are excluded from identity estimation. This results in gaps along the central diagonal for these regions.  If desired, these can be kept by setting the `—-ambiguous` flag in both interactive and static mode. 
+By default, every k-mer window containing a non-ACGTU character is excluded from identity estimation without changing its genomic position. This produces gaps through regions containing ambiguous IUPAC bases. To include deterministic hashes for those windows, set the `--ambiguous` flag in either interactive or static mode.
 
 --- 
 
@@ -208,9 +214,9 @@ Skip output of histogram legend.
 
 Save .bedpe to file, but skip rendering of plots.
 
-`--width <int>`
+`--width <float>`
 
-Adjust width of self dot plots. Default is 9 inches.
+Adjust the output figure width. For a grid this is the width of the complete grid, not each cell. Default is 9 inches.
 
 `--dpi <int>`
 
@@ -232,7 +238,7 @@ Window size. Unlike interactive mode, only one matrix will be created, so this r
 
 `--region <list of strs>`
 
-Plot only a particular range for a given sequence. Syntax is UCSC style (chr:start-end).
+Plot only the requested 1-based, inclusive range for each named sequence. Syntax is `FASTA_ID:start-end`; the identifier must exactly match the FASTA header's first whitespace-delimited token. Supply one value per sequence when every grid row and column should be cropped, for example `--region sample.hap1:1-4000000 sample.hap2:1-4000000`. Region limits apply to self plots, pairwise plots, BEDPE coordinates, and grid axes.
 
 `--palette <str>`
 
@@ -246,9 +252,21 @@ Add custom identity threshold breakpoints. Note that the number of breakpoints m
 
 Flip sequential order of color palette. Set to `-` by default for divergent palettes. 
 
-`--color <list of hexcodes>`
+`--colors <list of hexcodes>` (legacy alias: `--color`)
 
 List of custom colors in hexcode format can be entered sequentially, mapped from low to high identity. 
+
+`--plot-direction <bool>`
+
+With FASTA input, additionally create strand-direction plots. Canonical matches that are also present in a forward-only sketch are blue; canonical-only matches, representing reverse orientation, are pink. This option reads each input in both canonical and forward-only modes and cannot be reconstructed from a loaded BEDPE file.
+
+`--grid <bool>`
+
+Create a square grid containing every self comparison on the diagonal and every pairwise comparison off the diagonal. The grid is rendered as one Matplotlib figure and supports three or more input sequences, although large grids become visually dense.
+
+`--grid-only <bool>`
+
+Create the comparison grid without writing the individual dotplots.
 
 `-t / --axes-ticks <list of ints>`
 
@@ -331,9 +349,9 @@ Using `samtools faidx` will result in a genomic range being added to a fasta fil
 
 #### Adding custom bed file annotations
 
-If providing a custom annotation file using `--bed/b`, _ModDotPlot_ will output additional files:
+If providing a custom BED3-BED9 annotation file using `--bed/-b`, _ModDotPlot_ will output additional files:
 
-- An annotation track `_ANNOTATION_TRACK`, containing . Colors for ranges are set using the 9th column of the bedfile.
+- A collapsed annotation track `_ANNOTATION_TRACK` in PNG and the selected SVG, PDF, or PostScript vector format. Interval colors use the BED `itemRgb` value in column 9 when present, with a default color for BED3-BED8 records or invalid RGB values.
 - The annotation track overlayed with a self-identity dotplot `_ANNOTATED` for each sequence present in the annotation track.
 
 ```
