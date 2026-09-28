@@ -19,3 +19,18 @@ def test_interactive_accepts_forward_flag():
     )
 
     assert args.forward is True
+
+
+def test_interactive_accepts_multiple_annotation_beds():
+    args = get_parser().parse_args(
+        [
+            "interactive",
+            "--fasta",
+            "sequence.fa",
+            "--bed",
+            "first.bed",
+            "second.bed",
+        ]
+    )
+
+    assert args.bed == ["first.bed", "second.bed"]

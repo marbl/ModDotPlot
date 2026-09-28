@@ -29,9 +29,15 @@ import math
 import os
 import re
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_hex, to_rgb
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import ScalarFormatter
 from moddotplot.native_render import (
+    DEFAULT_FONT_FAMILY,
+    FALLBACK_FONT_FAMILY,
+    MIN_TEXT_SIZE,
+    MIN_TITLE_SIZE,
+    clamped_font_size,
     configure_dotplot_axis,
     configure_triangle_axis,
     create_triangle_layout,
@@ -39,18 +45,51 @@ from moddotplot.native_render import (
     draw_triangle_tiles,
     genomic_scale,
     genomic_tick_formatter,
+    is_glyph_loading_error,
     save_figure_pair,
+    save_with_font_fallback,
+    set_figure_font_family,
 )
 from moddotplot.const import (
+    DIRECTION_COLORS,
     DIVERGING_PALETTES,
     QUALITATIVE_PALETTES,
     SEQUENTIAL_PALETTES,
 )
 from palettable.colorbrewer import qualitative, sequential, diverging
+from moddotplot.annotations import (
+    DEFAULT_ANNOTATION_COLOR,
+    annotation_color as _annotation_color,
+    read_annotation_bed,
+    visible_annotation_intervals as _visible_annotation_intervals,
+)
 
 
-DEFAULT_ANNOTATION_COLOR = "#4C72B0"
 REGION_SUFFIX_PATTERN = re.compile(r"(?::\d+-\d+)+$")
+
+
+def _plot_font_theme(family=DEFAULT_FONT_FAMILY):
+    """Apply one family to every Plotnine text themeable."""
+
+    font = element_text(family=[family])
+    return theme(
+        text=font,
+        title=element_text(family=[family]),
+        axis_text=element_text(family=[family]),
+        strip_text=element_text(family=[family]),
+        legend_text=element_text(family=[family]),
+    )
+
+
+def _save_plot(plot, **kwargs):
+    """Save a Plotnine plot in Helvetica, retrying on glyph-load failure."""
+
+    try:
+        ggsave(plot + _plot_font_theme(), **kwargs)
+    except RuntimeError as error:
+        if not is_glyph_loading_error(error):
+            raise
+        ggsave(plot + _plot_font_theme(FALLBACK_FONT_FAMILY), **kwargs)
 
 
 def display_sequence_name(name):
@@ -59,8 +98,8 @@ def display_sequence_name(name):
     return REGION_SUFFIX_PATTERN.sub("", str(name))
 
 
-def _fit_grid_sequence_labels(figure, axes, minimum_size=2.0):
-    """Shrink grid sequence headings until each fits inside its own panel."""
+def _fit_grid_sequence_labels(figure, axes, minimum_size=MIN_TEXT_SIZE):
+    """Fit grid headings without shrinking them below a readable size."""
 
     figure.canvas.draw()
     renderer = figure.canvas.get_renderer()
@@ -82,15 +121,24 @@ def _fit_grid_sequence_labels(figure, axes, minimum_size=2.0):
             if label_box.height:
                 ratios.append(axis_box.height * 0.9 / label_box.height)
 
-    if not ratios:
+    artists = [axis.title for axis in axes[0, :]] + [
+        axis.yaxis.label for axis in axes[:, 0]
+    ]
+    artists = [artist for artist in artists if artist.get_text()]
+    if not ratios or not artists:
         return
     scale = min(1.0, min(ratios))
     if scale >= 1.0:
         return
 
-    artists = [axis.title for axis in axes[0, :]] + [
-        axis.yaxis.label for axis in axes[:, 0]
-    ]
+    sizes = [artist.get_fontsize() for artist in artists]
+    smallest_scaled_size = min(size * scale for size in sizes)
+    if smallest_scaled_size < minimum_size:
+        enlargement = minimum_size / smallest_scaled_size
+        width, height = figure.get_size_inches()
+        figure.set_size_inches(width * enlargement, height * enlargement, forward=True)
+        scale = min(1.0, scale * enlargement)
+
     for artist in artists:
         artist.set_fontsize(max(minimum_size, artist.get_fontsize() * scale))
 
@@ -112,107 +160,52 @@ def _resolve_native_colors(palette, palette_orientation, custom_colors=None):
     return list(custom_colors) if custom_colors else list(colors)
 
 
+DIRECTION_ANI_COLUMN = "direction_ani"
+
+
+def _direction_ani_style(dataframe):
+    """Return data and colors for direction hue plus ANI intensity.
+
+    Direction selects the blue or pink hue. The existing ordered ANI bins
+    control saturation: weak matches are pale and the strongest bin reaches
+    the base direction color. Data without ANI bins retains the solid legacy
+    direction colors, which keeps the low-level rendering API usable.
+    """
+
+    if "direction" not in dataframe.columns:
+        return dataframe, None, None
+    if "discrete" not in dataframe.columns:
+        return dataframe, DIRECTION_COLORS, "direction"
+
+    categories = (
+        list(dataframe["discrete"].cat.categories)
+        if isinstance(dataframe["discrete"].dtype, pd.CategoricalDtype)
+        else list(pd.unique(dataframe["discrete"].dropna()))
+    )
+    if not categories:
+        return dataframe, DIRECTION_COLORS, "direction"
+
+    colors = {}
+    category_count = len(categories)
+    for direction, base_color in DIRECTION_COLORS.items():
+        base_rgb = np.asarray(to_rgb(base_color))
+        for index, category in enumerate(categories):
+            fraction = 1.0 if category_count == 1 else index / (category_count - 1)
+            strength = 0.25 + (0.75 * fraction)
+            rgb = np.ones(3) + ((base_rgb - np.ones(3)) * strength)
+            colors[f"{direction}:{category}"] = to_hex(rgb)
+
+    styled = dataframe.copy()
+    styled[DIRECTION_ANI_COLUMN] = [
+        f"{direction}:{category}"
+        for direction, category in zip(styled["direction"], styled["discrete"])
+    ]
+    return styled, colors, DIRECTION_ANI_COLUMN
+
+
 def is_plot_empty(p):
     # Check if the plot has data or any layers
     return len(p.layers) == 0 and p.data.empty
-
-
-def read_annotation_bed(filepath):
-    """Read the BED3-BED9 subset used by ModDotPlot annotations."""
-    col_names = [
-        "chrom",
-        "start",
-        "end",
-        "name",
-        "score",
-        "strand",
-        "thickStart",
-        "thickEnd",
-        "itemRgb",
-    ]
-
-    try:
-        df = pd.read_csv(filepath, sep="\t", comment="#", header=None, dtype=str)
-    except pd.errors.EmptyDataError:
-        return pd.DataFrame(columns=col_names[:3])
-
-    if not 3 <= df.shape[1] <= len(col_names):
-        raise ValueError(
-            "Invalid BED file: expected between 3 and 9 tab-separated columns."
-        )
-
-    df.columns = col_names[: df.shape[1]]
-    df["chrom"] = df["chrom"].astype(str)
-
-    for column in ("start", "end"):
-        try:
-            values = pd.to_numeric(df[column], errors="raise")
-        except (TypeError, ValueError) as error:
-            raise ValueError(
-                f"Invalid BED file: '{column}' must contain only integers."
-            ) from error
-        if values.isna().any() or not np.all(np.isfinite(values)):
-            raise ValueError(
-                f"Invalid BED file: '{column}' must contain only finite integers."
-            )
-        if np.any(values % 1 != 0):
-            raise ValueError(
-                f"Invalid BED file: '{column}' must contain only integers."
-            )
-        df[column] = values.astype(np.int64)
-
-    if (df["start"] < 0).any():
-        raise ValueError("Invalid BED file: 'start' must be non-negative.")
-    if (df["end"] <= df["start"]).any():
-        raise ValueError(
-            "Invalid BED file: 'end' must be greater than 'start' for every interval."
-        )
-
-    return df
-
-
-def _annotation_color(value, fallback=DEFAULT_ANNOTATION_COLOR):
-    """Return a Matplotlib color for a BED ``itemRgb`` value."""
-    if value is None or pd.isna(value):
-        return fallback
-
-    fields = [field.strip() for field in str(value).split(",")]
-    if len(fields) != 3:
-        return fallback
-
-    try:
-        channels = tuple(int(field) for field in fields)
-    except ValueError:
-        return fallback
-    if any(channel < 0 or channel > 255 for channel in channels):
-        return fallback
-    return tuple(channel / 255 for channel in channels)
-
-
-def _visible_annotation_intervals(
-    bed_df, chrom, region_start, region_end, fallback=DEFAULT_ANNOTATION_COLOR
-):
-    """Select and clip BED intervals to a plotted genomic region."""
-    if region_end <= region_start:
-        raise ValueError("Annotation region end must be greater than its start.")
-    if bed_df.empty:
-        return []
-
-    intervals = []
-    matching = bed_df[bed_df["chrom"] == str(chrom)]
-    has_item_rgb = "itemRgb" in matching.columns
-    for row in matching.itertuples(index=False):
-        interval_start = int(row.start)
-        interval_end = int(row.end)
-        if interval_end <= interval_start:
-            continue
-        clipped_start = max(interval_start, region_start)
-        clipped_end = min(interval_end, region_end)
-        if clipped_end <= clipped_start:
-            continue
-        rgb = getattr(row, "itemRgb", None) if has_item_rgb else None
-        intervals.append((clipped_start, clipped_end, _annotation_color(rgb, fallback)))
-    return intervals
 
 
 def draw_annotation_track(
@@ -276,14 +269,20 @@ def render_annotation_track(
             return False
 
         figure.subplots_adjust(left=0.02, right=0.995, bottom=0.34, top=0.96)
-        figure.savefig(
-            f"{output_prefix}.{vector_format}",
-            format=vector_format,
-            dpi=dpi,
-            transparent=vector_format != "ps",
-            facecolor="white" if vector_format == "ps" else "none",
-        )
-        figure.savefig(f"{output_prefix}.png", format="png", dpi=dpi, facecolor="white")
+
+        def save_outputs():
+            figure.savefig(
+                f"{output_prefix}.{vector_format}",
+                format=vector_format,
+                dpi=dpi,
+                transparent=vector_format != "ps",
+                facecolor="white" if vector_format == "ps" else "none",
+            )
+            figure.savefig(
+                f"{output_prefix}.png", format="png", dpi=dpi, facecolor="white"
+            )
+
+        save_with_font_fallback(figure, save_outputs)
         return True
     finally:
         plt.close(figure)
@@ -542,6 +541,8 @@ def make_dot(
         title_length = 1.5 * width
     elif len(title_name) > 80:
         title_length = width
+    sdf, direction_colors, direction_column = _direction_ani_style(sdf)
+    direction_coloring = direction_colors is not None
     # Select the color palette
     if hasattr(diverging, palette):
         function_name = getattr(diverging, palette)
@@ -562,6 +563,8 @@ def make_dot(
     new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
     if colors:
         new_hexcodes = colors  # Override colors if provided
+    fill_column = direction_column if direction_coloring else "discrete"
+    fill_colors = direction_colors if direction_coloring else new_hexcodes
     # Determine the exact genomic interval. A two-value limit is supplied by
     # FASTA mode so blank edge windows do not shrink or extend the plot.
     min_val, max_val = _data_axis_limits(sdf, xlim)
@@ -599,25 +602,33 @@ def make_dot(
         plot_background=element_blank(),
         panel_background=element_blank(),
         axis_line=element_line(color="black"),
-        axis_text=element_text(family=["DejaVu Sans"], size=width * 2),
+        axis_text=element_text(
+            family=[DEFAULT_FONT_FAMILY],
+            size=clamped_font_size(width, 2.0),
+        ),
         axis_ticks_major=element_line(
             size=(width), color="black"
         ),  # Increased tick length
         title=element_text(
-            family=["DejaVu Sans"], size=title_length, hjust=0.5
+            family=[DEFAULT_FONT_FAMILY],
+            size=max(MIN_TITLE_SIZE, title_length),
+            hjust=0.5,
         ),  # Center title
-        axis_title_x=element_text(size=(width * 2.8), family=["DejaVu Sans"]),
+        axis_title_x=element_text(
+            size=clamped_font_size(width, 2.8),
+            family=[DEFAULT_FONT_FAMILY],
+        ),
         strip_background=element_blank(),  # Remove facet strip background
         strip_text=element_text(
-            size=(width * 1.2), family=["DejaVu Sans"]
+            size=clamped_font_size(width, 1.2), family=[DEFAULT_FONT_FAMILY]
         ),  # Customize facet label text size (optional)
     )
 
     # Construct the plot arguments
     ggplot_args = (
         ggplot(sdf)
-        + scale_color_discrete(guide=False)
-        + scale_fill_manual(values=new_hexcodes, guide=False)
+        + scale_color_discrete(guide=None)
+        + scale_fill_manual(values=fill_colors, guide=None)
         + common_theme
         + scale_x_continuous(
             labels=make_scale, limits=[min_val, max_val], breaks=breaks
@@ -631,7 +642,7 @@ def make_dot(
     )
 
     p = ggplot_args + _dotplot_tiles(
-        aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
+        aes(x="q_st", y="r_st", fill=fill_column, height=window, width=window),
         deraster,
     )
 
@@ -705,23 +716,32 @@ def make_dot_grid(
         plot_background=element_blank(),
         panel_background=element_blank(),
         axis_line=element_line(color="black"),
-        axis_text=element_text(family=["DejaVu Sans"], size=width),
+        axis_text=element_text(
+            family=[DEFAULT_FONT_FAMILY], size=clamped_font_size(width, 1.0)
+        ),
         axis_ticks_major=element_line(
             size=(width), color="black"
         ),  # Increased tick length
-        title=element_text(size=(width * 1.2), alpha=0),
-        axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+        title=element_text(
+            size=clamped_font_size(width, 1.2, MIN_TITLE_SIZE),
+            family=[DEFAULT_FONT_FAMILY],
+            alpha=0,
+        ),
+        axis_title_x=element_text(
+            size=clamped_font_size(width, 1.2),
+            family=[DEFAULT_FONT_FAMILY],
+        ),
         strip_background=element_blank(),  # Remove facet strip background
         strip_text=element_text(
-            size=(width * 1.2), family=["DejaVu Sans"]
+            size=clamped_font_size(width, 1.2), family=[DEFAULT_FONT_FAMILY]
         ),  # Customize facet label text size (optional)
     )
 
     # Construct the plot arguments
     ggplot_args = (
         ggplot(sdf)
-        + scale_color_discrete(guide=False)
-        + scale_fill_manual(values=new_hexcodes, guide=False)
+        + scale_color_discrete(guide=None)
+        + scale_fill_manual(values=new_hexcodes, guide=None)
         + common_theme
         + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
         + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
@@ -879,9 +899,19 @@ def create_direction_plot(
             legend_position="none",
             panel_grid_major=element_blank(),
             panel_grid_minor=element_blank(),
-            axis_text=element_text(family=["DejaVu Sans"], size=width),
-            title=element_text(size=width * 1.4, hjust=0.5),
-            axis_title_x=element_text(size=width * 1.2, family=["DejaVu Sans"]),
+            axis_text=element_text(
+                family=[DEFAULT_FONT_FAMILY],
+                size=clamped_font_size(width, 1.0),
+            ),
+            title=element_text(
+                family=[DEFAULT_FONT_FAMILY],
+                size=clamped_font_size(width, 1.4, MIN_TITLE_SIZE),
+                hjust=0.5,
+            ),
+            axis_title_x=element_text(
+                size=clamped_font_size(width, 1.2),
+                family=[DEFAULT_FONT_FAMILY],
+            ),
         )
     )
 
@@ -890,7 +920,7 @@ def create_direction_plot(
         f"{name_x}_DIRECTION" if self_identity else f"{name_x}_{name_y}_DIRECTION"
     )
     prefix = os.path.join(directory, filename)
-    ggsave(
+    _save_plot(
         plot,
         width=width,
         height=width,
@@ -899,7 +929,7 @@ def create_direction_plot(
         filename=f"{prefix}.{vector_format}",
         verbose=False,
     )
-    ggsave(
+    _save_plot(
         plot,
         width=width,
         height=width,
@@ -942,7 +972,10 @@ def make_dot_final(
                 plot_background=element_blank(),
                 panel_background=element_blank(),
                 axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_text=element_text(
+                    family=[DEFAULT_FONT_FAMILY],
+                    size=clamped_font_size(width, 1.0),
+                ),
                 axis_ticks_major=element_line(),
                 axis_title_x=element_blank(),
                 axis_title_y=element_blank(),
@@ -1004,8 +1037,8 @@ def make_dot_final(
                 aes(x=x_col, y=y_col, fill="discrete", height=window, width=window),
                 deraster,
             )
-            + scale_color_discrete(guide=False)
-            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + scale_color_discrete(guide=None)
+            + scale_fill_manual(values=new_hexcodes, guide=None)
             + theme(
                 legend_position="none",
                 panel_grid_major=element_blank(),
@@ -1013,9 +1046,12 @@ def make_dot_final(
                 plot_background=element_blank(),
                 panel_background=element_blank(),
                 axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_text=element_text(
+                    family=[DEFAULT_FONT_FAMILY],
+                    size=clamped_font_size(width, 1.0),
+                ),
                 axis_ticks_major=element_line(),
-                title=element_text(family=["Dejavu Sans"]),
+                title=element_text(family=[DEFAULT_FONT_FAMILY]),
             )
             + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
             + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
@@ -1029,8 +1065,8 @@ def make_dot_final(
                 aes(x=x_col, y=y_col, fill="discrete", height=window, width=window),
                 deraster,
             )
-            + scale_color_discrete(guide=False)
-            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + scale_color_discrete(guide=None)
+            + scale_fill_manual(values=new_hexcodes, guide=None)
             + theme(
                 legend_position="none",
                 panel_grid_major=element_blank(),
@@ -1038,9 +1074,12 @@ def make_dot_final(
                 plot_background=element_blank(),
                 panel_background=element_blank(),
                 axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_text=element_text(
+                    family=[DEFAULT_FONT_FAMILY],
+                    size=clamped_font_size(width, 1.0),
+                ),
                 axis_ticks_major=element_line(),
-                title=element_text(family=["Dejavu Sans"]),
+                title=element_text(family=[DEFAULT_FONT_FAMILY]),
             )
             + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
             + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
@@ -1120,8 +1159,8 @@ def make_tri(
                 deraster,
                 alpha=1.0,
             )  # Ensure full opacity
-            + scale_fill_manual(values=new_hexcodes, guide=False)
-            + scale_color_discrete(guide=False)
+            + scale_fill_manual(values=new_hexcodes, guide=None)
+            + scale_color_discrete(guide=None)
             + scale_x_continuous(
                 labels=make_scale, limits=[min_val, max_val], breaks=breaks
             )
@@ -1136,14 +1175,24 @@ def make_tri(
                 panel_grid_minor=element_blank(),
                 plot_background=element_blank(),
                 panel_background=element_blank(),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_text=element_text(
+                    family=[DEFAULT_FONT_FAMILY],
+                    size=clamped_font_size(width, 1.0),
+                ),
                 axis_line_x=element_line(),
                 axis_line_y=element_blank(),
                 axis_ticks_major_x=element_line(),
                 axis_ticks_major_y=element_blank(),
                 axis_ticks_major=element_line(size=(width)),
-                title=element_text(size=(width * 1.4), hjust=0.5),
-                axis_title_x=element_text(size=(width * 1.4), family=["DejaVu Sans"]),
+                title=element_text(
+                    family=[DEFAULT_FONT_FAMILY],
+                    size=clamped_font_size(width, 1.4, MIN_TITLE_SIZE),
+                    hjust=0.5,
+                ),
+                axis_title_x=element_text(
+                    size=clamped_font_size(width, 1.4),
+                    family=[DEFAULT_FONT_FAMILY],
+                ),
                 axis_text_y=element_blank(),
             )
         )
@@ -1153,8 +1202,8 @@ def make_tri(
                 aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
                 alpha=0,
             )
-            + scale_color_discrete(guide=False)
-            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + scale_color_discrete(guide=None)
+            + scale_fill_manual(values=new_hexcodes, guide=None)
             + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
             + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
             + coord_fixed(ratio=1)
@@ -1166,7 +1215,10 @@ def make_tri(
                 plot_background=element_blank(),
                 panel_background=element_blank(),
                 axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_text=element_text(
+                    family=[DEFAULT_FONT_FAMILY],
+                    size=clamped_font_size(width, 1.0),
+                ),
                 axis_ticks_major=element_line(),
                 axis_line_x=element_line(),
                 axis_line_y=element_blank(),
@@ -1175,7 +1227,10 @@ def make_tri(
                 axis_text_x=element_line(),
                 axis_text_y=element_blank(),
                 plot_title=element_blank(),
-                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+                axis_title_x=element_text(
+                    size=clamped_font_size(width, 1.2),
+                    family=[DEFAULT_FONT_FAMILY],
+                ),
             )
         )
     else:
@@ -1186,8 +1241,8 @@ def make_tri(
                 deraster,
                 alpha=1.0,
             )  # Ensure full opacity
-            + scale_fill_manual(values=new_hexcodes, guide=False)
-            + scale_color_discrete(guide=False)
+            + scale_fill_manual(values=new_hexcodes, guide=None)
+            + scale_color_discrete(guide=None)
             + scale_x_continuous(
                 labels=make_scale, limits=[min_val, max_val], breaks=breaks
             )
@@ -1202,7 +1257,10 @@ def make_tri(
                 panel_grid_minor=element_blank(),
                 plot_background=element_blank(),
                 panel_background=element_blank(),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
+                axis_text=element_text(
+                    family=[DEFAULT_FONT_FAMILY],
+                    size=clamped_font_size(width, 1.0),
+                ),
                 axis_line_x=element_line(),
                 axis_line_y=element_blank(),
                 axis_ticks_major_x=element_line(),
@@ -1210,7 +1268,10 @@ def make_tri(
                 axis_ticks_major=element_line(),
                 axis_text_y=element_blank(),
                 title=element_blank(),
-                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+                axis_title_x=element_text(
+                    size=clamped_font_size(width, 1.2),
+                    family=[DEFAULT_FONT_FAMILY],
+                ),
             )
         )
         axis = (
@@ -1219,8 +1280,8 @@ def make_tri(
                 aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
                 alpha=0,
             )
-            + scale_color_discrete(guide=False)
-            + scale_fill_manual(values=new_hexcodes, guide=False)
+            + scale_color_discrete(guide=None)
+            + scale_fill_manual(values=new_hexcodes, guide=None)
             + scale_x_continuous(
                 labels=make_scale, limits=[min_val, max_val], breaks=breaks
             )
@@ -1236,7 +1297,7 @@ def make_tri(
                 plot_background=element_blank(),
                 panel_background=element_blank(),
                 axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"]),
+                axis_text=element_text(family=[DEFAULT_FONT_FAMILY]),
                 axis_ticks_major=element_line(),
                 axis_line_x=element_line(),
                 axis_line_y=element_blank(),
@@ -1245,7 +1306,10 @@ def make_tri(
                 axis_text_x=element_line(),
                 axis_text_y=element_blank(),
                 plot_title=element_blank(),
-                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
+                axis_title_x=element_text(
+                    size=clamped_font_size(width, 1.2),
+                    family=[DEFAULT_FONT_FAMILY],
+                ),
             )
         )
 
@@ -1300,10 +1364,10 @@ def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks,
             aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
             alpha=0,
         )
-        + scale_color_discrete(guide=False)
+        + scale_color_discrete(guide=None)
         + scale_fill_manual(
             values=new_hexcodes,
-            guide=False,
+            guide=None,
         )
         + theme(
             legend_position="none",
@@ -1313,7 +1377,7 @@ def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks,
             panel_background=element_blank(),
             axis_line=element_line(color="black"),  # Adjust axis line size
             axis_text=element_text(
-                family=["DejaVu Sans"]
+                family=[DEFAULT_FONT_FAMILY]
             ),  # Change axis text font and size
             axis_ticks_major=element_line(),
             axis_line_x=element_line(),  # Keep the x-axis line
@@ -1374,13 +1438,16 @@ def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoin
     if count > 1e6:
         extra = "\n(thousands)"
 
+    sdf, direction_colors, direction_column = _direction_ani_style(sdf)
+    fill_column = direction_column or "discrete"
+    fill_colors = direction_colors or new_hexcodes
     p = (
-        ggplot(data=sdf, mapping=aes(x="perID_by_events", fill="discrete"))
+        ggplot(data=sdf, mapping=aes(x="perID_by_events", fill=fill_column))
         + geom_histogram(bins=300)
         + scale_color_cmap(cmap_name="plasma")
-        + scale_fill_manual(new_hexcodes)
+        + scale_fill_manual(fill_colors)
         + theme_light()
-        + theme(text=element_text(family=["DejaVu Sans"]))
+        + _plot_font_theme()
         + theme(legend_position="none")
         + coord_cartesian(xlim=(bot, 100))
         + xlab("% Identity Estimate")
@@ -1427,7 +1494,11 @@ def _build_triangle_figure(
         if axes_labels
         else generate_breaks(int(region_start), int(region_end))
     )
-    colors = _resolve_native_colors(palette, palette_orientation, custom_colors)
+    sdf, direction_colors, direction_column = _direction_ani_style(sdf)
+    colors = direction_colors or _resolve_native_colors(
+        palette, palette_orientation, custom_colors
+    )
+    color_column = direction_column or "discrete"
     with_annotation = annotation_df is not None
     layout = create_triangle_layout(width, with_annotation=with_annotation)
     try:
@@ -1435,6 +1506,7 @@ def _build_triangle_figure(
             layout.triangle_axis,
             sdf,
             colors,
+            color_column=color_column,
             rasterized=not deraster,
         )
         configure_triangle_axis(
@@ -1444,8 +1516,15 @@ def _build_triangle_figure(
             breaks=breaks,
             label=not with_annotation,
         )
+        if with_annotation:
+            # The annotation axis is the sole genomic axis in the combined
+            # figure. Remove the triangle baseline and its tick marks.
+            layout.triangle_axis.spines["bottom"].set_visible(False)
+            layout.triangle_axis.tick_params(axis="x", bottom=False, labelbottom=False)
         layout.triangle_axis.set_title(
-            display_sequence_name(title), fontsize=max(10, width * 1.4)
+            display_sequence_name(title),
+            fontsize=clamped_font_size(width, 1.4, MIN_TITLE_SIZE),
+            fontfamily=DEFAULT_FONT_FAMILY,
         )
 
         if with_annotation:
@@ -1472,6 +1551,23 @@ def _build_triangle_figure(
             top=0.90,
             hspace=0.05,
         )
+        if with_annotation:
+            # ``set_aspect('equal', adjustable='box')`` narrows the triangle
+            # axis inside its GridSpec cell to retain 45-degree diagonals. A
+            # normal annotation axis keeps the full cell width, so shared data
+            # limits alone do not produce physical pixel alignment. Match the
+            # BED axis to the triangle's final horizontal bounds.
+            triangle_position = layout.triangle_axis.get_position()
+            annotation_position = layout.annotation_axis.get_position()
+            layout.annotation_axis.set_position(
+                [
+                    triangle_position.x0,
+                    annotation_position.y0,
+                    triangle_position.width,
+                    annotation_position.height,
+                ]
+            )
+        set_figure_font_family(layout.figure, DEFAULT_FONT_FAMILY)
     except Exception:
         plt.close(layout.figure)
         raise
@@ -1613,6 +1709,7 @@ def _build_grid_figure(
 
     all_frames = list(single_frames.values()) + list(pair_frames.values())
     axis_start, axis_end = _grid_axis_limits(all_frames, xlim)
+    _, axis_unit = genomic_scale(axis_end)
     axis_breaks = axes_label or breaks
     if not axis_breaks:
         axis_breaks = generate_breaks(int(axis_start), int(axis_end))
@@ -1621,10 +1718,21 @@ def _build_grid_figure(
 
     grid_size = len(names)
     figure_width = max(float(width), 2.0)
-    heading_size = max(6.0, min(12.0, figure_width * 1.2))
+    heading_size = clamped_font_size(figure_width, 1.2, 8.0, 12.0)
     # Numeric genomic labels are intentionally twice the previous size. The
     # inverse grid-size factor keeps larger grids proportionate.
-    tick_size = max(8.0, min(18.0, figure_width * 3.0 / grid_size))
+    tick_size = clamped_font_size(
+        figure_width,
+        3.0 / grid_size,
+        MIN_TEXT_SIZE,
+        18.0,
+    )
+    axis_title_size = clamped_font_size(
+        figure_width,
+        1.6 / grid_size,
+        MIN_TEXT_SIZE,
+        14.0,
+    )
     figure, axes = plt.subplots(
         grid_size,
         grid_size,
@@ -1655,10 +1763,16 @@ def _build_grid_figure(
                         )
 
                 if dataframe is not None and not dataframe.empty:
+                    (
+                        dataframe,
+                        direction_colors,
+                        direction_column,
+                    ) = _direction_ani_style(dataframe)
                     draw_rectangular_tiles(
                         axis,
                         dataframe,
-                        colors,
+                        direction_colors or colors,
+                        color_column=direction_column or "discrete",
                         transpose=transpose,
                         rasterized=not deraster,
                     )
@@ -1674,22 +1788,37 @@ def _build_grid_figure(
                 axis.grid(False)
                 if row == 0:
                     axis.set_title(
-                        display_sequence_name(column_name), fontsize=heading_size
+                        display_sequence_name(column_name),
+                        fontsize=heading_size,
+                        fontfamily=DEFAULT_FONT_FAMILY,
                     )
                 if column == 0:
                     axis.set_ylabel(
-                        display_sequence_name(row_name), fontsize=heading_size
+                        display_sequence_name(row_name),
+                        fontsize=heading_size,
+                        fontfamily=DEFAULT_FONT_FAMILY,
                     )
 
+        figure.supxlabel(
+            f"Genomic Position ({axis_unit})",
+            fontsize=axis_title_size,
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
+        figure.supylabel(
+            f"Genomic Position ({axis_unit})",
+            fontsize=axis_title_size,
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
         figure.subplots_adjust(
-            left=0.10,
+            left=0.14,
             right=0.98,
-            bottom=0.08,
+            bottom=0.12,
             top=0.92,
             wspace=0.08,
             hspace=0.08,
         )
         _fit_grid_sequence_labels(figure, axes)
+        set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
     except Exception:
         plt.close(figure)
         raise
@@ -1734,7 +1863,14 @@ def create_grid(
         deraster=deraster,
     )
     grid_size = axes.shape[0]
-    grid_prefix = os.path.join(directory, f"{grid_size}x{grid_size}_GRID")
+    directional = any(
+        "direction" in matrix.columns
+        if isinstance(matrix, pd.DataFrame)
+        else bool(matrix) and "direction" in matrix[0]
+        for matrix in [*singles, *doubles]
+    )
+    grid_label = "DIRECTION_GRID" if directional else "GRID"
+    grid_prefix = os.path.join(directory, f"{grid_size}x{grid_size}_{grid_label}")
     print(f"\nGrid complete! Saving to {grid_prefix}...\n")
     try:
         save_figure_pair(
@@ -1747,6 +1883,7 @@ def create_grid(
     finally:
         plt.close(figure)
     print("Grid saved successfully!\n")
+    return [f"{grid_prefix}.{vector_format}", f"{grid_prefix}.png"]
 
 
 def create_plots(
@@ -1771,6 +1908,8 @@ def create_plots(
     deraster,
     annotation,
 ):
+    os.makedirs(directory, exist_ok=True)
+    created_files = []
     df = read_df(
         sdf,
         palette,
@@ -1781,6 +1920,7 @@ def create_plots(
         from_file,
     )
     sdf = df
+    directional = "direction" in sdf.columns
 
     plot_filename = os.path.join(directory, name_x)
 
@@ -1819,6 +1959,12 @@ def create_plots(
                 vector_format=vector_format,
             )
             if annotation_track_created:
+                created_files.extend(
+                    [
+                        f"{iniprefix}_ANNOTATION_TRACK.{vector_format}",
+                        f"{iniprefix}_ANNOTATION_TRACK.png",
+                    ]
+                )
                 annotation_bed_df = bed_df
                 annotation_chrom = chrom_name
                 print(f"\nAnnotation track saved to {iniprefix}_ANNOTATION_TRACK\n")
@@ -1848,41 +1994,55 @@ def create_plots(
             True,
         )
         print(f"Creating plots and saving to {plot_filename}...\n")
-        ggsave(
+        full_suffix = "_DIRECTION_FULL" if directional else "_COMPARE"
+        hist_suffix = "_DIRECTION_HIST" if directional else "_COMPARE_HIST"
+        _save_plot(
             heatmap,
             width=width,
             height=width,
             dpi=dpi,
             format=vector_format,
-            filename=f"{plot_filename}_COMPARE.{vector_format}",
+            filename=f"{plot_filename}{full_suffix}.{vector_format}",
             verbose=False,
         )
-        ggsave(
+        _save_plot(
             heatmap,
             width=width,
             height=width,
             dpi=dpi,
             format="png",
-            filename=f"{plot_filename}_COMPARE.png",
+            filename=f"{plot_filename}{full_suffix}.png",
             verbose=False,
         )
+        created_files.extend(
+            [
+                f"{plot_filename}{full_suffix}.{vector_format}",
+                f"{plot_filename}{full_suffix}.png",
+            ]
+        )
         if not no_hist:
-            ggsave(
+            _save_plot(
                 histy,
                 width=3,
                 height=3,
                 dpi=dpi,
                 format=vector_format,
-                filename=f"{plot_filename}_COMPARE_HIST.{vector_format}",
+                filename=f"{plot_filename}{hist_suffix}.{vector_format}",
                 verbose=False,
             )
-            ggsave(
+            created_files.extend(
+                [
+                    f"{plot_filename}{hist_suffix}.{vector_format}",
+                    f"{plot_filename}{hist_suffix}.png",
+                ]
+            )
+            _save_plot(
                 histy,
                 width=3,
                 height=3,
                 dpi=dpi,
                 format="png",
-                filename=f"{plot_filename}_COMPARE_HIST.png",
+                filename=f"{plot_filename}{hist_suffix}.png",
                 verbose=False,
             )
         try:
@@ -1890,15 +2050,16 @@ def create_plots(
                 print(
                     f"{plot_filename} comparative plots and histogram saved sucessfully. \n"
                 )
-                return 0
+                return created_files
         except ValueError:
             print(
                 f"{plot_filename} comparative plots and histogram saved sucessfully. \n"
             )
-            return 0
+            return created_files
         if no_hist:
             print(
-                f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
+                f"{plot_filename}{full_suffix}.{vector_format} and "
+                f"{plot_filename}{full_suffix}.png saved sucessfully. \n"
             )
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
@@ -1920,25 +2081,34 @@ def create_plots(
             width,
             False,
         )
-        ggsave(
+        full_suffix = "_DIRECTION_FULL" if directional else "_FULL"
+        tri_suffix = "_DIRECTION_TRI" if directional else "_TRI"
+        hist_suffix = "_DIRECTION_HIST" if directional else "_HIST"
+        _save_plot(
             full_plot,
             width=width,
             height=width,
             dpi=dpi,
             format=vector_format,
-            filename=f"{plot_filename}_FULL.{vector_format}",
+            filename=f"{plot_filename}{full_suffix}.{vector_format}",
             verbose=False,
         )
-        ggsave(
+        created_files.extend(
+            [
+                f"{plot_filename}{full_suffix}.{vector_format}",
+                f"{plot_filename}{full_suffix}.png",
+            ]
+        )
+        _save_plot(
             full_plot,
             width=width,
             height=width,
             dpi=dpi,
             format="png",
-            filename=f"{plot_filename}_FULL.png",
+            filename=f"{plot_filename}{full_suffix}.png",
             verbose=False,
         )
-        tri_prefix = f"{plot_filename}_TRI"
+        tri_prefix = f"{plot_filename}{tri_suffix}"
         triangle_figure = _build_triangle_figure(
             sdf=sdf,
             title=name_x,
@@ -1960,6 +2130,7 @@ def create_plots(
             )
         finally:
             plt.close(triangle_figure)
+        created_files.extend([f"{tri_prefix}.{vector_format}", f"{tri_prefix}.png"])
 
         if annotation_track_created:
             annotated_figure = _build_triangle_figure(
@@ -1985,30 +2156,43 @@ def create_plots(
                 )
             finally:
                 plt.close(annotated_figure)
+            created_files.extend(
+                [
+                    f"{tri_prefix}_ANNOTATED.{vector_format}",
+                    f"{tri_prefix}_ANNOTATED.png",
+                ]
+            )
 
         if no_hist:
             print(
                 f"Triangle plots and full plots for {plot_filename} saved sucessfully. \n"
             )
         else:
-            ggsave(
+            _save_plot(
                 histy,
                 width=3,
                 height=3,
                 dpi=dpi,
                 format=vector_format,
-                filename=plot_filename + f"_HIST.{vector_format}",
+                filename=plot_filename + f"{hist_suffix}.{vector_format}",
                 verbose=False,
             )
-            ggsave(
+            _save_plot(
                 histy,
                 width=3,
                 height=3,
                 dpi=dpi,
                 format="png",
-                filename=plot_filename + "_HIST.png",
+                filename=plot_filename + f"{hist_suffix}.png",
                 verbose=False,
+            )
+            created_files.extend(
+                [
+                    plot_filename + f"{hist_suffix}.{vector_format}",
+                    plot_filename + f"{hist_suffix}.png",
+                ]
             )
             print(
                 f"Triangle plots, full plots, and histogram for {plot_filename} saved sucessfully. \n"
             )
+    return created_files

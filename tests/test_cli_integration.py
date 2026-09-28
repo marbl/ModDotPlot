@@ -73,6 +73,30 @@ def test_static_cli_computes_all_self_and_pairwise_outputs(tmp_path):
     assert all(path.stat().st_size > 0 for path in output.rglob("*.bedpe"))
 
 
+def test_omitted_subcommand_runs_static_mode(tmp_path):
+    fasta = tmp_path / "one.fa"
+    fasta.write_text(">alpha\n" + "ACGT" * 300 + "\n")
+    output = tmp_path / "implicit-static"
+
+    result = _run_cli(
+        "--fasta",
+        fasta,
+        "--window",
+        100,
+        "--modimizer",
+        10,
+        "--identity",
+        80,
+        "--no-plot",
+        "--output-dir",
+        output,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "Running ModDotPlot in static mode" in result.stdout
+    assert (output / "alpha" / "alpha.bedpe").is_file()
+
+
 def test_static_grid_regions_with_dotted_headers_crop_every_output(tmp_path):
     names = [
         "PAN010.chr14.haplotype1.paternal",
@@ -189,3 +213,4 @@ def test_interactive_cli_forward_mode_saves_matrix_without_launching_server(tmp_
     assert (saved / "alpha_0.npz").is_file()
     assert (saved / "metadata.pkl").is_file()
     assert "Saved matrices" in result.stdout
+    assert "interactive mode is deprecated and maintenance-only" in result.stderr

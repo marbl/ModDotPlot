@@ -3,7 +3,7 @@ from pathlib import Path
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover
-    # Exercised by the Python 3.8-3.10 CI jobs.
+    # Retained for source-tree tooling that may run outside supported Python.
     import tomli as tomllib
 
 from moddotplot.const import VERSION
@@ -22,15 +22,15 @@ def test_runtime_and_distribution_versions_match():
 
 
 def test_declared_python_floor_matches_documentation():
-    assert project_metadata()["requires-python"] == ">=3.8,<3.13"
+    assert project_metadata()["requires-python"] == ">=3.11,<3.15"
     readme = (PROJECT_ROOT / "README.md").read_text()
-    assert "supports Python 3.8 through 3.12" in readme
-    assert "Python 3.13 and newer are not supported" in readme
+    assert "supports Python 3.11 through 3.14" in readme
 
 
 def test_plotnine_supports_declared_python_floor():
     dependencies = project_metadata()["dependencies"]
-    assert "plotnine==0.12.4" in dependencies
+    assert "plotnine>=0.15.8,<0.16" in dependencies
+    assert "matplotlib>=3.11.2" in dependencies
 
 
 def test_mmh3_is_not_a_runtime_dependency():
@@ -88,9 +88,9 @@ def test_svg_composition_dependencies_are_not_runtime_dependencies():
 
 def test_ci_covers_every_supported_python_minor():
     workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text()
-    for minor in range(8, 13):
+    for minor in range(11, 15):
         assert f'          - "3.{minor}"' in workflow
-    assert '          - "3.13"' not in workflow
+    assert '          - "3.10"' not in workflow
 
 
 def test_release_workflow_is_tag_gated_and_uses_trusted_publishing():
@@ -102,7 +102,7 @@ def test_release_workflow_is_tag_gated_and_uses_trusted_publishing():
     assert "id-token: write" in workflow
     assert "pypa/gh-action-pypi-publish@release/v1" in workflow
     assert "pypa/cibuildwheel@v4.2.0" in workflow
-    assert 'CIBW_BUILD: "cp39-*"' in workflow
+    assert 'CIBW_BUILD: "cp311-*"' in workflow
     assert "py_limited_api = cp38" in setup_config
     for runner in ("ubuntu-latest", "macos-15-intel", "windows-latest"):
         assert f"          - {runner}" in workflow

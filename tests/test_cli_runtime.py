@@ -1,4 +1,5 @@
 import sys
+import shlex
 
 import numpy as np
 import pytest
@@ -29,7 +30,7 @@ def _patch_static_calculation(monkeypatch, plot_calls, pair_calls=None):
     monkeypatch.setattr(cli, "create_plots", lambda **kwargs: plot_calls.append(kwargs))
 
 
-def test_main_without_subcommand_reports_parser_error(monkeypatch, capsys):
+def test_main_without_arguments_defaults_to_static_parser(monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["moddotplot"])
 
     with pytest.raises(SystemExit) as exc_info:
@@ -37,8 +38,25 @@ def test_main_without_subcommand_reports_parser_error(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert exc_info.value.code == 2
-    assert "the following arguments are required: command" in captured.err
-    assert "{interactive,static}" in captured.err
+    assert "moddotplot static" in captured.err
+    assert "one of the arguments -c/--config -l/--load -f/--fasta is required" in (
+        captured.err
+    )
+    assert "the following arguments are required: command" not in captured.err
+
+
+def test_parser_defaults_omitted_subcommand_to_static():
+    args = cli.parse_args(["--fasta", "sequence.fa", "--no-plot"])
+
+    assert args.command == "static"
+    assert args.fasta == ["sequence.fa"]
+    assert args.no_plot
+
+
+def test_parser_preserves_explicit_interactive_subcommand():
+    args = cli.parse_args(["interactive", "--fasta", "sequence.fa"])
+
+    assert args.command == "interactive"
 
 
 @pytest.mark.parametrize("option", ["--colors", "--color"])
@@ -129,6 +147,78 @@ def test_interactive_window_uses_longest_sequence_by_length(monkeypatch):
     assert {entry["max_window_size"] for entry in metadata} == {102}
 
 
+def test_interactive_load_passes_combined_beds_to_dash(monkeypatch, tmp_path):
+    first_bed = tmp_path / "first.bed"
+    second_bed = tmp_path / "second.bed"
+    first_bed.write_text("chrA\t1010\t1020\n")
+    second_bed.write_text("chrB\t30\t40\n")
+    metadata = [
+        {
+            "x_name": "chrA:1001-1100",
+            "y_name": "chrB",
+            "x_size": 100,
+            "y_size": 100,
+            "self": False,
+            "max_window_size": 50,
+            "resolution": 2,
+        }
+    ]
+    monkeypatch.setattr(
+        cli, "extractFiles", lambda _path: ([[np.ones((2, 2))]], metadata)
+    )
+    dash_calls = []
+    monkeypatch.setattr(cli, "run_dash", lambda *args: dash_calls.append(args))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "moddotplot",
+            "interactive",
+            "--load",
+            "saved-matrices",
+            "--bed",
+            str(first_bed),
+            str(second_bed),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 0
+    x_axis, y_axis = dash_calls[0][2][0]
+    assert (x_axis[0], x_axis[-1]) == (1001, 1100)
+    assert (y_axis[0], y_axis[-1]) == (0, 100)
+    annotations = dash_calls[0][7]
+    assert annotations[["chrom", "start", "end"]].to_dict("records") == [
+        {"chrom": "chrA", "start": 1010, "end": 1020},
+        {"chrom": "chrB", "start": 30, "end": 40},
+    ]
+
+
+def test_interactive_rejects_invalid_annotation_bed(monkeypatch, tmp_path, capsys):
+    bed = tmp_path / "invalid.bed"
+    bed.write_text("chrA\tnot-a-coordinate\t20\n")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "moddotplot",
+            "interactive",
+            "--load",
+            "saved-matrices",
+            "--bed",
+            str(bed),
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main()
+
+    assert exc_info.value.code == 2
+    assert "Error reading annotation BED file(s)" in capsys.readouterr().err
+
+
 def test_no_bedpe_self_plot_uses_sequence_output_directory(monkeypatch, tmp_path):
     _patch_fasta_input(monkeypatch, ["chrA"], [[1] * 1000])
     plot_calls = []
@@ -155,6 +245,58 @@ def test_no_bedpe_self_plot_uses_sequence_output_directory(monkeypatch, tmp_path
     assert expected_directory.is_dir()
     assert plot_calls[0]["directory"] == str(expected_directory)
     assert not list(tmp_path.rglob("*.bedpe"))
+
+
+def test_static_plot_directory_gets_reproducibility_summary(monkeypatch, tmp_path):
+    fasta = tmp_path / "source genome.fa"
+    fasta.touch()
+    _patch_fasta_input(monkeypatch, ["chrA"], [[1] * 1000])
+    monkeypatch.setattr(cli, "createSelfMatrix", lambda *_args: np.full((1, 1), 100.0))
+    monkeypatch.setattr(
+        cli,
+        "convertMatrixToBed",
+        lambda *_args, **_kwargs: [["header"], ["value"]],
+    )
+
+    def create_plot_files(**kwargs):
+        prefix = tmp_path / "chrA:101-400" / "chrA:101-400"
+        created = []
+        for suffix in ("_FULL.svg", "_FULL.png", "_TRI.svg", "_TRI.png"):
+            path = prefix.parent / f"{prefix.name}{suffix}"
+            path.touch()
+            created.append(str(path))
+        return created
+
+    monkeypatch.setattr(cli, "create_plots", create_plot_files)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "moddotplot",
+            "-f",
+            str(fasta),
+            "--region",
+            "chrA:101-400",
+            "--resolution",
+            "10",
+            "--no-bedpe",
+            "--no-hist",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+
+    cli.main()
+
+    summary = (tmp_path / "chrA:101-400" / "plot_summary.txt").read_text()
+    assert f"Command: {shlex.join(sys.argv)}" in summary
+    assert str(fasta.resolve()) in summary
+    assert "Window sizes:\n  - 28 bp" in summary
+    assert "Regions:\n  - chrA:101-400" in summary
+    assert "BED annotation file: None" in summary
+    assert (
+        str((tmp_path / "chrA:101-400" / "chrA:101-400_TRI.svg").resolve()) in summary
+    )
 
 
 def test_unmatched_region_fails_instead_of_silently_using_full_sequences(

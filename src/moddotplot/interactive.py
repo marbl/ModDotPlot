@@ -15,10 +15,162 @@ import math
 import plotly.graph_objs as go
 import logging
 import os
+from moddotplot.annotations import visible_annotation_intervals
+from moddotplot.parse_fasta import extractRegion
+
+INTERACTIVE_FONT_FAMILY = "Helvetica, 'DejaVu Sans', sans-serif"
 
 # Prevent HTTP protocol requests from showing up in terminal
 log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
+
+
+def _plotly_annotation_color(color):
+    """Convert a shared annotation color into a Plotly-compatible value."""
+
+    if isinstance(color, str):
+        return color
+    channels = [round(float(channel) * 255) for channel in color]
+    return f"rgb({channels[0]},{channels[1]},{channels[2]})"
+
+
+def interactive_axis_bounds(plot_metadata, axis):
+    """Return genomic bounds for an interactive matrix axis.
+
+    Region-suffixed FASTA identifiers carry the genomic offset needed to align
+    BED annotations. Older saved metadata has no explicit start/end fields, so
+    derive them from the axis name while retaining the historical zero-based
+    bounds for ordinary identifiers.
+    """
+
+    size = float(plot_metadata[f"{axis}_size"])
+    explicit_start = plot_metadata.get(f"{axis}_start")
+    explicit_end = plot_metadata.get(f"{axis}_end")
+    if explicit_start is not None and explicit_end is not None:
+        return float(explicit_start), float(explicit_end)
+
+    name = plot_metadata[f"{axis}_name"]
+    parsed_region = extractRegion(name)
+    if not parsed_region:
+        return 0.0, size
+
+    _chrom, start, declared_end = parsed_region
+    expected_size = declared_end - start + 1
+    end = declared_end if math.isclose(expected_size, size) else start + size - 1
+    return float(start), float(end)
+
+
+def _annotation_chromosome(name):
+    parsed_region = extractRegion(name)
+    return parsed_region[0] if parsed_region else name
+
+
+def add_annotation_tracks(figure, plot_metadata, annotations):
+    """Add collapsed BED tracks aligned to the matrix's visible axes.
+
+    Self-identity plots receive an x-axis track. Comparative plots receive an
+    x-axis track and, when the y sequence also has annotations, a y-axis track.
+    Shapes use genomic axis references, so they remain aligned during Plotly
+    zooming and panning without adding callback state.
+    """
+
+    if annotations is None or annotations.empty:
+        return figure
+
+    x_start, x_end = interactive_axis_bounds(plot_metadata, "x")
+    x_intervals = visible_annotation_intervals(
+        annotations,
+        _annotation_chromosome(plot_metadata["x_name"]),
+        x_start,
+        x_end,
+    )
+    y_intervals = []
+    if not plot_metadata.get("self", False):
+        y_start, y_end = interactive_axis_bounds(plot_metadata, "y")
+        y_intervals = visible_annotation_intervals(
+            annotations,
+            _annotation_chromosome(plot_metadata["y_name"]),
+            y_start,
+            y_end,
+        )
+
+    if x_intervals:
+        figure.add_shape(
+            type="rect",
+            x0=x_start,
+            x1=x_end,
+            y0=-0.14,
+            y1=-0.09,
+            xref="x",
+            yref="paper",
+            fillcolor="#F0F0F0",
+            line=dict(color="#B0B0B0", width=0.5),
+        )
+        for start, end, color in x_intervals:
+            figure.add_shape(
+                type="rect",
+                x0=start,
+                x1=end,
+                y0=-0.14,
+                y1=-0.09,
+                xref="x",
+                yref="paper",
+                fillcolor=_plotly_annotation_color(color),
+                line=dict(color=_plotly_annotation_color(color), width=0.5),
+            )
+        bottom_margin = figure.layout.margin.b or 0
+        figure.update_layout(margin=dict(b=max(bottom_margin, 140)))
+        figure.update_xaxes(title_standoff=70)
+
+    if y_intervals:
+        figure.add_shape(
+            type="rect",
+            x0=-0.14,
+            x1=-0.09,
+            y0=y_start,
+            y1=y_end,
+            xref="paper",
+            yref="y",
+            fillcolor="#F0F0F0",
+            line=dict(color="#B0B0B0", width=0.5),
+        )
+        for start, end, color in y_intervals:
+            figure.add_shape(
+                type="rect",
+                x0=-0.14,
+                x1=-0.09,
+                y0=start,
+                y1=end,
+                xref="paper",
+                yref="y",
+                fillcolor=_plotly_annotation_color(color),
+                line=dict(color=_plotly_annotation_color(color), width=0.5),
+            )
+        left_margin = figure.layout.margin.l or 0
+        figure.update_layout(margin=dict(l=max(left_margin, 140)))
+        figure.update_yaxes(title_standoff=70)
+
+    return figure
+
+
+def preserve_zoom_ranges(figure, x_range, y_range):
+    """Keep a callback-generated figure inside the user's requested viewport.
+
+    Plotly includes layout shapes when autoranging. BED tracks intentionally
+    span the complete genomic interval, so a rebuilt image-pyramid figure must
+    restore the zoom ranges after adding those shapes.
+    """
+
+    x_start, x_end = map(float, x_range)
+    y_start, y_end = map(float, y_range)
+    if not all(np.isfinite((x_start, x_end, y_start, y_end))):
+        raise ValueError("Zoom ranges must contain only finite values")
+    if x_end <= x_start or y_end <= y_start:
+        raise ValueError("Zoom range ends must be greater than their starts")
+
+    figure.update_xaxes(range=[x_start, x_end], autorange=False)
+    figure.update_yaxes(range=[y_start, y_end], autorange=False)
+    return figure
 
 
 def figure_to_bed(figure, default_identity=86.0):
@@ -101,7 +253,16 @@ def find_closest_elements(value, sorted_list):
         return closest_index1, closest_index2
 
 
-def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_dir):
+def run_dash(
+    matrices,
+    metadata,
+    axes,
+    sparsity,
+    identity,
+    port_number,
+    output_dir,
+    annotations=None,
+):
     # Run Dash app
     app = dash.Dash(__name__, prevent_initial_callbacks="initial_duplicate")
     app.title = "ModDotPlot"
@@ -182,10 +343,10 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
         hoverinfo="all",
         hovertemplate=hover_template_text,
         name="",
-        x0=0,
+        x0=main_x_axis[0],
         dx=current_metadata["max_window_size"],
         xtype="scaled",
-        y0=0,
+        y0=main_y_axis[0],
         dy=current_metadata["max_window_size"],
         ytype="scaled",
     )
@@ -232,13 +393,17 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
     fig.update_layout(
         height=800,
         width=800,
-        hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica"),
+        font=dict(family=INTERACTIVE_FONT_FAMILY),
+        hoverlabel=dict(
+            bgcolor="white", font_size=16, font_family=INTERACTIVE_FONT_FAMILY
+        ),
         yaxis_scaleanchor="x",
         title=fig_title,
-        title_font=dict(size=title_size, family="Helvetica, Arial, sans-serif"),
+        title_font=dict(size=title_size, family=INTERACTIVE_FONT_FAMILY),
         title_x=0.5,
         title_y=0.95,
     )
+    add_annotation_tracks(fig, current_metadata, annotations)
     colorscales = px.colors.named_colorscales()
     colornames = px.colors.named_colorscales()
 
@@ -294,7 +459,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                     "paddingBottom": "40px",
                                     "paddingLeft": "40px",
                                     "width": "100px",
-                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                    "fontFamily": INTERACTIVE_FONT_FAMILY,
                                 },  # Added padding to separate the content
                             ),
                             html.Div(
@@ -330,7 +495,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                     "display": "none" if len(titles) < 2 else "block",
                                     "width": "fit-content"
                                     * 2,  # Set width to fit content
-                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                    "fontFamily": INTERACTIVE_FONT_FAMILY,
                                     "paddingTop": "10px",
                                     "paddingLeft": "25px",
                                     "paddingBottom": "30px",
@@ -354,7 +519,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                 ],
                                 id="window-div",
                                 style={
-                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                    "fontFamily": INTERACTIVE_FONT_FAMILY,
                                     "paddingTop": "10px",
                                     "paddingLeft": "45px",
                                     "paddingBot": "30px",
@@ -365,7 +530,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                             html.Div(
                                 f"Minimum Window Size: {current_metadata['min_window_size']}",
                                 style={
-                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                    "fontFamily": INTERACTIVE_FONT_FAMILY,
                                     "paddingTop": "10px",
                                     "paddingLeft": "45px",
                                     "paddingBot": "30px",
@@ -388,7 +553,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                     "paddingBottom": "30px",
                                     "width": "260px",
                                     "textAlign": "left",
-                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                    "fontFamily": INTERACTIVE_FONT_FAMILY,
                                 },
                             ),
                             html.Div(id="content"),
@@ -396,7 +561,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                 "Color Palette",
                                 id="color-palette-text",
                                 style={
-                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                    "fontFamily": INTERACTIVE_FONT_FAMILY,
                                     "paddingLeft": "45px",  # Added padding to separate the content
                                 },
                             ),
@@ -1279,7 +1444,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                             "paddingTop": "10px",
                                             "paddingLeft": "20px",
                                             "width": "250px",
-                                            "fontFamily": "Helvetica, Arial, sans-serif",
+                                            "fontFamily": INTERACTIVE_FONT_FAMILY,
                                         },  # Added padding to separate the content
                                     )
                                 ],
@@ -1290,7 +1455,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                         "Coordinate Log:",
                                         id="coordinate-text",
                                         style={
-                                            "fontFamily": "Helvetica, Arial, sans-serif",
+                                            "fontFamily": INTERACTIVE_FONT_FAMILY,
                                             "paddingLeft": "45px",  # Added padding to separate the content
                                             "paddingBottom": "10px",
                                         },
@@ -1307,7 +1472,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                                     "height": "40px",
                                                     "width": "62%",
                                                     "margin-left": "22px",
-                                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                                    "fontFamily": INTERACTIVE_FONT_FAMILY,
                                                 },
                                             ),
                                             html.Button(
@@ -1322,7 +1487,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                                     ),
                                 ],
                                 style={
-                                    "fontFamily": "Helvetica, Arial, sans-serif",
+                                    "fontFamily": INTERACTIVE_FONT_FAMILY,
                                 },
                             ),
                         ],
@@ -1477,10 +1642,20 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                     if len(updated_info["x_name"]) + len(updated_info["y_name"]) > 22:
                         title_size = 16
         new_main_level = image_pyramid[0]
-        fig = go.Figure(data=[heatmap])
         current_color = getInteractiveColor(getMatchingColors(color), "+")
-        new_heatmap = heatmap
-        new_heatmap.update(dict(colorscale=current_color, z=new_main_level))
+        new_heatmap = go.Heatmap(heatmap.to_plotly_json())
+        new_heatmap.update(
+            dict(
+                colorscale=current_color,
+                z=new_main_level,
+                x=image_axes[0],
+                y=image_axes[1],
+                x0=image_axes[0][0],
+                y0=image_axes[1][0],
+                dx=updated_info["max_window_size"],
+                dy=updated_info["max_window_size"],
+            )
+        )
 
         masked_data = np.where(
             (new_heatmap["z"] < threshold_range[0])
@@ -1525,16 +1700,22 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
         fig.update_yaxes(title_text=updated_info["y_name"], title_font=dict(size=18))
 
         fig.update_layout(
-            hoverlabel=dict(bgcolor="white", font_size=16, font_family="Helvetica"),
+            font=dict(family=INTERACTIVE_FONT_FAMILY),
+            hoverlabel=dict(
+                bgcolor="white",
+                font_size=16,
+                font_family=INTERACTIVE_FONT_FAMILY,
+            ),
             title=updated_title,  # Add your title here
             title_font=dict(
-                size=title_size, family="Helvetica"
+                size=title_size, family=INTERACTIVE_FONT_FAMILY
             ),  # Adjust the title font size if needed
             title_x=0.5,
             title_y=0.95,
         )
 
         fig.update_layout(yaxis_scaleanchor="x")
+        add_annotation_tracks(fig, updated_info, annotations)
         if relayoutData is not None:
             # TODO: Pan mode should stay in pan mode
 
@@ -1543,32 +1724,30 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                 y_start_range = relayoutData.get("yaxis.range[0]")
                 x_end_range = relayoutData.get("xaxis.range[1]")
                 y_end_range = relayoutData.get("yaxis.range[1]")
+                x_axis_start, x_axis_end = interactive_axis_bounds(updated_info, "x")
+                y_axis_start, y_axis_end = interactive_axis_bounds(updated_info, "y")
 
                 # Check that selected range is in bounds, snap to boundary otherwise
                 # TODO: still broken here
                 if x_start_range is not None:
-                    if x_start_range < 0:
-                        print("x axis out of bounds! Shifting to x=0")
-                        relayoutData["xaxis.range[0]"] = 0
-                        x_start_range = 0
-                    if y_start_range < 0:
-                        print("y axis out of bounds! Shifting to y=0")
-                        relayoutData["yaxis.range[0]"] = 0
-                        y_start_range = 0
-                    if x_end_range > updated_info["x_size"]:
-                        print(
-                            f"x axis out of bounds! Shifting to x={updated_info['x_size']}"
-                        )
-                        relayoutData["xaxis.range[1]"] = updated_info["x_size"]
-                        x_end_range = updated_info["x_size"]
-                    if y_end_range > updated_info["y_size"]:
-                        print(
-                            f"y axis out of bounds! Shifting to y={updated_info['y_size']}"
-                        )
-                        relayoutData["yaxis.range[1]"] = updated_info["y_size"]
-                        y_end_range = updated_info["y_size"]
+                    if x_start_range < x_axis_start:
+                        print(f"x axis out of bounds! Shifting to x={x_axis_start:g}")
+                        relayoutData["xaxis.range[0]"] = x_axis_start
+                        x_start_range = x_axis_start
+                    if y_start_range < y_axis_start:
+                        print(f"y axis out of bounds! Shifting to y={y_axis_start:g}")
+                        relayoutData["yaxis.range[0]"] = y_axis_start
+                        y_start_range = y_axis_start
+                    if x_end_range > x_axis_end:
+                        print(f"x axis out of bounds! Shifting to x={x_axis_end:g}")
+                        relayoutData["xaxis.range[1]"] = x_axis_end
+                        x_end_range = x_axis_end
+                    if y_end_range > y_axis_end:
+                        print(f"y axis out of bounds! Shifting to y={y_axis_end:g}")
+                        relayoutData["yaxis.range[1]"] = y_axis_end
+                        y_end_range = y_axis_end
 
-                if x_start_range >= 0 and y_start_range >= 0:
+                if x_start_range >= x_axis_start and y_start_range >= y_axis_start:
                     x_begin = round(relayoutData["xaxis.range[0]"])
                     x_end = round(relayoutData["xaxis.range[1]"])
 
@@ -1681,15 +1860,24 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
                             title_text=updated_info["y_name"], title_font=dict(size=18)
                         )
                         current_fig.update_layout(
+                            font=dict(family=INTERACTIVE_FONT_FAMILY),
                             hoverlabel=dict(
-                                bgcolor="white", font_size=16, font_family="Helvetica"
+                                bgcolor="white",
+                                font_size=16,
+                                font_family=INTERACTIVE_FONT_FAMILY,
                             ),
-                            title=fig_title,  # Add your title here
-                            title_font=dict(size=28, family="Helvetica"),
+                            title=updated_title,  # Add your title here
+                            title_font=dict(size=28, family=INTERACTIVE_FONT_FAMILY),
                             title_x=0.5,  # Center horizontally
                             title_y=0.95,  # Center vertically
                         )
                         current_fig.update_layout(yaxis_scaleanchor="x")
+                        add_annotation_tracks(current_fig, updated_info, annotations)
+                        preserve_zoom_ranges(
+                            current_fig,
+                            (x_start_range, x_end_range),
+                            (y_start_range, y_end_range),
+                        )
                         return (
                             current_fig,
                             "",
@@ -1764,7 +1952,7 @@ def run_dash(matrices, metadata, axes, sparsity, identity, port_number, output_d
 
             .custom-slider .rc-slider-handle {
                 border: 2px solid black;  /* Change the handle border color to gray */
-                font-family: Helvetica, Arial, sans-serif;
+                font-family: Helvetica, "DejaVu Sans", sans-serif;
             }
             #main_color {
                 justify-content:center;

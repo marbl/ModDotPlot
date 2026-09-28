@@ -1,8 +1,10 @@
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
 import numpy as np
+from pathlib import Path
 import pytest
 
+from moddotplot.const import DIRECTION_COLORS
 from moddotplot.static_plots import _build_grid_figure, create_grid
 
 
@@ -103,7 +105,7 @@ def _basic_two_sequence_grid(**overrides):
 
 
 def _create_grid(tmp_path, *, vector_format="svg", **kwargs):
-    create_grid(
+    return create_grid(
         directory=tmp_path,
         vector_format=vector_format,
         dpi=72,
@@ -183,7 +185,7 @@ def test_create_grid_handles_empty_pairwise_comparison(tmp_path):
 def test_create_grid_writes_png_and_valid_selected_vector_format(
     tmp_path, vector_format, signature
 ):
-    _create_grid(
+    output_files = _create_grid(
         tmp_path,
         vector_format=vector_format,
         **_basic_two_sequence_grid(),
@@ -191,11 +193,32 @@ def test_create_grid_writes_png_and_valid_selected_vector_format(
 
     png = tmp_path / "2x2_GRID.png"
     vector = tmp_path / f"2x2_GRID.{vector_format}"
+    assert output_files == [str(vector), str(png)]
     assert png.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
     if vector_format == "svg":
         assert signature in vector.read_bytes()[:1024]
     else:
         assert vector.read_bytes().startswith(signature)
+
+
+def test_create_grid_uses_direction_output_name(tmp_path):
+    kwargs = _basic_two_sequence_grid()
+    direction_header = (*BED_HEADER, "direction")
+    kwargs["singles"] = [
+        [direction_header] + [(*row, "Forward") for row in records[1:]]
+        for records in kwargs["singles"]
+    ]
+    kwargs["doubles"] = [
+        [direction_header] + [(*row, "Reverse") for row in records[1:]]
+        for records in kwargs["doubles"]
+    ]
+
+    outputs = _create_grid(tmp_path / "directionality", **kwargs)
+
+    assert {Path(output).name for output in outputs} == {
+        "2x2_DIRECTION_GRID.svg",
+        "2x2_DIRECTION_GRID.png",
+    }
 
 
 def test_reversed_pair_metadata_orients_asymmetric_coordinates_by_grid_cell():
@@ -341,6 +364,26 @@ def test_grid_exact_bounds_do_not_expand_to_next_nice_tick():
         plt.close(figure)
 
 
+@pytest.mark.parametrize(
+    ("axis_end", "unit"),
+    [(100_000, "Kbp"), (103_156_783, "Mbp"), (500_000_000, "Gbp")],
+)
+def test_grid_labels_both_axes_with_genomic_units(axis_end, unit):
+    kwargs = _basic_two_sequence_grid(
+        xlim=(1, axis_end),
+        axes_label=None,
+        breaks=None,
+    )
+
+    figure, _axes = _build_grid_figure(**kwargs)
+    try:
+        expected = f"Genomic Position ({unit})"
+        assert figure._supxlabel.get_text() == expected
+        assert figure._supylabel.get_text() == expected
+    finally:
+        plt.close(figure)
+
+
 def test_compare_only_grid_derives_sequence_names_from_pair_metadata(tmp_path):
     double_names = [
         ["gamma", "alpha"],
@@ -456,6 +499,42 @@ def test_grid_honors_custom_breakpoints_and_colors():
         rendered_colors = _all_artist_colors(axes)
         for color in custom_colors:
             assert to_rgba(color) in rendered_colors
+    finally:
+        plt.close(figure)
+
+
+def test_grid_uses_blue_and_pink_direction_colors_in_every_cell():
+    kwargs = _basic_two_sequence_grid()
+    direction_header = (*BED_HEADER, "direction")
+
+    def add_directions(records):
+        return [direction_header] + [
+            (*row, "Forward" if index % 2 == 0 else "Reverse")
+            for index, row in enumerate(records[1:])
+        ]
+
+    kwargs["singles"] = [add_directions(records) for records in kwargs["singles"]]
+    pair = _records(
+        "sequence_a",
+        "sequence_b",
+        [(10, 10, 86), (30, 40, 100), (50, 60, 86), (70, 80, 100)],
+    )
+    kwargs["doubles"] = [
+        [direction_header]
+        + [
+            (*row, direction)
+            for row, direction in zip(
+                pair[1:], ["Forward", "Forward", "Reverse", "Reverse"]
+            )
+        ]
+    ]
+
+    figure, axes = _build_grid_figure(**kwargs)
+    try:
+        rendered_colors = _all_artist_colors(axes)
+        assert to_rgba(DIRECTION_COLORS["Forward"]) in rendered_colors
+        assert to_rgba(DIRECTION_COLORS["Reverse"]) in rendered_colors
+        assert len(rendered_colors) >= 4
     finally:
         plt.close(figure)
 

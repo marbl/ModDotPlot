@@ -7,8 +7,10 @@ import pandas as pd
 import pytest
 
 import moddotplot.static_plots as static_plots
+from moddotplot.const import DIRECTION_COLORS
 from moddotplot.static_plots import (
     DEFAULT_ANNOTATION_COLOR,
+    _build_triangle_figure,
     draw_annotation_track,
     read_annotation_bed,
     render_annotation_track,
@@ -120,6 +122,44 @@ def test_render_annotation_track_writes_expected_svg_and_png(tmp_path):
     ET.parse(svg_path)
 
 
+def test_triangle_uses_blue_and_pink_direction_colors():
+    dataframe = pd.DataFrame(
+        {
+            "q": ["chr1"] * 4,
+            "q_st": [10, 20, 30, 40],
+            "q_en": [20, 30, 40, 50],
+            "r": ["chr1"] * 4,
+            "r_st": [10, 40, 60, 80],
+            "r_en": [20, 50, 70, 90],
+            "discrete": pd.Categorical([0, 1, 0, 1], categories=[0, 1]),
+            "direction": ["Forward", "Forward", "Reverse", "Reverse"],
+        }
+    )
+
+    figure = _build_triangle_figure(
+        sdf=dataframe,
+        title="chr1",
+        palette="Spectral_11",
+        palette_orientation="+",
+        custom_colors=["#000000", "#ffffff"],
+        axes_labels=[0, 50, 100],
+        xlim=(0, 100),
+        deraster=True,
+        width=4,
+    )
+    try:
+        rendered = {
+            tuple(color)
+            for collection in figure.axes[0].collections
+            for color in collection.get_facecolors()
+        }
+        assert to_rgba(DIRECTION_COLORS["Forward"]) in rendered
+        assert to_rgba(DIRECTION_COLORS["Reverse"]) in rendered
+        assert len(rendered) == 4
+    finally:
+        plt.close(figure)
+
+
 def test_render_annotation_track_skips_empty_overlap(tmp_path):
     bed_path = tmp_path / "annotations.bed"
     bed_path.write_text("chr2\t10\t20\n")
@@ -141,12 +181,87 @@ def test_render_annotation_track_skips_empty_overlap(tmp_path):
     assert not (tmp_path / "sample_ANNOTATION_TRACK.png").exists()
 
 
+def test_annotated_triangle_physically_aligns_axes_and_hides_heatmap_baseline(
+    tmp_path,
+):
+    bed_path = tmp_path / "annotations.bed"
+    bed_path.write_text("chr1\t0\t100\n")
+    dataframe = pd.DataFrame(
+        {
+            "q_st": [0],
+            "q_en": [100],
+            "r_st": [0],
+            "r_en": [100],
+            "discrete": [0],
+        }
+    )
+
+    figure = _build_triangle_figure(
+        sdf=dataframe,
+        title="chr1:1-100",
+        palette="Spectral_11",
+        palette_orientation="+",
+        custom_colors=None,
+        axes_labels=None,
+        xlim=(0, 100),
+        deraster=False,
+        width=6,
+        annotation_df=read_annotation_bed(bed_path),
+        annotation_chrom="chr1",
+    )
+    try:
+        triangle_axis, annotation_axis = figure.axes
+        triangle_position = triangle_axis.get_position()
+        annotation_position = annotation_axis.get_position()
+
+        assert annotation_position.x0 == pytest.approx(triangle_position.x0)
+        assert annotation_position.width == pytest.approx(triangle_position.width)
+        assert not triangle_axis.spines["bottom"].get_visible()
+        assert not any(
+            tick.tick1line.get_visible() for tick in triangle_axis.xaxis.majorTicks
+        )
+        assert annotation_axis.spines["bottom"].get_visible()
+        assert annotation_axis.get_xlabel() == "Genomic Position (Kbp)"
+    finally:
+        plt.close(figure)
+
+
+def test_unannotated_triangle_keeps_its_genomic_axis():
+    dataframe = pd.DataFrame(
+        {
+            "q_st": [0],
+            "q_en": [100],
+            "r_st": [0],
+            "r_en": [100],
+            "discrete": [0],
+        }
+    )
+
+    figure = _build_triangle_figure(
+        sdf=dataframe,
+        title="chr1",
+        palette="Spectral_11",
+        palette_orientation="+",
+        custom_colors=None,
+        axes_labels=None,
+        xlim=(0, 100),
+        deraster=False,
+        width=6,
+    )
+    try:
+        triangle_axis = figure.axes[0]
+        assert triangle_axis.spines["bottom"].get_visible()
+        assert triangle_axis.get_xlabel() == "Genomic Position (Kbp)"
+    finally:
+        plt.close(figure)
+
+
 class _FakePlot:
     def __add__(self, _other):
         return self
 
 
-def _stub_create_plots_dependencies(monkeypatch):
+def _stub_create_plots_dependencies(monkeypatch, *, directional=False):
     dataframe = pd.DataFrame(
         [
             {
@@ -161,6 +276,8 @@ def _stub_create_plots_dependencies(monkeypatch):
             }
         ]
     )
+    if directional:
+        dataframe["direction"] = ["Forward"]
     monkeypatch.setattr(static_plots, "read_df", lambda *_args, **_kwargs: dataframe)
     monkeypatch.setattr(
         static_plots, "make_hist", lambda *_args, **_kwargs: _FakePlot()
@@ -178,7 +295,7 @@ def _stub_create_plots_dependencies(monkeypatch):
 
 
 def _run_create_plots(output_dir, annotation, vector_format="svg"):
-    static_plots.create_plots(
+    return static_plots.create_plots(
         sdf=None,
         directory=str(output_dir),
         name_x="chr1",
@@ -209,25 +326,63 @@ def test_create_plots_creates_and_skips_annotation_artifacts(tmp_path, monkeypat
     matching_dir.mkdir()
     matching_bed = tmp_path / "matching.bed"
     matching_bed.write_text("chr1\t10\t20\n")
-    _run_create_plots(matching_dir, matching_bed)
+    matching_outputs = _run_create_plots(matching_dir, matching_bed)
 
     assert (matching_dir / "chr1_ANNOTATION_TRACK.svg").exists()
     assert (matching_dir / "chr1_ANNOTATION_TRACK.png").exists()
     assert (matching_dir / "chr1_TRI_ANNOTATED.svg").exists()
     assert (matching_dir / "chr1_TRI_ANNOTATED.png").exists()
     assert not (matching_dir / "chr1_PRE_ANNOTATED.svg").exists()
+    assert str(matching_dir / "chr1_TRI_ANNOTATED.svg") in matching_outputs
+    assert str(matching_dir / "chr1_ANNOTATION_TRACK.svg") in matching_outputs
 
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
     nonmatching_bed = tmp_path / "nonmatching.bed"
     nonmatching_bed.write_text("chr2\t10\t20\n")
-    _run_create_plots(empty_dir, nonmatching_bed)
+    empty_outputs = _run_create_plots(empty_dir, nonmatching_bed)
 
     assert not (empty_dir / "chr1_ANNOTATION_TRACK.svg").exists()
     assert not (empty_dir / "chr1_ANNOTATION_TRACK.png").exists()
     assert not (empty_dir / "chr1_PRE_ANNOTATED.svg").exists()
     assert not (empty_dir / "chr1_TRI_ANNOTATED.svg").exists()
     assert not (empty_dir / "chr1_TRI_ANNOTATED.png").exists()
+    assert not any("ANNOTATION" in output for output in empty_outputs)
+
+
+def test_create_plots_uses_direction_output_names(tmp_path, monkeypatch):
+    _stub_create_plots_dependencies(monkeypatch, directional=True)
+
+    outputs = static_plots.create_plots(
+        sdf=None,
+        directory=str(tmp_path / "directionality"),
+        name_x="chr1",
+        name_y="chr1",
+        palette="Spectral_11",
+        palette_orientation="+",
+        no_hist=False,
+        width=4,
+        dpi=72,
+        is_freq=False,
+        xlim=100,
+        custom_colors=None,
+        custom_breakpoints=None,
+        from_file=None,
+        is_pairwise=False,
+        axes_labels=None,
+        axes_tick_number=7,
+        vector_format="svg",
+        deraster=True,
+        annotation=None,
+    )
+
+    expected_stems = {
+        "chr1_DIRECTION_FULL",
+        "chr1_DIRECTION_TRI",
+        "chr1_DIRECTION_HIST",
+    }
+    assert {Path(output).stem for output in outputs} == expected_stems
+    assert all(Path(output).parent.name == "directionality" for output in outputs)
 
 
 @pytest.mark.parametrize(

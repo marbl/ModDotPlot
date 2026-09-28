@@ -22,7 +22,8 @@ from moddotplot.estimate_identity import (
     ModimizerSketchCache,
     partitionOverlaps,
 )
-from moddotplot.interactive import run_dash
+from moddotplot.interactive import interactive_axis_bounds, run_dash
+from moddotplot.annotations import read_annotation_beds
 from moddotplot.const import ASCII_ART, VERSION
 
 import argparse
@@ -31,6 +32,9 @@ import json
 import numpy as np
 import pickle
 import os
+import shlex
+
+from moddotplot.plot_summary import PlotSummaryWriter
 
 
 # Static plotting pulls in the Plotnine and Matplotlib stacks. Keep those
@@ -39,11 +43,16 @@ import os
 read_df_from_file = None
 create_plots = None
 create_grid = None
-create_direction_plot = None
+
+COMMANDS = frozenset({"interactive", "static"})
+INTERACTIVE_DEPRECATION_MESSAGE = (
+    "Warning: interactive mode is deprecated and maintenance-only. "
+    "It remains available, but will not receive new features."
+)
 
 
 def _load_static_plotting():
-    global read_df_from_file, create_plots, create_grid, create_direction_plot
+    global read_df_from_file, create_plots, create_grid
 
     from moddotplot import static_plots
 
@@ -53,8 +62,6 @@ def _load_static_plotting():
         create_plots = static_plots.create_plots
     if create_grid is None:
         create_grid = static_plots.create_grid
-    if create_direction_plot is None:
-        create_direction_plot = static_plots.create_direction_plot
 
 
 def get_parser():
@@ -67,12 +74,21 @@ def get_parser():
         description="ModDotPlot: Visualization of Tandem Repeats",
     )
     subparsers = parser.add_subparsers(
-        dest="command", required=True, help="Choose mode: interactive or static"
+        dest="command",
+        required=False,
+        help="Choose mode; static is used when omitted",
+    )
+    static_parser = subparsers.add_parser(
+        "static", help="Static mode commands (default)"
     )
     interactive_parser = subparsers.add_parser(
-        "interactive", help="Interactive mode commands"
+        "interactive",
+        help="Interactive mode commands (deprecated; explicit use only)",
+        description=(
+            "Deprecated interactive mode. This mode remains available but is "
+            "maintenance-only and will not receive new features."
+        ),
     )
-    static_parser = subparsers.add_parser("static", help="Static mode commands")
 
     # -----------INTERACTIVE MODE SUBCOMMANDS-----------
     interactive_input_group = interactive_parser.add_mutually_exclusive_group(
@@ -147,6 +163,17 @@ def get_parser():
         "--output-dir",
         default=None,
         help="Directory name for saving matrices and coordinate logs. Defaults to working directory.",
+    )
+
+    interactive_parser.add_argument(
+        "-b",
+        "--bed",
+        default=None,
+        nargs="+",
+        help=(
+            "BED3-BED9 annotation file(s). Tracks are shown for BED chromosome "
+            "names matching the FASTA headers on each matrix axis."
+        ),
     )
 
     compare_group.add_argument(
@@ -358,7 +385,10 @@ def get_parser():
     static_parser.add_argument(
         "--plot-direction",
         action="store_true",
-        help="Create a plot containing the direction of each k-mer array (relative to the first array). Arrays with inversions will be highlighted in blue (forward) and pink (reverse).",
+        help=(
+            "Color matches in _FULL, _TRI, and grid plots by k-mer orientation: "
+            "blue for the same orientation and pink for reverse orientation."
+        ),
     )
 
     static_parser.add_argument(
@@ -438,6 +468,23 @@ def get_parser():
     )
 
     return parser
+
+
+def _arguments_with_default_command(arguments=None):
+    """Return CLI arguments with static mode inserted when no mode is given."""
+
+    normalized = list(sys.argv[1:] if arguments is None else arguments)
+    if normalized[:1] and normalized[0] in ("-h", "--help"):
+        return normalized
+    if not normalized or normalized[0] not in COMMANDS:
+        normalized.insert(0, "static")
+    return normalized
+
+
+def parse_args(arguments=None):
+    """Parse command-line arguments, defaulting omitted subcommands to static."""
+
+    return get_parser().parse_args(_arguments_with_default_command(arguments))
 
 
 def _apply_static_config(args, config):
@@ -550,14 +597,92 @@ def _slice_kmers_for_region(kmers, region, kmer_size, sequence_start=1):
     return selected
 
 
+def _bedpe_window_sizes(dataframe):
+    """Extract the window sizes represented by a loaded BEDPE dataframe."""
+
+    for start, end in (("query_start", "query_end"), ("q_st", "q_en")):
+        if start in dataframe and end in dataframe:
+            sizes = dataframe[end] - dataframe[start]
+            return sorted({int(size) for size in sizes if size > 0})
+    return []
+
+
+def _regions_from_names(names):
+    """Return normalized region strings embedded in sequence names."""
+
+    regions = []
+    for name in names:
+        parsed = extractRegion(name)
+        if parsed:
+            region = f"{parsed[0]}:{parsed[1]}-{parsed[2]}"
+            if region not in regions:
+                regions.append(region)
+    return regions
+
+
+def _annotate_bed_directions(
+    bed,
+    canonical_matrix,
+    forward_matrix,
+    window_size,
+    x_offset,
+    y_offset,
+):
+    """Add forward/reverse orientation labels to canonical BEDPE rows."""
+
+    canonical_matrix = np.asarray(canonical_matrix)
+    forward_matrix = np.asarray(forward_matrix)
+    if canonical_matrix.shape != forward_matrix.shape:
+        raise ValueError("Canonical and forward matrices must have matching shapes")
+    if not bed:
+        return bed
+
+    header = list(bed[0])
+    try:
+        query_start_index = header.index("query_start")
+        reference_start_index = header.index("reference_start")
+    except ValueError as error:
+        raise ValueError(
+            "BEDPE data is missing direction coordinate columns"
+        ) from error
+
+    annotated = [tuple([*header, "direction"])]
+    for row in bed[1:]:
+        query_index = round((int(row[query_start_index]) - x_offset) / window_size)
+        reference_index = round(
+            (int(row[reference_start_index]) - y_offset) / window_size
+        )
+        try:
+            direction = (
+                "Forward"
+                if forward_matrix[query_index, reference_index] > 0
+                else "Reverse"
+            )
+        except IndexError as error:
+            raise ValueError(
+                "BEDPE coordinates fall outside direction matrices"
+            ) from error
+        annotated.append(tuple([*row, direction]))
+    return annotated
+
+
 def main():
     print(ASCII_ART)
     print(f"v{VERSION} \n")
-    args = get_parser().parse_args()
+    args = parse_args()
+    summary_writer = PlotSummaryWriter(shlex.join(sys.argv))
+    annotation_df = None
+    if args.command == "interactive" and args.bed:
+        try:
+            annotation_df = read_annotation_beds(args.bed)
+        except (OSError, ValueError) as error:
+            print(f"Error reading annotation BED file(s): {error}", file=sys.stderr)
+            sys.exit(2)
     if args.command == "static":
         _load_static_plotting()
     # -----------MUTUALLY EXCLUSIVE: INTERACTIVE OR STATIC MODE-----------
     if args.command == "interactive":
+        print(INTERACTIVE_DEPRECATION_MESSAGE, file=sys.stderr)
         print(f"Running ModDotPlot in interactive mode\n")
         # -----------LOAD MATRICES FOR INTERACTIVE MODE-----------
         if hasattr(args, "load") and args.load:
@@ -571,16 +696,16 @@ def main():
             for i in range(len(matrices)):
                 matrix_axes = []
                 for matrix in matrices[i]:
+                    x_start, x_end = interactive_axis_bounds(metadata[i], "x")
+                    y_start, y_end = interactive_axis_bounds(metadata[i], "y")
                     x_axis = [
-                        j * round(metadata[i]["x_size"] / matrix.shape[0])
-                        for j in range(matrix.shape[0])
+                        value
+                        for value in np.linspace(x_start, x_end, matrix.shape[0] + 1)
                     ]
                     y_axis = [
-                        j * round(metadata[i]["y_size"] / matrix.shape[1])
-                        for j in range(matrix.shape[1])
+                        value
+                        for value in np.linspace(y_start, y_end, matrix.shape[1] + 1)
                     ]
-                    x_axis.append(metadata[i]["x_size"])
-                    y_axis.append(metadata[i]["y_size"])
                     matrix_axes.append(x_axis)
                     matrix_axes.append(y_axis)
                 axes.append(matrix_axes)
@@ -592,6 +717,7 @@ def main():
                 args.identity,
                 args.port,
                 args.output_dir,
+                annotation_df,
             )
             sys.exit(0)
     elif args.command == "static":
@@ -633,12 +759,21 @@ def main():
                 single_val_name = []
                 double_val_name = []
                 xlim_val_grid = 0
+                loaded_window_sizes = []
+                loaded_regions = []
             for bed in args.load:
                 # If args.load is provided as input, run static mode directly from the paired-end bed file. Skip counting input k-mers.
                 df = read_df_from_file(bed)
 
                 unique_query_names = df["#query_name"].unique()
                 unique_reference_names = df["reference_name"].unique()
+                bed_window_sizes = _bedpe_window_sizes(df)
+                bed_regions = _regions_from_names(
+                    [*unique_query_names, *unique_reference_names]
+                )
+                if args.grid or args.grid_only:
+                    loaded_window_sizes.extend(bed_window_sizes)
+                    loaded_regions.extend(bed_regions)
                 assert len(unique_query_names) == len(unique_reference_names)
                 assert len(unique_reference_names) == 1
                 self_id_scores = df[df["#query_name"] == df["reference_name"]]
@@ -652,7 +787,7 @@ def main():
                     os.makedirs(args.output_dir)
                 if len(self_id_scores) > 1:
                     if not args.grid_only:
-                        create_plots(
+                        plot_files = create_plots(
                             sdf=None,
                             directory=args.output_dir if args.output_dir else ".",
                             name_x=unique_query_names[0],
@@ -674,6 +809,14 @@ def main():
                             deraster=args.deraster,
                             annotation=args.bed,
                         )
+                        summary_writer.add(
+                            args.output_dir,
+                            plot_files or [],
+                            window_sizes=bed_window_sizes,
+                            regions=bed_regions,
+                            bed_file=args.bed,
+                            bedpe_inputs=[bed],
+                        )
                     if args.grid or args.grid_only:
                         single_vals.append(df)
                         single_val_name.append(unique_query_names[0])
@@ -690,7 +833,7 @@ def main():
                 if len(pairwise_id_scores) > 1:
                     if not args.grid_only:
                         # Potentially sort
-                        create_plots(
+                        plot_files = create_plots(
                             sdf=None,
                             directory=args.output_dir if args.output_dir else ".",
                             name_x=unique_query_names[0],
@@ -712,6 +855,14 @@ def main():
                             deraster=args.deraster,
                             annotation=args.bed,
                         )
+                        summary_writer.add(
+                            args.output_dir,
+                            plot_files or [],
+                            window_sizes=bed_window_sizes,
+                            regions=bed_regions,
+                            bed_file=args.bed,
+                            bedpe_inputs=[bed],
+                        )
                     if args.grid or args.grid_only:
                         double_vals.append(df)
                         double_val_name.append(
@@ -725,7 +876,7 @@ def main():
                 print(
                     f"Creating a {len(single_val_name)}x{len(single_val_name)} grid.\n"
                 )
-                create_grid(
+                plot_files = create_grid(
                     singles=single_vals,
                     doubles=double_vals,
                     directory=args.output_dir if args.output_dir else ".",
@@ -744,6 +895,14 @@ def main():
                     deraster=args.deraster,
                     vector_format=args.vector,
                     dpi=args.dpi,
+                )
+                summary_writer.add(
+                    args.output_dir,
+                    plot_files or [],
+                    window_sizes=loaded_window_sizes,
+                    regions=loaded_regions,
+                    bed_file=args.bed,
+                    bedpe_inputs=args.load,
                 )
             sys.exit(0)
 
@@ -766,6 +925,13 @@ def main():
                 f"\nUnable to open {i}. Please check it is correctly formatted or compressed...\n"
             )
             fasta_list.remove(i)
+
+    fasta_source_by_name = {}
+    for fasta_path, headers in fasta_headers.items():
+        for header in headers:
+            parsed_header = extractRegion(header)
+            base_header = parsed_header[0] if parsed_header else header
+            fasta_source_by_name.setdefault(base_header, fasta_path)
 
     try:
         region_by_name = _parse_region_arguments(
@@ -1096,9 +1262,11 @@ def main():
         axes = []
         for matrices_set, meta in zip(matrices, metadata):
             matrix_axes = []
+            x_start, x_end = interactive_axis_bounds(meta, "x")
+            y_start, y_end = interactive_axis_bounds(meta, "y")
             for matrix in matrices_set:
-                x_axis = np.linspace(0, meta["x_size"], matrix.shape[0] + 1)
-                y_axis = np.linspace(0, meta["y_size"], matrix.shape[1] + 1)
+                x_axis = np.linspace(x_start, x_end, matrix.shape[0] + 1)
+                y_axis = np.linspace(y_start, y_end, matrix.shape[1] + 1)
                 matrix_axes.append(x_axis)
                 matrix_axes.append(y_axis)
             axes.append(matrix_axes)
@@ -1110,14 +1278,22 @@ def main():
             args.identity,
             args.port,
             args.output_dir,
+            annotation_df,
         )
 
     # -----------SETUP STATIC MODE-----------
     elif args.command == "static":
         # -----------SET SPARSITY VALUE-----------
+        direction_rendering = args.plot_direction and (
+            not args.no_plot or args.grid or args.grid_only
+        )
         if args.grid or args.grid_only:
             grid_val_singles = []
             grid_val_single_names = []
+            grid_window_sizes = []
+            if direction_rendering:
+                direction_grid_val_singles = []
+                direction_grid_val_doubles = []
         if direction_k_list is None:
             new_sequences = list(zip(seq_list, k_list))
         else:
@@ -1270,7 +1446,7 @@ def main():
                     # calculations finish.
                     del prepared_self
                 direction_self_mat = None
-                if args.plot_direction and not args.no_plot and not args.grid_only:
+                if direction_rendering:
                     direction_self_mat = createSelfMatrix(
                         seq_length,
                         alternate_sequence,
@@ -1294,9 +1470,41 @@ def main():
                     subseq_end_pos,
                     subseq_end_pos,
                 )
+                plot_bed = bed
+                if direction_rendering:
+                    if args.forward:
+                        canonical_matrix = direction_self_mat
+                        forward_matrix = self_mat
+                        canonical_bed = convertMatrixToBed(
+                            canonical_matrix,
+                            win,
+                            args.identity,
+                            seq_name,
+                            seq_name,
+                            True,
+                            seq_start_pos,
+                            seq_start_pos,
+                            subseq_end_pos,
+                            subseq_end_pos,
+                        )
+                    else:
+                        canonical_matrix = self_mat
+                        forward_matrix = direction_self_mat
+                        canonical_bed = bed
+                    plot_bed = _annotate_bed_directions(
+                        canonical_bed,
+                        canonical_matrix,
+                        forward_matrix,
+                        win,
+                        seq_start_pos,
+                        seq_start_pos,
+                    )
                 if args.grid or args.grid_only:
                     grid_val_singles.append(bed)
                     grid_val_single_names.append(seq_name)
+                    grid_window_sizes.append(win)
+                    if direction_rendering:
+                        direction_grid_val_singles.append(plot_bed)
 
                 if args.cooler:
                     try:
@@ -1341,7 +1549,7 @@ def main():
                     )
 
                 if (not args.no_plot) and (not args.grid_only):
-                    create_plots(
+                    plot_files = create_plots(
                         sdf=[bed],
                         directory=bedpe_path,
                         name_x=seq_name,
@@ -1363,29 +1571,50 @@ def main():
                         deraster=args.deraster,
                         annotation=args.bed,
                     )
-                    if args.plot_direction:
-                        if args.forward:
-                            canonical_matrix = direction_self_mat
-                            forward_matrix = self_mat
-                        else:
-                            canonical_matrix = self_mat
-                            forward_matrix = direction_self_mat
-                        create_direction_plot(
-                            canonical_matrix=canonical_matrix,
-                            forward_matrix=forward_matrix,
-                            window_size=win,
-                            directory=bedpe_path,
+                    self_region = (
+                        [f"{base_name}:{seq_range[1]}-{seq_range[2]}"]
+                        if seq_range
+                        else _regions_from_names([sequence_name])
+                    )
+                    summary_writer.add(
+                        bedpe_path,
+                        plot_files or [],
+                        fasta_files=[fasta_source_by_name[base_name]],
+                        window_sizes=[win],
+                        regions=self_region,
+                        bed_file=args.bed,
+                    )
+                    if direction_rendering:
+                        direction_directory = os.path.join(bedpe_path, "directionality")
+                        direction_files = create_plots(
+                            sdf=[plot_bed],
+                            directory=direction_directory,
                             name_x=seq_name,
                             name_y=seq_name,
-                            self_identity=True,
+                            palette=args.palette,
+                            palette_orientation=args.palette_orientation,
+                            no_hist=args.no_hist,
                             width=args.width,
                             dpi=args.dpi,
+                            is_freq=args.bin_freq,
+                            xlim=plot_axis_bounds,
+                            custom_colors=args.colors,
+                            custom_breakpoints=args.breakpoints,
+                            from_file=None,
+                            is_pairwise=False,
+                            axes_labels=args.axes_ticks,
+                            axes_tick_number=args.axes_number,
                             vector_format=args.vector,
                             deraster=args.deraster,
-                            xlim=plot_axis_bounds,
-                            axes_labels=args.axes_ticks,
-                            x_offset=seq_start_pos,
-                            y_offset=seq_start_pos,
+                            annotation=None,
+                        )
+                        summary_writer.add(
+                            direction_directory,
+                            direction_files or [],
+                            fasta_files=[fasta_source_by_name[base_name]],
+                            window_sizes=[win],
+                            regions=self_region,
+                            bed_file=args.bed,
                         )
 
         # -----------COMPUTE COMPARATIVE PLOTS-----------
@@ -1585,7 +1814,7 @@ def main():
                         # evicts or clears them.
                         del prepared_smaller, prepared_larger
                     direction_pair_mat = None
-                    if args.plot_direction and not args.no_plot and not args.grid_only:
+                    if direction_rendering:
                         direction_pair_mat = createPairwiseMatrix(
                             smaller_length,
                             larger_length,
@@ -1660,11 +1889,43 @@ def main():
                             larger_seq_end_pos,
                             smaller_seq_end_pos,
                         )
+                        plot_bed = bed
+                        if direction_rendering:
+                            if args.forward:
+                                canonical_matrix = direction_pair_mat
+                                forward_matrix = pair_mat
+                                canonical_bed = convertMatrixToBed(
+                                    canonical_matrix,
+                                    win,
+                                    args.identity,
+                                    larger_seq_name,
+                                    smaller_seq_name,
+                                    False,
+                                    larger_seq_start_pos,
+                                    smaller_seq_start_pos,
+                                    larger_seq_end_pos,
+                                    smaller_seq_end_pos,
+                                )
+                            else:
+                                canonical_matrix = pair_mat
+                                forward_matrix = direction_pair_mat
+                                canonical_bed = bed
+                            plot_bed = _annotate_bed_directions(
+                                canonical_bed,
+                                canonical_matrix,
+                                forward_matrix,
+                                win,
+                                larger_seq_start_pos,
+                                smaller_seq_start_pos,
+                            )
                         if args.grid or args.grid_only:
                             grid_val_doubles.append(bed)
                             grid_val_double_names.append(
                                 [larger_seq_name, smaller_seq_name]
                             )
+                            grid_window_sizes.append(win)
+                            if direction_rendering:
+                                direction_grid_val_doubles.append(plot_bed)
                         bedfile_prefix = larger_seq_name + "_" + smaller_seq_name
                         bedpe_path = os.path.join(
                             args.output_dir or ".", bedfile_prefix
@@ -1687,7 +1948,7 @@ def main():
                             )
 
                         if (not args.no_plot) and (not args.grid_only):
-                            create_plots(
+                            plot_files = create_plots(
                                 sdf=[bed],
                                 directory=bedpe_path,
                                 name_x=larger_seq_name,
@@ -1709,29 +1970,70 @@ def main():
                                 deraster=args.deraster,
                                 annotation=args.bed,
                             )
-                            if args.plot_direction:
-                                if args.forward:
-                                    canonical_matrix = direction_pair_mat
-                                    forward_matrix = pair_mat
-                                else:
-                                    canonical_matrix = pair_mat
-                                    forward_matrix = direction_pair_mat
-                                create_direction_plot(
-                                    canonical_matrix=canonical_matrix,
-                                    forward_matrix=forward_matrix,
-                                    window_size=win,
-                                    directory=bedpe_path,
+                            pair_regions = []
+                            if larger_seq_range:
+                                pair_regions.append(
+                                    f"{larger_base_name}:{larger_seq_range[1]}-"
+                                    f"{larger_seq_range[2]}"
+                                )
+                            else:
+                                pair_regions.extend(
+                                    _regions_from_names([larger_sequence_name])
+                                )
+                            if smaller_seq_range:
+                                pair_regions.append(
+                                    f"{smaller_base_name}:{smaller_seq_range[1]}-"
+                                    f"{smaller_seq_range[2]}"
+                                )
+                            else:
+                                pair_regions.extend(
+                                    _regions_from_names([smaller_sequence_name])
+                                )
+                            pair_fasta_files = [
+                                fasta_source_by_name[name]
+                                for name in (larger_base_name, smaller_base_name)
+                            ]
+                            summary_writer.add(
+                                bedpe_path,
+                                plot_files or [],
+                                fasta_files=pair_fasta_files,
+                                window_sizes=[win],
+                                regions=pair_regions,
+                                bed_file=args.bed,
+                            )
+                            if direction_rendering:
+                                direction_directory = os.path.join(
+                                    bedpe_path, "directionality"
+                                )
+                                direction_files = create_plots(
+                                    sdf=[plot_bed],
+                                    directory=direction_directory,
                                     name_x=larger_seq_name,
                                     name_y=smaller_seq_name,
-                                    self_identity=False,
+                                    palette=args.palette,
+                                    palette_orientation=args.palette_orientation,
+                                    no_hist=args.no_hist,
                                     width=args.width,
                                     dpi=args.dpi,
+                                    is_freq=args.bin_freq,
+                                    xlim=pair_axis_bounds,
+                                    custom_colors=args.colors,
+                                    custom_breakpoints=args.breakpoints,
+                                    from_file=None,
+                                    is_pairwise=True,
+                                    axes_labels=args.axes_ticks,
+                                    axes_tick_number=args.axes_number,
                                     vector_format=args.vector,
                                     deraster=args.deraster,
-                                    xlim=pair_axis_bounds,
-                                    axes_labels=args.axes_ticks,
-                                    x_offset=larger_seq_start_pos,
-                                    y_offset=smaller_seq_start_pos,
+                                    annotation=None,
+                                )
+                                summary_writer.add(
+                                    direction_directory,
+                                    direction_files or [],
+                                    fasta_files=pair_fasta_files,
+                                    window_sizes=[win],
+                                    regions=pair_regions,
+                                    bed_file=args.bed,
                                 )
 
             if sketch_cache is not None:
@@ -1741,7 +2043,7 @@ def main():
                 if args.axes_limits:
                     xlim_val_grid = args.axes_limits
                 print(f"Creating a {len(sequences)}x{len(sequences)} grid.\n")
-                create_grid(
+                plot_files = create_grid(
                     singles=grid_val_singles,
                     doubles=grid_val_doubles,
                     directory=args.output_dir if args.output_dir else ".",
@@ -1761,6 +2063,54 @@ def main():
                     vector_format=args.vector,
                     dpi=args.dpi,
                 )
+                grid_directory = args.output_dir if args.output_dir else "."
+                grid_regions = [
+                    f"{name}:{region[1]}-{region[2]}"
+                    for name, region in region_by_name.items()
+                ]
+                for embedded_region in _regions_from_names(
+                    [sequence[0] for sequence in sequences]
+                ):
+                    if embedded_region not in grid_regions:
+                        grid_regions.append(embedded_region)
+                summary_writer.add(
+                    grid_directory,
+                    plot_files or [],
+                    fasta_files=fasta_list,
+                    window_sizes=grid_window_sizes,
+                    regions=grid_regions,
+                    bed_file=args.bed,
+                )
+                if direction_rendering:
+                    direction_directory = os.path.join(grid_directory, "directionality")
+                    direction_files = create_grid(
+                        singles=direction_grid_val_singles,
+                        doubles=direction_grid_val_doubles,
+                        directory=direction_directory,
+                        palette=args.palette,
+                        palette_orientation=args.palette_orientation,
+                        single_names=grid_val_single_names,
+                        double_names=grid_val_double_names,
+                        is_freq=args.bin_freq,
+                        xlim=xlim_val_grid,
+                        custom_colors=args.colors,
+                        custom_breakpoints=args.breakpoints,
+                        axes_label=args.axes_ticks,
+                        is_bed=False,
+                        width=args.width,
+                        breaks=args.axes_ticks,
+                        deraster=args.deraster,
+                        vector_format=args.vector,
+                        dpi=args.dpi,
+                    )
+                    summary_writer.add(
+                        direction_directory,
+                        direction_files or [],
+                        fasta_files=fasta_list,
+                        window_sizes=grid_window_sizes,
+                        regions=grid_regions,
+                        bed_file=args.bed,
+                    )
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.collections import PolyCollection
 from matplotlib.figure import Figure
+from matplotlib.text import Text
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
@@ -22,6 +23,56 @@ import pandas as pd
 
 ColorSource = Union[Sequence[str], Mapping[object, str]]
 TickFormatter = Callable[[float, int], str]
+
+DEFAULT_FONT_FAMILY = "Helvetica"
+FALLBACK_FONT_FAMILY = "DejaVu Sans"
+MIN_TEXT_SIZE = 8.0
+MIN_TITLE_SIZE = 10.0
+
+
+def clamped_font_size(
+    width: float,
+    multiplier: float,
+    minimum: float = MIN_TEXT_SIZE,
+    maximum: Optional[float] = None,
+) -> float:
+    """Scale a font with figure width without allowing unreadable sizes."""
+
+    size = float(width) * float(multiplier)
+    if not np.isfinite(size):
+        raise ValueError("Calculated font size must be finite")
+    size = max(float(minimum), size)
+    if maximum is not None:
+        size = min(float(maximum), size)
+    return size
+
+
+def set_figure_font_family(figure: Figure, family: str) -> None:
+    """Set every existing text artist in a figure to one font family."""
+
+    for artist in figure.findobj(match=Text):
+        artist.set_fontfamily(family)
+
+
+def is_glyph_loading_error(error: BaseException) -> bool:
+    """Return whether Matplotlib failed while loading a font glyph."""
+
+    return (
+        isinstance(error, RuntimeError) and "failed to load glyph" in str(error).lower()
+    )
+
+
+def save_with_font_fallback(figure: Figure, save: Callable[[], None]) -> None:
+    """Save with Helvetica, retrying the complete operation with DejaVu Sans."""
+
+    set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
+    try:
+        save()
+    except RuntimeError as error:
+        if not is_glyph_loading_error(error):
+            raise
+        set_figure_font_family(figure, FALLBACK_FONT_FAMILY)
+        save()
 
 
 @dataclass(frozen=True)
@@ -351,8 +402,12 @@ def save_figure_pair(
         "transparent": transparent,
         "bbox_inches": bbox_inches,
     }
-    figure.savefig(png_path, format="png", **save_options)
-    figure.savefig(vector_path, format=vector_format, **save_options)
+
+    def save_outputs() -> None:
+        figure.savefig(png_path, format="png", **save_options)
+        figure.savefig(vector_path, format=vector_format, **save_options)
+
+    save_with_font_fallback(figure, save_outputs)
     return png_path, vector_path
 
 

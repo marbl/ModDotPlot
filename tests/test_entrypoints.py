@@ -44,11 +44,19 @@ def test_module_help_is_available():
     result = _run_module("--help")
 
     assert result.returncode == 0
-    assert "{interactive,static}" in result.stdout
+    assert "{static,interactive}" in result.stdout
+    assert "static is used when omitted" in result.stdout
+    assert "Static mode commands (default)" in result.stdout
+    assert "Interactive mode commands (deprecated; explicit use" in result.stdout
+    assert "only)" in result.stdout
 
 
-def test_module_without_subcommand_has_clean_usage_error():
+def test_module_without_arguments_defaults_to_static_parser():
     result = _run_module()
 
     assert result.returncode == 2
-    assert "the following arguments are required: command" in result.stderr
+    assert "static:" in result.stderr
+    assert "one of the arguments -c/--config -l/--load -f/--fasta is required" in (
+        result.stderr
+    )
+    assert "the following arguments are required: command" not in result.stderr

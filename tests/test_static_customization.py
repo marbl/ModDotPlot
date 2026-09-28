@@ -1,6 +1,8 @@
 import pandas as pd
 import pytest
+from matplotlib.colors import to_rgba
 
+from moddotplot.const import DIRECTION_COLORS
 from moddotplot.static_plots import (
     display_sequence_name,
     generate_breaks,
@@ -80,6 +82,52 @@ def test_make_dot_uses_custom_color_scale():
 
     fill_scale = plot.scales.get_scales("fill")
     assert fill_scale.palette(len(custom_colors)) == custom_colors
+
+
+def test_make_dot_uses_direction_colors_when_orientation_is_present():
+    plot_data = pd.DataFrame(
+        {
+            "q": ["query"] * 4,
+            "q_st": [0, 10, 20, 30],
+            "q_en": [10, 20, 30, 40],
+            "r": ["reference"] * 4,
+            "r_st": [0, 10, 20, 30],
+            "r_en": [10, 20, 30, 40],
+            "discrete": pd.Categorical([0, 1, 0, 1], categories=[0, 1]),
+            "direction": ["Forward", "Forward", "Reverse", "Reverse"],
+        }
+    )
+
+    plot = make_dot(
+        sdf=plot_data,
+        name_x="query",
+        name_y="reference",
+        palette="Spectral_11",
+        palette_orientation="+",
+        colors=["#000000", "#ffffff"],
+        breaks=[0, 10, 20, 30, 40],
+        num_ticks=3,
+        xlim=40,
+        deraster=True,
+        width=4,
+        is_pairwise=True,
+    )
+
+    figure = plot.draw(show=False)
+    try:
+        rendered = {
+            tuple(color)
+            for collection in figure.axes[0].collections
+            for color in collection.get_facecolors()
+        }
+        assert to_rgba(DIRECTION_COLORS["Forward"]) in rendered
+        assert to_rgba(DIRECTION_COLORS["Reverse"]) in rendered
+        assert len(rendered) == 4
+        assert to_rgba("#000000") not in rendered
+    finally:
+        import matplotlib.pyplot as plt
+
+        plt.close(figure)
 
 
 def test_make_dot_honors_exact_region_bounds():

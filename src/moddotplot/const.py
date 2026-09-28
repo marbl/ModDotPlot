@@ -1,4 +1,5 @@
 VERSION = "1.0.0"
+DIRECTION_COLORS = {"Forward": "#2166AC", "Reverse": "#D01C8B"}
 COLS = [
     "#query_name",
     "query_start",

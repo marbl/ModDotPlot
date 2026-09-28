@@ -51,7 +51,7 @@ If you're interested in learning more about _ModDotPlot_ and how to visualize ta
 
 ## Installation
 
-_ModDotPlot_ can be installed by running `pip install moddotplot`. Version 1.0.0 supports Python 3.8 through 3.12; Python 3.13 and newer are not supported by the pinned plotting stack. Alternatively, you can download the current release from GitHub by using:
+_ModDotPlot_ can be installed by running `pip install moddotplot`. Version 1.0.0 supports Python 3.11 through 3.14 and uses the current Matplotlib 3.11 and Plotnine 0.15 release lines. Alternatively, you can download the current release from GitHub by using:
 
 ```
 git clone https://github.com/marbl/ModDotPlot.git
@@ -82,14 +82,14 @@ Finally, confirm that the installation was installed correctly and that your ver
 
  v1.0.0
 
-usage: moddotplot [-h] {interactive,static} ...
+usage: moddotplot [-h] [{static,interactive}] ...
 
 ModDotPlot: Visualization of Tandem Repeats
 
 positional arguments:
-  {interactive,static}  Choose mode: interactive or static
-    interactive         Interactive mode commands
-    static              Static mode commands
+  {static,interactive}  Choose mode; static is used when omitted
+    static              Static mode commands (default)
+    interactive         Interactive mode commands (deprecated; explicit use only)
 
 options:
   -h, --help            show this help message and exit
@@ -101,7 +101,13 @@ Note that running `moddotplot -h` might take a while at first! This is because t
 
 ## Usage
 
-_ModDotPlot_ must be run either in `static` mode, or `interactive` mode:
+_ModDotPlot_ runs in `static` mode by default. The `static` subcommand remains
+available for compatibility and clarity, so these forms are equivalent:
+
+```
+moddotplot -f sequence.fa <ARGS>
+moddotplot static -f sequence.fa <ARGS>
+```
 
 ### Static Mode
 
@@ -117,7 +123,9 @@ Running _ModDotPlot_ in static mode quickly create plots under the specified out
 
 ![](images/moddotplot_output.png)
 
-Plots and histograms are output as both rasterized `.png` images and vector graphics (default: `.svg`). [Plotnine](https://plotnine.readthedocs.io/en/v0.12.4/) provides the primary plotting interface, while Matplotlib directly renders triangle plots, annotation layouts, multi-sequence grids, and each requested output format.
+Plots and histograms are output as both rasterized `.png` images and vector graphics (default: `.svg`). [Plotnine](https://plotnine.org/) provides the primary plotting interface, while Matplotlib directly renders triangle plots, annotation layouts, multi-sequence grids, and each requested output format. Grid axes state their genomic unit (Kbp, Mbp, or Gbp). Plot text uses Helvetica by default with an automatic DejaVu Sans fallback if Helvetica cannot render a glyph.
+
+Every directory containing generated static plots also receives a `plot_summary.txt` reproducibility record. It lists the creation time, absolute plot and input paths, window size, any selected region or annotation BED file, and the exact command used for the run.
 
 _ModDotPlot_ supports highly customizable plotting features in static mode. See [static mode commands](#static-mode-commands) for a complete list of features.
 
@@ -127,6 +135,10 @@ _ModDotPlot_ supports highly customizable plotting features in static mode. See 
 ```
 moddotplot interactive <ARGS>
 ```
+
+Interactive mode is deprecated and maintenance-only. It remains available, but
+will not receive new features. It runs only when the `interactive` subcommand is
+explicitly provided.
 
 Running _ModDotPlot_ in interactive mode will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot (this should happen automatically, but depending on your environment you might need to copy and paste this URL into your web browser). Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info, and [Sample run - Port Forwarding](#sample-run---port-forwarding) for tips on running interactive mode on an HPC environment).
 
@@ -140,9 +152,9 @@ The following arguments are the same in both interactive and static mode:
 
 Fasta files to input. Multifasta files are accepted. Interactive mode will only support a maximum of two sequences at a time.
 
-`-b / --bed <.bed file>`
+`-b / --bed <.bed file(s)>`
 
-Input bedfile used for dotplot annotation (note: this is not the same as the paired-end bed file produced by ModDotPlot). If selected, this will produce an annotated bedtrack image `_ANNOTATION_TRACK` as PNG and in the selected vector format in static mode, and open an IGV js track in the interactive mode Dash application. The name in the bedfile must match the name of the fasta sequence header in order to produce a correct bed track.
+Input BED3-BED9 annotation file used for dotplot annotation (this is not the paired-end BEDPE file produced by ModDotPlot). The BED chromosome field must match a FASTA header, excluding any trailing `:start-end` region suffix. Static mode accepts one BED file and produces an annotation track plus annotated triangle output. Interactive mode accepts one or more BED files, combines their matching intervals, and displays a collapsed track beneath the x axis. Comparative interactive plots also display a track beside the y axis when that sequence has matching annotations. BED `itemRgb` colors are used when present.
 
 `-k / --kmer <int>`
 
@@ -258,7 +270,7 @@ List of custom colors in hexcode format can be entered sequentially, mapped from
 
 `--plot-direction <bool>`
 
-With FASTA input, additionally create strand-direction plots. Canonical matches that are also present in a forward-only sketch are blue; canonical-only matches, representing reverse orientation, are pink. This option reads each input in both canonical and forward-only modes and cannot be reconstructed from a loaded BEDPE file.
+With FASTA input, retain the standard ANI-colored plots and additionally create a `directionality` subfolder. Direction plots use blue for same-orientation matches and pink for reverse-orientation matches, with darker shades representing stronger ANI. Self-comparisons are named `_DIRECTION_FULL`, `_DIRECTION_TRI`, and `_DIRECTION_HIST`; a requested grid is named `_DIRECTION_GRID`. This option reads each input in both canonical and forward-only modes and cannot be reconstructed from a loaded BEDPE file.
 
 `--grid <bool>`
 
@@ -391,6 +403,20 @@ moddotplot static -f sequences/*_MATERNAL*.fa --compare-only
 
 ### Interactive Mode Commands
 
+`-b / --bed <.bed file> [<.bed file> ...]`
+
+Add one or more BED3-BED9 annotation files. A self-identity plot shows the
+matching track beneath its x axis. A comparative plot shows independent x- and
+y-axis tracks when BED chromosome names match both FASTA headers. A FASTA
+header such as `chr14_MATERNAL:1-4000000` matches BED chromosome
+`chr14_MATERNAL`, and the interactive axes retain those genomic coordinates.
+For example:
+
+```
+moddotplot interactive -f sample1.fa sample2.fa --compare \
+    --bed sample1.bed sample2.bed
+```
+
 `--port <int>`
 
 Port to display ModDotPlot on. Default is 8050, this can be changed to any accepted port. 
@@ -490,7 +516,5 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 ## Known Issues
 
 - Mac users might encounter the following unexpected command line output: `/bin/sh: lscpu: command not found`. This is a known issue with Plotnine, the Python plotting library used by ModDotPlot. This can be safely ignored.
-
-- If you encounter an error with the following traceback: `rv = reductor(4) TypeError: cannot pickle 'generator' object`, ths means that you have a newer version of Plotnine that is incompatible with ModDotPlot. Please uninstall plotnine and reinstall version 0.12.4 `pip install plotnine==0.12.4`. 
 
 - The error ` UserWarning: h5py is running against HDF5 1.xx.x when it was built against 1.xx.x, this may cause problems` is due to the h5py library used by cooler having conflicting versions in the dependency tree. This can also be safely ignored, but if you want to remove this message run `pip uninstall -y h5py` `pip install --no-binary=h5py h5py`
