@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from moddotplot import _nthash
 import moddotplot.estimate_identity as estimate_identity
 from moddotplot.estimate_identity import (
     _sketch_intersection_counts,
@@ -110,6 +111,113 @@ def test_sparse_counts_use_wide_accumulator():
 
     assert counts.dtype == np.int32
     assert counts[0, 0] == 300
+
+
+def test_native_sorted_uint64_intersections_match_scalar_reference(monkeypatch):
+    rng = np.random.default_rng(616)
+    sketches_a = [
+        np.sort(
+            rng.choice(5_000, size=int(rng.integers(0, 250)), replace=False)
+        ).astype(np.uint64)
+        for _ in range(17)
+    ]
+    sketches_b = [
+        np.sort(
+            rng.choice(5_000, size=int(rng.integers(0, 250)), replace=False)
+        ).astype(np.uint64)
+        for _ in range(13)
+    ]
+    expected = np.asarray(
+        [
+            [len(set(left.tolist()) & set(right.tolist())) for right in sketches_b]
+            for left in sketches_a
+        ],
+        dtype=np.int32,
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("the CSR compatibility path was used")
+
+    monkeypatch.setattr(estimate_identity, "csr_matrix", fail_if_called)
+
+    actual = _sketch_intersection_counts(sketches_a, sketches_b)
+
+    np.testing.assert_array_equal(actual, expected)
+    assert actual.dtype == np.int32
+
+
+def test_native_intersection_merge_handles_hash_shared_by_every_window():
+    shared = np.uint64(2**63 + 17)
+    sketches_a = [np.array([index, shared], dtype=np.uint64) for index in range(20)]
+    sketches_b = [
+        np.array([index + 100, shared], dtype=np.uint64) for index in range(30)
+    ]
+    # Keep the production precondition explicit: arrays are sorted and unique.
+    sketches_a = [np.sort(sketch) for sketch in sketches_a]
+    sketches_b = [np.sort(sketch) for sketch in sketches_b]
+
+    np.testing.assert_array_equal(
+        _sketch_intersection_counts(sketches_a, sketches_b),
+        np.ones((20, 30), dtype=np.int32),
+    )
+
+
+def test_native_intersection_retains_ephemeral_sequence_items():
+    released = []
+
+    class TrackedBytes(bytes):
+        def __new__(cls, payload):
+            instance = super().__new__(cls, payload)
+            instance.release_events = released
+            return instance
+
+        def __del__(self):
+            self.release_events.append(True)
+
+    class EphemeralSketches:
+        def __init__(self, sketches):
+            self.sketches = sketches
+
+        def __len__(self):
+            return len(self.sketches)
+
+        def __getitem__(self, index):
+            # A sequence implementation is allowed to return a newly-created
+            # object for each item. No item may be released while the native
+            # function is still materializing or reading the sequence.
+            assert not released
+            return TrackedBytes(self.sketches[index])
+
+    left = EphemeralSketches(
+        [
+            np.array([1, 3], dtype=np.uint64).tobytes(),
+            np.array([2, 3], dtype=np.uint64).tobytes(),
+        ]
+    )
+    right = EphemeralSketches(
+        [
+            np.array([3, 4], dtype=np.uint64).tobytes(),
+            np.array([1, 2], dtype=np.uint64).tobytes(),
+        ]
+    )
+
+    packed = _nthash.intersection_counts(left, right)
+
+    np.testing.assert_array_equal(
+        np.frombuffer(packed, dtype=np.int32).reshape(2, 2),
+        np.array([[1, 1], [1, 1]], dtype=np.int32),
+    )
+    assert len(released) == 4
+
+
+def test_unsorted_uint64_arrays_retain_compatibility_path():
+    sketches_a = [np.array([9, 1, 5], dtype=np.uint64)]
+    sketches_b = [np.array([5, 2, 9], dtype=np.uint64)]
+
+    np.testing.assert_array_equal(
+        _sketch_intersection_counts(sketches_a, sketches_b),
+        np.array([[2]], dtype=np.int32),
+    )
 
 
 def test_matrix_path_does_not_fall_back_to_per_cell_set_intersections(monkeypatch):

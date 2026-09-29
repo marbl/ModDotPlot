@@ -17,6 +17,7 @@ from matplotlib.collections import PolyCollection
 from matplotlib.figure import Figure
 from matplotlib.text import Text
 from matplotlib.ticker import FuncFormatter
+from matplotlib.transforms import Bbox
 import numpy as np
 import pandas as pd
 
@@ -108,7 +109,7 @@ def tile_width(dataframe: pd.DataFrame) -> float:
 
 def rectangular_tile_vertices(
     dataframe: pd.DataFrame, *, transpose: bool = False
-) -> Sequence[np.ndarray]:
+) -> np.ndarray:
     """Build one square polygon per sparse input row.
 
     The squares are centered on the start columns and all use the maximum query
@@ -119,7 +120,7 @@ def rectangular_tile_vertices(
 
     _require_columns(dataframe, ("q_st", "q_en", "r_st"))
     if dataframe.empty:
-        return []
+        return np.empty((0, 4, 2), dtype=float)
 
     window = tile_width(dataframe)
     half_window = window / 2.0
@@ -130,18 +131,16 @@ def rectangular_tile_vertices(
     if transpose:
         query, reference = reference, query
 
-    return [
-        np.asarray(
-            [
-                (q - half_window, r - half_window),
-                (q + half_window, r - half_window),
-                (q + half_window, r + half_window),
-                (q - half_window, r + half_window),
-            ],
-            dtype=float,
-        )
-        for q, r in zip(query, reference)
-    ]
+    vertices = np.empty((query.size, 4, 2), dtype=float)
+    vertices[:, 0, 0] = query - half_window
+    vertices[:, 0, 1] = reference - half_window
+    vertices[:, 1, 0] = query + half_window
+    vertices[:, 1, 1] = reference - half_window
+    vertices[:, 2, 0] = query + half_window
+    vertices[:, 2, 1] = reference + half_window
+    vertices[:, 3, 0] = query - half_window
+    vertices[:, 3, 1] = reference + half_window
+    return vertices
 
 
 def transform_triangle_points(points: np.ndarray) -> np.ndarray:
@@ -380,7 +379,7 @@ def save_figure_pair(
     dpi: int,
     *,
     transparent: bool = False,
-    bbox_inches: Optional[str] = "tight",
+    bbox_inches: Optional[Union[str, Bbox]] = "tight",
 ) -> Tuple[Path, Path]:
     """Save one figure directly as PNG and SVG, PDF, or PostScript."""
 

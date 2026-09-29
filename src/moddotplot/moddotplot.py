@@ -3,6 +3,8 @@ import sys
 from moddotplot.parse_fasta import (
     HASH_ALGORITHM,
     readKmersFromFile,
+    iter_fasta_records,
+    supports_indexed_fasta_access,
     getInputHeaders,
     isValidFasta,
     extractFiles,
@@ -13,12 +15,16 @@ from moddotplot.estimate_identity import (
     convertToModimizers,
     selfContainmentMatrix,
     pairwiseContainmentMatrix,
+    BEDPE_HEADER,
     convertMatrixToBed,
+    convertMatrixToBedDataFrame,
+    iterMatrixToBedChunks,
     convertMatrixToCool,
     createSelfMatrix,
     createPairwiseMatrix,
     create_self_matrix_from_sketches,
     create_pairwise_matrix_from_sketches,
+    prepare_sequence_sketches,
     ModimizerSketchCache,
     partitionOverlaps,
 )
@@ -27,11 +33,15 @@ from moddotplot.annotations import read_annotation_beds
 from moddotplot.const import ASCII_ART, VERSION
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from dataclasses import dataclass
+from itertools import islice
 import math
 import json
 import numpy as np
 import pickle
 import os
+import multiprocessing
 import shlex
 
 from moddotplot.plot_summary import PlotSummaryWriter
@@ -253,6 +263,17 @@ def get_parser():
         nargs="+",
     )
 
+    static_parser.add_argument(
+        "-s",
+        "--sequence",
+        default=None,
+        nargs="+",
+        help=(
+            "Analyze only these FASTA sequence identifiers. Exact matches are "
+            "preferred; an unambiguous case-insensitive match is also accepted."
+        ),
+    )
+
     # Add a mutually exclusive group for compare and compare only.
     static_compare_group = static_parser.add_mutually_exclusive_group(required=False)
     static_window_size_group = static_parser.add_mutually_exclusive_group(
@@ -352,6 +373,19 @@ def get_parser():
 
     static_parser.add_argument(
         "--no-hist", action="store_true", help="Skip output of histogram color legend."
+    )
+
+    static_parser.add_argument(
+        "--processes",
+        default=None,
+        type=int,
+        choices=range(1, 5),
+        metavar="N",
+        help=(
+            "Number of independent chromosome workers (1-4). The default "
+            "automatically uses up to four workers for indexed multi-record "
+            "FASTA input."
+        ),
     )
 
     static_parser.add_argument(
@@ -499,6 +533,7 @@ def _apply_static_config(args, config):
     args.modimizer = config.get("modimizer", args.modimizer)
     args.resolution = config.get("resolution", args.resolution)
     args.window = config.get("window", args.window)
+    args.sequence = config.get("sequence", args.sequence)
     args.region = config.get("region", args.region)
     args.identity = config.get("identity", args.identity)
     args.delta = config.get("delta", args.delta)
@@ -511,6 +546,7 @@ def _apply_static_config(args, config):
     args.no_bedpe = config.get("no_bedpe", args.no_bedpe)
     args.no_plot = config.get("no_plot", args.no_plot)
     args.no_hist = config.get("no_hist", args.no_hist)
+    args.processes = config.get("processes", args.processes)
     args.width = config.get("width", args.width)
     args.axes_limits = config.get("axes_limits", args.axes_limits)
     args.dpi = config.get("dpi", args.dpi)
@@ -532,6 +568,68 @@ def _apply_static_config(args, config):
     args.deraster = config.get("deraster", args.deraster)
 
     return args
+
+
+def _select_fasta_headers(fasta_headers, requested_sequences):
+    """Filter FASTA headers using exact-first, case-insensitive selectors.
+
+    The returned names retain their spelling and source order from the FASTA
+    inputs so downstream plot labels and ``--compare-order sequential`` remain
+    stable. A case-insensitive fallback makes common selectors such as ``chr1``
+    work with records named ``Chr1`` while still rejecting ambiguous matches.
+    """
+
+    if not requested_sequences:
+        return (
+            {path: list(headers) for path, headers in fasta_headers.items()},
+            [header for headers in fasta_headers.values() for header in headers],
+        )
+    if isinstance(requested_sequences, str):
+        requested_sequences = [requested_sequences]
+
+    exact_matches = {}
+    folded_matches = {}
+    for path, headers in fasta_headers.items():
+        for header in headers:
+            record = (path, header)
+            exact_matches.setdefault(header, []).append(record)
+            folded_matches.setdefault(header.casefold(), []).append(record)
+
+    selected_records = set()
+    for selector in requested_sequences:
+        if not isinstance(selector, str) or not selector:
+            raise ValueError("sequence identifiers must be non-empty strings")
+        matches = exact_matches.get(selector)
+        if matches is None:
+            matches = folded_matches.get(selector.casefold(), [])
+        if not matches:
+            raise ValueError(
+                f"sequence {selector!r} does not match any FASTA identifier"
+            )
+        if len(matches) > 1:
+            formatted = ", ".join(
+                f"{header!r} in {os.fspath(path)!r}" for path, header in matches
+            )
+            raise ValueError(
+                f"sequence {selector!r} is ambiguous; it matches {formatted}"
+            )
+
+        record = matches[0]
+        if record in selected_records:
+            raise ValueError(
+                f"sequence {selector!r} selects FASTA identifier {record[1]!r}, "
+                "which was already requested"
+            )
+        selected_records.add(record)
+
+    selected_headers = {}
+    selected_names = []
+    for path, headers in fasta_headers.items():
+        retained = [header for header in headers if (path, header) in selected_records]
+        if retained:
+            selected_headers[path] = retained
+            selected_names.extend(retained)
+    return selected_headers, selected_names
 
 
 def _parse_region_arguments(region_arguments, sequence_names):
@@ -666,6 +764,496 @@ def _annotate_bed_directions(
     return annotated
 
 
+@dataclass(frozen=True)
+class MatrixConfig:
+    """Effective per-sequence parameters for one identity matrix."""
+
+    window_size: int
+    resolution: int
+    modimizer: int
+    sparsity: int
+    expectation: int
+
+
+def _matrix_config_for_length(kmer_count, args):
+    """Resolve matrix parameters without mutating the parsed CLI arguments.
+
+    Automatic windows are never shorter than a k-mer.  A requested resolution
+    that would create smaller windows is reduced to the highest meaningful
+    resolution for that sequence instead.  This matters for chrM at the default
+    resolution, where 17-base windows cannot contain a 21-mer.
+    """
+
+    kmer_count = int(kmer_count)
+    if kmer_count <= 0:
+        raise ValueError("sequence must contain at least one k-mer")
+
+    if args.window is not None:
+        window_size = int(args.window)
+        if window_size <= 0:
+            raise ValueError("window size must be greater than zero")
+        resolution = math.ceil(kmer_count / window_size)
+    else:
+        requested_resolution = int(args.resolution)
+        if requested_resolution <= 0:
+            raise ValueError("resolution must be greater than zero")
+        window_size = max(
+            int(args.kmer), math.ceil(kmer_count / requested_resolution)
+        )
+        resolution = math.ceil(kmer_count / window_size)
+
+    if window_size < 10:
+        raise ValueError("window size must be at least 10 bases")
+
+    requested_modimizer = int(args.modimizer)
+    if requested_modimizer <= 0:
+        raise ValueError("modimizer sketch size must be greater than zero")
+    effective_modimizer = min(requested_modimizer, window_size)
+    sparsity_ratio = max(1, round(window_size / effective_modimizer))
+    if sparsity_ratio <= effective_modimizer:
+        sparsity = 2 ** int(math.log2(sparsity_ratio))
+    else:
+        sparsity = 2 ** (int(math.log2(sparsity_ratio - 1)) + 1)
+    expectation = round(window_size / sparsity)
+    return MatrixConfig(
+        window_size=window_size,
+        resolution=resolution,
+        modimizer=effective_modimizer,
+        sparsity=sparsity,
+        expectation=expectation,
+    )
+
+
+def _write_bedpe(path, rows):
+    """Write generic BEDPE rows in bounded batches."""
+
+    row_iterator = iter(rows)
+    with open(path, "w") as bedfile:
+        while batch := list(islice(row_iterator, 8192)):
+            bedfile.writelines(
+                "\t".join(map(str, row)) + "\n" for row in batch
+            )
+
+
+def _write_matrix_bedpe(path, chunks):
+    """Stream columnar BEDPE chunks without building Python row tuples."""
+
+    with open(path, "w") as bedfile:
+        bedfile.write("\t".join(BEDPE_HEADER) + "\n")
+        for frame in chunks:
+            bedfile.writelines(
+                "\t".join(map(str, row)) + "\n"
+                for row in frame.itertuples(index=False, name=None)
+            )
+
+
+def _annotate_bed_direction_frame(
+    frame,
+    forward_matrix,
+    window_size,
+    x_offset,
+    y_offset,
+):
+    """Add orientation labels to a columnar BEDPE dataframe."""
+
+    annotated = frame.copy()
+    if annotated.empty:
+        annotated["direction"] = np.asarray([], dtype=object)
+        return annotated
+    query_indices = np.rint(
+        (annotated["query_start"].to_numpy() - x_offset) / window_size
+    ).astype(np.intp)
+    reference_indices = np.rint(
+        (annotated["reference_start"].to_numpy() - y_offset) / window_size
+    ).astype(np.intp)
+    try:
+        values = np.asarray(forward_matrix)[query_indices, reference_indices]
+    except IndexError as error:
+        raise ValueError(
+            "BEDPE coordinates fall outside direction matrices"
+        ) from error
+    annotated["direction"] = np.where(values > 0, "Forward", "Reverse")
+    return annotated
+
+
+def _streaming_process_count(args, record_count, indexed_access):
+    """Resolve a safe worker count for independent chromosome plots."""
+
+    requested = _validated_process_count(getattr(args, "processes", None))
+
+    if record_count < 2 or not indexed_access:
+        return 1
+    available_cpus = max(1, os.cpu_count() or 1)
+    # Plotting temporarily retains Matplotlib figures and encoded raster
+    # buffers in addition to a chromosome's sketches. Two automatic rendering
+    # workers keep aggregate RSS below the former all-chromosome pipeline on
+    # typical hosts; compute-only runs can safely use all four. Users may
+    # explicitly request up to four when throughput is the priority.
+    automatic_limit = 4 if getattr(args, "no_plot", False) else 2
+    automatic = min(automatic_limit, available_cpus, record_count)
+    return min(requested, record_count) if requested is not None else automatic
+
+
+def _validated_process_count(value):
+    """Normalize a CLI/config process count and enforce the public bound."""
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError("processes must be an integer from 1 through 4")
+    try:
+        value = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("processes must be an integer from 1 through 4") from error
+    if value < 1 or value > 4:
+        raise ValueError("processes must be an integer from 1 through 4")
+    return value
+
+
+def _process_static_self_task(task):
+    """Reopen and process one indexed FASTA record in a spawned worker."""
+
+    args, fasta_path, sequence_id, selected_region, summary_command = task
+    if not args.no_plot:
+        _load_static_plotting()
+    regions = {sequence_id: selected_region} if selected_region is not None else None
+    records = iter_fasta_records(
+        fasta_path,
+        regions=regions,
+        record_ids=[sequence_id],
+    )
+    try:
+        current_id, sequence, sequence_label = next(records)
+    except StopIteration as error:
+        raise ValueError(
+            f"sequence {sequence_id!r} was not found in {fasta_path!r}"
+        ) from error
+
+    _process_static_self_record(
+        args=args,
+        sequence_id=current_id,
+        sequence=sequence,
+        sequence_label=sequence_label,
+        source_path=fasta_path,
+        summary_writer=PlotSummaryWriter(summary_command),
+    )
+    return sequence_id
+
+
+def _process_static_self_record(
+    *,
+    args,
+    sequence_id,
+    sequence,
+    sequence_label,
+    source_path,
+    summary_writer,
+):
+    """Compute and emit one independent static self plot.
+
+    The input sequence and its compact prepared sketches are deliberately kept
+    local so processing the next FASTA record cannot retain this chromosome.
+    """
+
+    sequence_start = 1
+    parsed_label = extractRegion(sequence_label)
+    if parsed_label:
+        _base_name, sequence_start, sequence_end = parsed_label
+    else:
+        sequence_end = len(sequence)
+    sequence_name = sequence_label
+    plot_axis_bounds = args.axes_limits or (sequence_start, sequence_end)
+    kmer_count = len(sequence) - args.kmer + 1
+    if kmer_count <= 0:
+        raise ValueError(
+            f"sequence {sequence_name!r} is shorter than k-mer size {args.kmer}"
+        )
+
+    config = _matrix_config_for_length(kmer_count, args)
+    print(f"Computing self identity matrix for {sequence_name}... \n")
+    print(f"\tSequence length n: {len(sequence)}\n")
+    print(f"\tWindow size w: {config.window_size}\n")
+    print(f"\tModimizer sketch size: {config.expectation}\n")
+    print(f"\tPlot Resolution r: {config.resolution}\n")
+
+    direction_rendering = args.plot_direction and not args.no_plot
+    prepared = prepare_sequence_sketches(
+        sequence,
+        config.window_size,
+        config.sparsity,
+        args.delta,
+        args.kmer,
+        args.ambiguous,
+        config.expectation,
+        canonical=not args.forward,
+    )
+    alternate_prepared = None
+    if direction_rendering:
+        alternate_prepared = prepare_sequence_sketches(
+            sequence,
+            config.window_size,
+            config.sparsity,
+            args.delta,
+            args.kmer,
+            args.ambiguous,
+            config.expectation,
+            canonical=bool(args.forward),
+        )
+    # No chromosome-sized sequence or positional-hash array survives into the
+    # sparse intersection and rendering phases.
+    del sequence
+
+    self_mat = create_self_matrix_from_sketches(
+        prepared, args.kmer, args.identity, args.ambiguous
+    )
+    del prepared
+    direction_self_mat = None
+    if alternate_prepared is not None:
+        direction_self_mat = create_self_matrix_from_sketches(
+            alternate_prepared, args.kmer, args.identity, args.ambiguous
+        )
+        del alternate_prepared
+
+    output_directory = os.path.join(args.output_dir or ".", sequence_name)
+    if (not args.no_bedpe) or (not args.no_plot):
+        os.makedirs(output_directory, exist_ok=True)
+
+    if args.cooler:
+        try:
+            os.makedirs(output_directory, exist_ok=True)
+            cooler_output = os.path.join(output_directory, sequence_name + ".cooler")
+            convertMatrixToCool(
+                matrix=self_mat,
+                window_size=config.window_size,
+                id_threshold=args.identity,
+                x_name=sequence_name,
+                y_name=sequence_name,
+                self_identity=True,
+                x_offset=sequence_start,
+                y_offset=sequence_start,
+                chromsizes=kmer_count,
+                output_cool=cooler_output,
+            )
+            print(
+                f"Saved self-identity matrix as a cooler file to {cooler_output}\n"
+            )
+        except Exception as error:
+            print(f"Error creating cooler file: {error}")
+
+    bed_frame = None
+    direction_frame = None
+    if not args.no_plot:
+        bed_frame = convertMatrixToBedDataFrame(
+            self_mat,
+            config.window_size,
+            args.identity,
+            sequence_name,
+            sequence_name,
+            True,
+            sequence_start,
+            sequence_start,
+            sequence_end,
+            sequence_end,
+        )
+        if direction_rendering:
+            if args.forward:
+                canonical_frame = convertMatrixToBedDataFrame(
+                    direction_self_mat,
+                    config.window_size,
+                    args.identity,
+                    sequence_name,
+                    sequence_name,
+                    True,
+                    sequence_start,
+                    sequence_start,
+                    sequence_end,
+                    sequence_end,
+                )
+                forward_matrix = self_mat
+            else:
+                canonical_frame = bed_frame
+                forward_matrix = direction_self_mat
+            direction_frame = _annotate_bed_direction_frame(
+                canonical_frame,
+                forward_matrix,
+                config.window_size,
+                sequence_start,
+                sequence_start,
+            )
+
+    if not args.no_bedpe:
+        bedfile_output = os.path.join(output_directory, sequence_name + ".bedpe")
+        if bed_frame is not None:
+            _write_matrix_bedpe(bedfile_output, [bed_frame])
+        else:
+            _write_matrix_bedpe(
+                bedfile_output,
+                iterMatrixToBedChunks(
+                    self_mat,
+                    config.window_size,
+                    args.identity,
+                    sequence_name,
+                    sequence_name,
+                    True,
+                    sequence_start,
+                    sequence_start,
+                    sequence_end,
+                    sequence_end,
+                ),
+            )
+        print(
+            f"Saved self-identity matrix as a paired-end bed file to {bedfile_output}\n"
+        )
+
+    # Rendering consumes only compact BEDPE columns. Release dense matrices
+    # before Matplotlib/Plotnine allocate figures and raster buffers.
+    del self_mat
+    if direction_self_mat is not None:
+        del direction_self_mat
+
+    if not args.no_plot:
+        plot_files = create_plots(
+            sdf=None,
+            directory=output_directory,
+            name_x=sequence_name,
+            name_y=sequence_name,
+            palette=args.palette,
+            palette_orientation=args.palette_orientation,
+            no_hist=args.no_hist,
+            width=args.width,
+            dpi=args.dpi,
+            is_freq=args.bin_freq,
+            xlim=plot_axis_bounds,
+            custom_colors=args.colors,
+            custom_breakpoints=args.breakpoints,
+            from_file=bed_frame,
+            is_pairwise=False,
+            axes_labels=args.axes_ticks,
+            axes_tick_number=args.axes_number,
+            vector_format=args.vector,
+            deraster=args.deraster,
+            annotation=args.bed,
+        )
+        summary_writer.add(
+            output_directory,
+            plot_files or [],
+            fasta_files=[source_path],
+            window_sizes=[config.window_size],
+            regions=_regions_from_names([sequence_name]),
+            bed_file=args.bed,
+        )
+        if direction_rendering:
+            direction_directory = os.path.join(output_directory, "directionality")
+            direction_files = create_plots(
+                sdf=None,
+                directory=direction_directory,
+                name_x=sequence_name,
+                name_y=sequence_name,
+                palette=args.palette,
+                palette_orientation=args.palette_orientation,
+                no_hist=args.no_hist,
+                width=args.width,
+                dpi=args.dpi,
+                is_freq=args.bin_freq,
+                xlim=plot_axis_bounds,
+                custom_colors=args.colors,
+                custom_breakpoints=args.breakpoints,
+                from_file=direction_frame,
+                is_pairwise=False,
+                axes_labels=args.axes_ticks,
+                axes_tick_number=args.axes_number,
+                vector_format=args.vector,
+                deraster=args.deraster,
+                annotation=None,
+            )
+            summary_writer.add(
+                direction_directory,
+                direction_files or [],
+                fasta_files=[source_path],
+                window_sizes=[config.window_size],
+                regions=_regions_from_names([sequence_name]),
+                bed_file=args.bed,
+            )
+
+
+def _run_streaming_static_self(
+    args, fasta_list, fasta_headers, region_by_name, summary_writer
+):
+    """Run independent self plots with bounded, record-local memory.
+
+    Indexed FASTA records can be reopened directly by up to four spawned
+    workers. Unindexed plain/gzip inputs retain the one-pass sequential path;
+    this avoids making every worker rescan or decompress the entire file.
+    """
+
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+
+    tasks = [
+        (
+            args,
+            fasta_path,
+            sequence_id,
+            region_by_name.get(sequence_id),
+            getattr(summary_writer, "command", ""),
+        )
+        for fasta_path in fasta_list
+        for sequence_id in fasta_headers[fasta_path]
+    ]
+    unique_record_ids = {task[2] for task in tasks}
+    indexed_access = (
+        len(unique_record_ids) == len(tasks)
+        and all(supports_indexed_fasta_access(path) for path in fasta_list)
+    )
+    process_count = _streaming_process_count(args, len(tasks), indexed_access)
+
+    if process_count > 1:
+        print(
+            f"Processing {len(tasks)} sequences with {process_count} "
+            "chromosome workers.\n"
+        )
+        context = multiprocessing.get_context("spawn")
+        try:
+            with ProcessPoolExecutor(
+                max_workers=process_count,
+                mp_context=context,
+            ) as executor:
+                future_records = {
+                    executor.submit(_process_static_self_task, task): task[2]
+                    for task in tasks
+                }
+                for future in as_completed(future_records):
+                    sequence_id = future_records[future]
+                    try:
+                        future.result()
+                    except Exception as error:
+                        for pending in future_records:
+                            pending.cancel()
+                        raise ValueError(
+                            f"failed while processing sequence {sequence_id!r}: {error}"
+                        ) from error
+        except ValueError:
+            raise
+        except (OSError, RuntimeError) as error:
+            raise ValueError(f"unable to run chromosome workers: {error}") from error
+        return
+
+    for fasta_path in fasta_list:
+        for sequence_id, sequence, sequence_label in iter_fasta_records(
+            fasta_path,
+            regions=region_by_name,
+            record_ids=fasta_headers[fasta_path],
+        ):
+            _process_static_self_record(
+                args=args,
+                sequence_id=sequence_id,
+                sequence=sequence,
+                sequence_label=sequence_label,
+                source_path=fasta_path,
+                summary_writer=summary_writer,
+            )
+
+
 def main():
     print(ASCII_ART)
     print(f"v{VERSION} \n")
@@ -678,8 +1266,6 @@ def main():
         except (OSError, ValueError) as error:
             print(f"Error reading annotation BED file(s): {error}", file=sys.stderr)
             sys.exit(2)
-    if args.command == "static":
-        _load_static_plotting()
     # -----------MUTUALLY EXCLUSIVE: INTERACTIVE OR STATIC MODE-----------
     if args.command == "interactive":
         print(INTERACTIVE_DEPRECATION_MESSAGE, file=sys.stderr)
@@ -729,7 +1315,29 @@ def main():
                 config = json.load(f)
                 _apply_static_config(args, config)
 
+        try:
+            args.processes = _validated_process_count(args.processes)
+        except ValueError as error:
+            print(f"Error: {error}.", file=sys.stderr)
+            sys.exit(2)
+
+        # Plotting imports are comparatively expensive. Compute-only static
+        # runs should not import Plotnine or initialize Matplotlib at all.
+        if (
+            (not args.no_plot)
+            or args.grid
+            or args.grid_only
+            or getattr(args, "load", None)
+        ):
+            _load_static_plotting()
+
         # -----------INPUT COMMAND VALIDATION-----------
+        if args.sequence and getattr(args, "load", None):
+            print(
+                "Error: --sequence requires FASTA input; it cannot be used with --load.\n"
+            )
+            sys.exit(2)
+
         if args.plot_direction and getattr(args, "load", None):
             print(
                 "Error: --plot-direction requires FASTA input because strand "
@@ -907,10 +1515,12 @@ def main():
             sys.exit(0)
 
     # -----------INPUT SEQUENCE VALIDATION-----------
-    seq_list = []
-    fasta_list = args.fasta.copy()
+    # Repeating an input path cannot add a distinct sequence, and allowing it
+    # here would hash the same records twice while the path-keyed header map
+    # contains them only once.
+    fasta_list = list(dict.fromkeys(args.fasta))
     fasta_headers = {}
-    for i in args.fasta:
+    for i in fasta_list.copy():
         try:
             headers = getInputHeaders(i)
             fasta_headers[i] = headers
@@ -918,13 +1528,24 @@ def main():
             if len(headers) > 1:
                 print(f"File {i} contains multiple fasta entries.\n")
 
-            seq_list.extend(headers)  # Add all headers to seq_list
-
         except Exception as e:
             print(
                 f"\nUnable to open {i}. Please check it is correctly formatted or compressed...\n"
             )
             fasta_list.remove(i)
+
+    if not fasta_list:
+        print("Error: no readable FASTA input files remain.", file=sys.stderr)
+        sys.exit(2)
+
+    try:
+        fasta_headers, seq_list = _select_fasta_headers(
+            fasta_headers, getattr(args, "sequence", None)
+        )
+    except ValueError as error:
+        print(f"Error: {error}.\n")
+        sys.exit(2)
+    fasta_list = [path for path in fasta_list if path in fasta_headers]
 
     fasta_source_by_name = {}
     for fasta_path, headers in fasta_headers.items():
@@ -940,6 +1561,37 @@ def main():
     except ValueError as error:
         print(f"Error: {error}.\n")
         sys.exit(2)
+
+    # Independent static self plots have no cross-record dependency. Stream
+    # them directly instead of retaining every positional hash in ``k_list``.
+    # The file-existence condition preserves unit tests and third-party callers
+    # that replace the legacy reader with an in-memory stub.
+    streaming_static_self = (
+        args.command == "static"
+        and bool(fasta_list)
+        and not args.compare
+        and not args.compare_only
+        and not args.grid
+        and not args.grid_only
+        and args.compare_order == "sequential"
+        and all(
+            os.path.isfile(path) and os.path.getsize(path) > 0
+            for path in fasta_list
+        )
+    )
+    if streaming_static_self:
+        try:
+            _run_streaming_static_self(
+                args,
+                fasta_list,
+                fasta_headers,
+                region_by_name,
+                summary_writer,
+            )
+        except (OSError, UnicodeError, ValueError) as error:
+            print(f"Error processing FASTA input: {error}", file=sys.stderr)
+            sys.exit(2)
+        return
 
     # -----------LOAD SEQUENCES INTO MEMORY-----------
     kmer_list = []
@@ -1381,29 +2033,15 @@ def main():
                 )
 
                 seq_length = len(matrix_sequence)
-                win = args.window
-                res = args.resolution
-                if args.window:
-                    # Change the resolution of each plot
-                    res = math.ceil(seq_length / args.window)
-                else:
-                    win = math.ceil(seq_length / args.resolution)
-
-                if win < args.modimizer:
-                    args.modimizer = win
-                if win < 10:
-                    print(f"Error: sequence too small for analysis.\n")
-                    print(
-                        f"ModDotPlot requires a minimum window size of 10. Sequences less than 10Kbp will not work with ModDotPlot under normal resolution. We recommend rerunning ModDotPlot with --r {math.ceil(seq_length / 10)}.\n"
-                    )
-                    sys.exit(0)
-
-                seq_sparsity = round(win / args.modimizer)
-                if seq_sparsity <= args.modimizer:
-                    seq_sparsity = 2 ** int(math.log2(seq_sparsity))
-                else:
-                    seq_sparsity = 2 ** (int(math.log2(seq_sparsity - 1)) + 1)
-                expectation = round(win / seq_sparsity)
+                try:
+                    matrix_config = _matrix_config_for_length(seq_length, args)
+                except ValueError as error:
+                    print(f"Error: {error}.\n")
+                    sys.exit(2)
+                win = matrix_config.window_size
+                res = matrix_config.resolution
+                seq_sparsity = matrix_config.sparsity
+                expectation = matrix_config.expectation
 
                 print(f"Computing self identity matrix for {seq_name}... \n")
                 # TODO: Logging here
@@ -1728,21 +2366,17 @@ def main():
                         max(larger_seq_end_pos, smaller_seq_end_pos),
                     )
 
-                    win = args.window
-                    res = args.resolution
-                    if args.window:
-                        res = math.ceil(smaller_length / args.window)
-                    else:
-                        win = math.ceil(smaller_length / args.resolution)
-                    if win < args.modimizer:
-                        args.modimizer = win
-
-                    seq_sparsity = round(win / args.modimizer)
-                    if seq_sparsity <= args.modimizer:
-                        seq_sparsity = 2 ** int(math.log2(seq_sparsity))
-                    else:
-                        seq_sparsity = 2 ** (int(math.log2(seq_sparsity - 1)) + 1)
-                    expectation = round(win / seq_sparsity)
+                    try:
+                        matrix_config = _matrix_config_for_length(
+                            smaller_length, args
+                        )
+                    except ValueError as error:
+                        print(f"Error: {error}.\n")
+                        sys.exit(2)
+                    win = matrix_config.window_size
+                    res = matrix_config.resolution
+                    seq_sparsity = matrix_config.sparsity
+                    expectation = matrix_config.expectation
                     print(
                         f"Computing pairwise identity matrix for {larger_seq_name} and {smaller_seq_name}... \n"
                     )

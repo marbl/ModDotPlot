@@ -2,14 +2,61 @@ import numpy as np
 import pytest
 
 from moddotplot.estimate_identity import (
+    BEDPE_HEADER,
     containment_neighbors,
     convertMatrixToBed,
+    convertMatrixToBedDataFrame,
     createSelfMatrix,
+    iterMatrixToBedChunks,
     pairwiseContainmentMatrix,
     partitionOverlaps,
     populateModimizers,
 )
 from moddotplot.parse_fasta import generateKmersFromFasta, printProgressBar
+
+
+def _scalar_bed_reference(
+    matrix,
+    window_size,
+    id_threshold,
+    x_name,
+    y_name,
+    self_identity,
+    x_offset,
+    y_offset,
+    x_end=None,
+    y_end=None,
+):
+    """Original scalar implementation used as a parity oracle."""
+
+    bed = [BEDPE_HEADER]
+    for x in range(matrix.shape[0]):
+        for y in range(matrix.shape[1]):
+            value = matrix[x, y]
+            if self_identity and x > y:
+                continue
+            if not value >= id_threshold / 100:
+                continue
+            start_x = x * window_size + x_offset
+            end_x = start_x + window_size - 1
+            start_y = y * window_size + y_offset
+            end_y = start_y + window_size - 1
+            if x_end is not None:
+                end_x = min(end_x, x_end)
+            if y_end is not None:
+                end_y = min(end_y, y_end)
+            bed.append(
+                (
+                    x_name,
+                    int(start_x),
+                    int(end_x),
+                    y_name,
+                    int(start_y),
+                    int(end_y),
+                    float(value),
+                )
+            )
+    return bed
 
 
 def test_bed_conversion_clamps_partial_windows_to_exact_region_end():
@@ -28,6 +75,186 @@ def test_bed_conversion_clamps_partial_windows_to_exact_region_end():
 
     assert max(row[2] for row in bed[1:]) == 250
     assert max(row[5] for row in bed[1:]) == 350
+
+
+@pytest.mark.parametrize("self_identity", [False, True])
+def test_vectorized_bed_conversion_preserves_row_order_and_values(self_identity):
+    matrix = np.array(
+        [
+            [0.0, 86.5, 0.0, 92.25],
+            [87.0, 0.0, 99.0, 0.0],
+            [0.0, 91.0, 88.0, 0.0],
+        ]
+    )
+    expected = [
+        (
+            "#query_name",
+            "query_start",
+            "query_end",
+            "reference_name",
+            "reference_start",
+            "reference_end",
+            "perID_by_events",
+        )
+    ]
+    for x in range(matrix.shape[0]):
+        for y in range(matrix.shape[1]):
+            value = matrix[x, y]
+            if (not self_identity or x <= y) and value >= 86 / 100:
+                expected.append(
+                    (
+                        "x",
+                        x * 100 + 11,
+                        min(x * 100 + 110, 250),
+                        "y",
+                        y * 100 + 21,
+                        min(y * 100 + 120, 350),
+                        float(value),
+                    )
+                )
+
+    assert (
+        convertMatrixToBed(
+            matrix,
+            window_size=100,
+            id_threshold=86,
+            x_name="x",
+            y_name="y",
+            self_identity=self_identity,
+            x_offset=11,
+            y_offset=21,
+            x_end=250,
+            y_end=350,
+        )
+        == expected
+    )
+
+
+def test_bed_conversion_returns_only_header_when_no_tiles_pass():
+    bed = convertMatrixToBed(
+        np.zeros((1_000, 1_000)),
+        window_size=100,
+        id_threshold=86,
+        x_name="x",
+        y_name="y",
+        self_identity=True,
+        x_offset=0,
+        y_offset=0,
+    )
+
+    assert len(bed) == 1
+
+
+@pytest.mark.parametrize("self_identity", [False, True])
+@pytest.mark.parametrize("max_chunk_cells", [1, 7, 64, 10_000])
+def test_chunked_bed_conversion_matches_scalar_reference_randomized(
+    self_identity, max_chunk_cells
+):
+    rng = np.random.default_rng(709)
+    # Exercise a non-contiguous view as well as values immediately around the
+    # legacy threshold. NaN must remain filtered by the comparison.
+    source = rng.uniform(0.0, 1.5, size=(14, 24))
+    matrix = source[::2, 1::2]
+    matrix[0, :4] = [0.859999, 0.86, 0.860001, np.nan]
+    kwargs = dict(
+        window_size=37,
+        id_threshold=86,
+        x_name="query",
+        y_name="reference",
+        self_identity=self_identity,
+        x_offset=13,
+        y_offset=29,
+        x_end=251,
+        y_end=411,
+    )
+
+    expected = _scalar_bed_reference(matrix, **kwargs)
+    actual = convertMatrixToBed(matrix, max_chunk_cells=max_chunk_cells, **kwargs)
+
+    assert actual == expected
+
+
+def test_bed_chunks_are_strictly_bounded_across_row_and_column_boundaries():
+    matrix = np.arange(30, dtype=float).reshape(3, 10)
+    chunks = list(
+        iterMatrixToBedChunks(
+            matrix,
+            window_size=10,
+            id_threshold=0,
+            x_name="x",
+            y_name="y",
+            self_identity=False,
+            x_offset=0,
+            y_offset=0,
+            max_chunk_cells=4,
+        )
+    )
+
+    # A ten-column row must be split because it is wider than the cap. The
+    # concatenated chunks still follow exact C order across every boundary.
+    assert [len(chunk) for chunk in chunks] == [4, 4, 2] * 3
+    assert all(tuple(chunk.columns) == BEDPE_HEADER for chunk in chunks)
+    observed = [
+        tuple(row)
+        for chunk in chunks
+        for row in chunk.itertuples(index=False, name=None)
+    ]
+    assert observed == _scalar_bed_reference(matrix, 10, 0, "x", "y", False, 0, 0)[1:]
+
+
+def test_bed_dataframe_helper_preserves_columns_clipping_and_float_values():
+    matrix = np.array([[0.85, 0.9, 1.25], [0.95, 0.1, 1.5]], dtype=np.float32)
+    kwargs = dict(
+        window_size=10.5,
+        id_threshold=86,
+        x_name="chrQ",
+        y_name="chrR",
+        self_identity=False,
+        x_offset=-3.25,
+        y_offset=101.75,
+        x_end=9.5,
+        y_end=119.25,
+        max_chunk_cells=2,
+    )
+
+    frame = convertMatrixToBedDataFrame(matrix, **kwargs)
+    expected = _scalar_bed_reference(
+        matrix,
+        **{key: value for key, value in kwargs.items() if key != "max_chunk_cells"},
+    )
+
+    assert tuple(frame.columns) == BEDPE_HEADER
+    assert list(frame.itertuples(index=False, name=None)) == expected[1:]
+    assert frame["perID_by_events"].dtype == np.dtype(float)
+
+
+@pytest.mark.parametrize("shape", [(0, 4), (4, 0), (0, 0)])
+def test_empty_bed_dataframe_has_exact_schema(shape):
+    frame = convertMatrixToBedDataFrame(
+        np.empty(shape), 100, 86, "x", "y", True, 0, 0, max_chunk_cells=1
+    )
+
+    assert frame.empty
+    assert tuple(frame.columns) == BEDPE_HEADER
+    assert convertMatrixToBed(
+        np.empty(shape), 100, 86, "x", "y", True, 0, 0, max_chunk_cells=1
+    ) == [BEDPE_HEADER]
+
+
+@pytest.mark.parametrize("max_chunk_cells", [0, -1, 1.5, True])
+def test_bed_conversion_rejects_invalid_chunk_bound(max_chunk_cells):
+    with pytest.raises((TypeError, ValueError), match="positive integer"):
+        convertMatrixToBed(
+            np.ones((1, 1)),
+            100,
+            86,
+            "x",
+            "y",
+            False,
+            0,
+            0,
+            max_chunk_cells=max_chunk_cells,
+        )
 
 
 def test_populate_modimizers_returns_denser_recursive_fallback():

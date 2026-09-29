@@ -62,7 +62,11 @@ def test_plotnine_outputs_retry_with_dejavu_on_glyph_failure(monkeypatch):
     attempted_families = []
 
     def fail_for_helvetica(plot, **_kwargs):
-        family = plot.theme.getp(("text", "family"))[0]
+        if hasattr(plot.theme, "getp"):
+            family = plot.theme.getp(("text", "family"))[0]
+        else:
+            # Plotnine <0.15 stores resolved themeable properties directly.
+            family = plot.theme.themeables["text"].properties["family"][0]
         attempted_families.append(family)
         if family == DEFAULT_FONT_FAMILY:
             raise RuntimeError("failed to load glyph")
@@ -71,3 +75,42 @@ def test_plotnine_outputs_retry_with_dejavu_on_glyph_failure(monkeypatch):
     static_plots._save_plot(ggplot(), filename="unused.png")
 
     assert attempted_families == [DEFAULT_FONT_FAMILY, FALLBACK_FONT_FAMILY]
+
+
+def test_plotnine_pair_draws_once_for_png_and_vector(monkeypatch, tmp_path):
+    figure = plt.figure()
+
+    class FakePlot:
+        draw_count = 0
+
+        def __add__(self, _other):
+            return self
+
+        def draw(self, show=False):
+            assert show is False
+            self.draw_count += 1
+            return figure
+
+    saved = []
+
+    def fake_save_figure_pair(current, prefix, vector_format, dpi, **kwargs):
+        saved.append((current, prefix, vector_format, dpi, kwargs))
+        return tmp_path / "plot.png", tmp_path / "plot.svg"
+
+    monkeypatch.setattr(static_plots, "save_figure_pair", fake_save_figure_pair)
+    plot = FakePlot()
+
+    static_plots._draw_and_save_plot_pair(
+        plot,
+        tmp_path / "plot",
+        width=9,
+        height=9,
+        dpi=300,
+        vector_format="svg",
+    )
+
+    assert plot.draw_count == 1
+    assert saved[0][0] is figure
+    assert saved[0][2:4] == ("svg", 300)
+    assert saved[0][4] == {"bbox_inches": figure.bbox_inches}
+    assert not plt.fignum_exists(figure.number)

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from moddotplot.const import DIRECTION_COLORS
+from moddotplot.native_render import FALLBACK_FONT_FAMILY, set_figure_font_family
 from moddotplot.static_plots import _build_grid_figure, create_grid
 
 
@@ -125,6 +126,18 @@ def _collection_center(axis):
     return (
         (points[:, 0].min() + points[:, 0].max()) / 2,
         (points[:, 1].min() + points[:, 1].max()) / 2,
+    )
+
+
+def _collection_centers(axis):
+    return sorted(
+        (
+            (path.vertices[:, 0].min() + path.vertices[:, 0].max()) / 2,
+            (path.vertices[:, 1].min() + path.vertices[:, 1].max()) / 2,
+        )
+        for collection in axis.collections
+        for path in collection.get_paths()
+        if path.vertices.size
     )
 
 
@@ -269,6 +282,56 @@ def test_self_comparisons_run_bottom_left_to_top_right():
         plt.close(figure)
 
 
+def test_self_comparison_grid_diagonal_uses_full_symmetric_dotplots():
+    kwargs = _basic_two_sequence_grid(
+        singles=[
+            _records(
+                "sequence_a",
+                "sequence_a",
+                [(10, 30, 91), (50, 50, 100)],
+            ),
+            _records(
+                "sequence_b",
+                "sequence_b",
+                [(20, 40, 92), (60, 60, 100)],
+            ),
+        ]
+    )
+
+    figure, axes = _build_grid_figure(**kwargs)
+    try:
+        assert _collection_centers(axes[1, 0]) == [
+            (10, 30),
+            (30, 10),
+            (50, 50),
+        ]
+        assert _collection_centers(axes[0, 1]) == [
+            (20, 40),
+            (40, 20),
+            (60, 60),
+        ]
+        assert len(_collection_centers(axes[0, 0])) == 1
+        assert len(_collection_centers(axes[1, 1])) == 1
+    finally:
+        plt.close(figure)
+
+
+def test_full_self_comparison_input_is_not_mirrored_twice():
+    kwargs = _basic_two_sequence_grid(
+        singles=[
+            _records("sequence_a", "sequence_a", [(10, 30, 91), (30, 10, 91)]),
+            _records("sequence_b", "sequence_b", [(20, 40, 92), (40, 20, 92)]),
+        ]
+    )
+
+    figure, axes = _build_grid_figure(**kwargs)
+    try:
+        assert _collection_centers(axes[1, 0]) == [(10, 30), (30, 10)]
+        assert _collection_centers(axes[0, 1]) == [(20, 40), (40, 20)]
+    finally:
+        plt.close(figure)
+
+
 def test_grid_region_names_fit_panels_and_numeric_labels_are_doubled():
     names = [
         "PAN010.chr14.haplotype1.paternal:1-4000000",
@@ -368,18 +431,91 @@ def test_grid_exact_bounds_do_not_expand_to_next_nice_tick():
     ("axis_end", "unit"),
     [(100_000, "Kbp"), (103_156_783, "Mbp"), (500_000_000, "Gbp")],
 )
-def test_grid_labels_both_axes_with_genomic_units(axis_end, unit):
+def test_grid_labels_genomic_units_only_on_bottom_left_cell(axis_end, unit):
     kwargs = _basic_two_sequence_grid(
         xlim=(1, axis_end),
         axes_label=None,
         breaks=None,
     )
 
-    figure, _axes = _build_grid_figure(**kwargs)
+    figure, axes = _build_grid_figure(**kwargs)
     try:
         expected = f"Genomic Position ({unit})"
-        assert figure._supxlabel.get_text() == expected
-        assert figure._supylabel.get_text() == expected
+        bottom_left_axis = axes[-1, 0]
+        assert bottom_left_axis.get_xlabel() == expected
+        assert sum(axis.get_xlabel() == expected for axis in axes.flat) == 1
+        assert getattr(figure, "_supxlabel", None) is None
+        assert getattr(figure, "_supylabel", None) is None
+        vertical_titles = [
+            text
+            for axis in axes.flat
+            for text in axis.texts
+            if text.get_gid() == "grid-y-axis-title"
+        ]
+        assert len(vertical_titles) == 1
+        assert vertical_titles[0].get_text() == expected
+        assert list(axis.get_ylabel() for axis in axes[:, 0]) == [
+            "sequence_b",
+            "sequence_a",
+        ]
+
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        figure_bounds = figure.bbox
+        cell_bounds = bottom_left_axis.get_window_extent(renderer)
+        horizontal_bounds = bottom_left_axis.xaxis.label.get_window_extent(renderer)
+        vertical_bounds = vertical_titles[0].get_window_extent(renderer)
+        row_label_bounds = bottom_left_axis.yaxis.label.get_window_extent(renderer)
+
+        assert cell_bounds.x0 <= horizontal_bounds.x0 + horizontal_bounds.width / 2
+        assert horizontal_bounds.x0 + horizontal_bounds.width / 2 <= cell_bounds.x1
+        assert cell_bounds.y0 <= vertical_bounds.y0 + vertical_bounds.height / 2
+        assert vertical_bounds.y0 + vertical_bounds.height / 2 <= cell_bounds.y1
+        assert vertical_bounds.x1 <= row_label_bounds.x0
+        for bounds in (horizontal_bounds, vertical_bounds):
+            assert figure_bounds.contains(bounds.x0, bounds.y0)
+            assert figure_bounds.contains(bounds.x1, bounds.y1)
+    finally:
+        plt.close(figure)
+
+
+@pytest.mark.parametrize(("width", "expected_width"), [(1, 2), (4, 4)])
+def test_grid_axis_labels_do_not_expand_saved_canvas(tmp_path, width, expected_width):
+    kwargs = _basic_two_sequence_grid(width=width)
+
+    with plt.rc_context({"savefig.bbox": "tight"}):
+        _create_grid(tmp_path, **kwargs)
+
+    image = plt.imread(tmp_path / "2x2_GRID.png")
+    assert image.shape[:2] == (expected_width * 72, expected_width * 72)
+
+
+def test_one_cell_grid_axis_titles_stay_inside_canvas():
+    name = "sequence_a"
+    kwargs = _grid_kwargs(
+        singles=[_records(name, name, [(10, 10, 100)])],
+        doubles=[],
+        single_names=[name],
+        double_names=[],
+    )
+    kwargs["width"] = 4
+
+    figure, axes = _build_grid_figure(**kwargs)
+    try:
+        vertical_title = next(
+            text for text in axes[0, 0].texts if text.get_gid() == "grid-y-axis-title"
+        )
+        for family in (None, FALLBACK_FONT_FAMILY):
+            if family is not None:
+                set_figure_font_family(figure, family)
+            for dpi in (72, 100, 300, 600):
+                figure.set_dpi(dpi)
+                figure.canvas.draw()
+                renderer = figure.canvas.get_renderer()
+                for title in (axes[0, 0].xaxis.label, vertical_title):
+                    bounds = title.get_window_extent(renderer)
+                    assert figure.bbox.contains(bounds.x0, bounds.y0)
+                    assert figure.bbox.contains(bounds.x1, bounds.y1)
     finally:
         plt.close(figure)
 

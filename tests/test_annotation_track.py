@@ -284,14 +284,23 @@ def _stub_create_plots_dependencies(monkeypatch, *, directional=False):
     )
     monkeypatch.setattr(static_plots, "make_dot", lambda *_args, **_kwargs: _FakePlot())
 
-    def fake_ggsave(*_args, **kwargs):
-        output = Path(kwargs["filename"])
-        if output.suffix == ".png":
-            output.write_bytes(b"png")
-        else:
-            output.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    def fake_plot_pair(
+        _plot,
+        output_prefix,
+        *,
+        width,
+        height,
+        dpi,
+        vector_format,
+    ):
+        del width, height, dpi
+        png = Path(f"{output_prefix}.png")
+        vector = Path(f"{output_prefix}.{vector_format}")
+        png.write_bytes(b"png")
+        vector.write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+        return png, vector
 
-    monkeypatch.setattr(static_plots, "ggsave", fake_ggsave)
+    monkeypatch.setattr(static_plots, "_draw_and_save_plot_pair", fake_plot_pair)
 
 
 def _run_create_plots(output_dir, annotation, vector_format="svg"):

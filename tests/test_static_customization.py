@@ -256,3 +256,15 @@ def test_get_colors_rejects_invalid_custom_breakpoints(breakpoints, message):
             is_freq=False,
             custom_breakpoints=breakpoints,
         )
+
+
+def test_get_colors_rejects_breakpoints_that_do_not_cover_observed_values():
+    scores = pd.DataFrame({"perID_by_events": [86.0, 100.0]})
+
+    with pytest.raises(ValueError, match="cover all finite identity values"):
+        get_colors(
+            scores,
+            ncolors=2,
+            is_freq=False,
+            custom_breakpoints=[86, 90, 95],
+        )

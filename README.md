@@ -150,7 +150,10 @@ The following arguments are the same in both interactive and static mode:
 
 `-f / --fasta <file>`
 
-Fasta files to input. Multifasta files are accepted. Interactive mode will only support a maximum of two sequences at a time.
+FASTA files to input. Multi-FASTA files are accepted. By default, every record
+is analyzed; static mode can limit a run to named records with
+`-s/--sequence`. Interactive mode will only support a maximum of two sequences
+at a time.
 
 `-b / --bed <.bed file(s)>`
 
@@ -210,6 +213,15 @@ Create a plot from a previously computed pairwise bed file. Skips Average Nucleo
 
 Run moddotplot static with a config file instead of command line args. Example syntax in `config/config.json`. Recommended when creating a really customized plot. Used instead of -f/--fasta.
 
+`-s / --sequence <FASTA_ID> [<FASTA_ID> ...]`
+
+In static mode, analyze only the requested records from the input FASTA
+file(s). Each ID is matched to the first whitespace-delimited token in a FASTA
+header. Exact matches are preferred, with an unambiguous case-insensitive
+fallback (so `chr1` selects `Chr1`). Unknown, ambiguous, and duplicate requested
+IDs are errors. When using a config file, provide the same list under the
+`sequence` key, for example `"sequence": ["chr1", "chr2"]`.
+
 `--cooler <bool>`
 
 If set, will output a matrix as a cooler file for each input sequence, in addition to a bedpe file.
@@ -225,6 +237,16 @@ Skip output of histogram legend.
 `--no-plot <bool>`
 
 Save .bedpe to file, but skip rendering of plots.
+
+`--processes <1-4>`
+
+Set the number of independent chromosome workers for self-only static runs.
+When omitted, ModDotPlot uses two workers while rendering or up to four for a
+`--no-plot` run on multi-record FASTA files that have random-access indexes
+(`.fai`, plus `.gzi` for BGZF). This keeps default aggregate memory bounded;
+`--processes 4` opts into maximum plotting throughput. Ordinary gzip and
+unindexed inputs remain single-pass and sequential so they are not scanned
+once per worker. Use `--processes 1` for explicitly serial execution.
 
 `--width <float>`
 
@@ -274,7 +296,14 @@ With FASTA input, retain the standard ANI-colored plots and additionally create 
 
 `--grid <bool>`
 
-Create a square grid containing every self comparison on the diagonal and every pairwise comparison off the diagonal. The grid is rendered as one Matplotlib figure and supports three or more input sequences, although large grids become visually dense.
+Create a square grid containing every self comparison on the bottom-left-to-top-right diagonal and every pairwise comparison off the diagonal. Self-comparison cells are rendered as full symmetric dotplots. The shared genomic-axis titles appear only around the bottom-left cell without enlarging the output canvas. The grid is rendered as one Matplotlib figure and supports three or more input sequences, although large grids become visually dense.
+
+For example, select only `chr1` and `chr2` from a multi-FASTA input and create
+their grid:
+
+```
+moddotplot -f ../../moddotplot-interactive/Col-CEN_v1.2.fasta -s chr1 chr2 --grid
+```
 
 `--grid-only <bool>`
 

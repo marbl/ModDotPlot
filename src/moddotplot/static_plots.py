@@ -92,14 +92,60 @@ def _save_plot(plot, **kwargs):
         ggsave(plot + _plot_font_theme(FALLBACK_FONT_FAMILY), **kwargs)
 
 
+def _draw_and_save_plot_pair(
+    plot,
+    output_prefix,
+    *,
+    width,
+    height,
+    dpi,
+    vector_format,
+):
+    """Build one Plotnine figure and save both raster and vector outputs.
+
+    ``ggsave`` redraws a plot for every requested format. Large tile plots and
+    histograms therefore paid their complete scale/layout/rasterization cost
+    twice. Drawing once also guarantees that both files contain the same axes,
+    labels, and tile realization.
+    """
+
+    def draw(family):
+        styled = (
+            plot
+            + _plot_font_theme(family)
+            + theme(figure_size=(float(width), float(height)), dpi=int(dpi))
+        )
+        return styled.draw(show=False)
+
+    try:
+        figure = draw(DEFAULT_FONT_FAMILY)
+    except RuntimeError as error:
+        if not is_glyph_loading_error(error):
+            raise
+        figure = draw(FALLBACK_FONT_FAMILY)
+    try:
+        return save_figure_pair(
+            figure,
+            output_prefix,
+            vector_format,
+            dpi,
+            # Match plotnine/ggsave's requested physical canvas exactly.  A
+            # tight bounding box changes both the raster dimensions and plot
+            # framing (for example, 3 in at 96 dpi no longer yields 288 px).
+            bbox_inches=figure.bbox_inches,
+        )
+    finally:
+        plt.close(figure)
+
+
 def display_sequence_name(name):
     """Return a sequence name without appended region coordinates."""
 
     return REGION_SUFFIX_PATTERN.sub("", str(name))
 
 
-def _fit_grid_sequence_labels(figure, axes, minimum_size=MIN_TEXT_SIZE):
-    """Fit grid headings without shrinking them below a readable size."""
+def _fit_grid_sequence_labels(figure, axes):
+    """Fit grid headings inside the existing figure canvas."""
 
     figure.canvas.draw()
     renderer = figure.canvas.get_renderer()
@@ -131,16 +177,8 @@ def _fit_grid_sequence_labels(figure, axes, minimum_size=MIN_TEXT_SIZE):
     if scale >= 1.0:
         return
 
-    sizes = [artist.get_fontsize() for artist in artists]
-    smallest_scaled_size = min(size * scale for size in sizes)
-    if smallest_scaled_size < minimum_size:
-        enlargement = minimum_size / smallest_scaled_size
-        width, height = figure.get_size_inches()
-        figure.set_size_inches(width * enlargement, height * enlargement, forward=True)
-        scale = min(1.0, scale * enlargement)
-
     for artist in artists:
-        artist.set_fontsize(max(minimum_size, artist.get_fontsize() * scale))
+        artist.set_fontsize(artist.get_fontsize() * scale)
 
 
 def _resolve_native_colors(palette, palette_orientation, custom_colors=None):
@@ -289,14 +327,25 @@ def render_annotation_track(
 
 
 def check_st_en_equality(df):
-    unequal_rows = df[(df["q_st"] != df["r_st"]) | (df["q_en"] != df["r_en"])]
-    unequal_rows.loc[:, ["q_en", "r_en", "q_st", "r_st"]] = unequal_rows[
-        ["r_en", "q_en", "r_st", "q_st"]
-    ].values
+    """Complete a self-comparison across its diagonal without duplicate tiles."""
 
-    df = pd.concat([df, unequal_rows], ignore_index=True)
+    if df.empty:
+        return df.copy()
 
-    return df
+    coordinate_columns = ["q_st", "q_en", "r_st", "r_en"]
+    unequal_rows = df[(df["q_st"] != df["r_st"]) | (df["q_en"] != df["r_en"])].copy()
+    if unequal_rows.empty:
+        return df.copy()
+
+    mirrored_rows = unequal_rows.copy()
+    mirrored_rows.loc[:, coordinate_columns] = unequal_rows[
+        ["r_st", "r_en", "q_st", "q_en"]
+    ].to_numpy()
+
+    existing_coordinates = pd.MultiIndex.from_frame(df[coordinate_columns])
+    mirrored_coordinates = pd.MultiIndex.from_frame(mirrored_rows[coordinate_columns])
+    mirrored_rows = mirrored_rows.loc[~mirrored_coordinates.isin(existing_coordinates)]
+    return pd.concat([df, mirrored_rows], ignore_index=True)
 
 
 def make_k(vals):
@@ -362,6 +411,15 @@ def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
             raise ValueError("Breakpoints must contain only finite numbers")
         if np.any(np.diff(breaks) <= 0):
             raise ValueError("Breakpoints must be strictly increasing")
+        values = np.asarray(sdf["perID_by_events"], dtype=np.float64)
+        if values.size and (
+            not np.all(np.isfinite(values))
+            or values.min() < breaks[0]
+            or values.max() > breaks[-1]
+        ):
+            raise ValueError(
+                "Breakpoints must cover all finite identity values in the plot"
+            )
     labels = np.arange(len(breaks) - 1)
     # A dataset containing only 100% identity creates repeated default bin
     # edges; frequency bins likewise collapse to one edge when every value is
@@ -1456,18 +1514,214 @@ def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoin
     return p
 
 
+def _missing_symmetric_rows(dataframe):
+    """Return rows whose coordinate-transposed counterpart is absent.
+
+    FASTA self matrices normally contain only one triangle. Drawing those
+    rows a second time with transposed coordinates completes the full plot
+    without allocating a second, mirrored dataframe. Loaded BEDPE files may
+    already contain both triangles, so the general path checks coordinate
+    membership before selecting rows to mirror.
+    """
+
+    if dataframe.empty:
+        return dataframe.iloc[0:0]
+
+    q_start = dataframe["q_st"]
+    q_end = dataframe["q_en"]
+    r_start = dataframe["r_st"]
+    r_end = dataframe["r_en"]
+    off_diagonal = (q_start != r_start) | (q_end != r_end)
+    if not off_diagonal.any():
+        return dataframe.iloc[0:0]
+
+    # The mirror collection needs coordinates and its resolved color only; do
+    # not copy names, identity estimates, or plotting-helper columns from a
+    # potentially large dataframe.
+    render_columns = ["q_st", "q_en", "r_st", "r_en"]
+    render_columns.extend(
+        column
+        for column in ("discrete", "direction", DIRECTION_ANI_COLUMN)
+        if column in dataframe.columns
+    )
+
+    # The production FASTA path is strictly triangular. Avoid building two
+    # MultiIndexes for that common case; a strict start-coordinate ordering
+    # proves that no transposed off-diagonal row can already be present.
+    start_difference = (
+        q_start.loc[off_diagonal].to_numpy()
+        - r_start.loc[off_diagonal].to_numpy()
+    )
+    if np.all(start_difference < 0) or np.all(start_difference > 0):
+        return dataframe.loc[off_diagonal, render_columns]
+
+    existing = pd.MultiIndex.from_arrays([q_start, q_end, r_start, r_end])
+    mirrored = pd.MultiIndex.from_arrays(
+        [r_start, r_end, q_start, q_end]
+    )
+    return dataframe.loc[
+        off_diagonal & ~mirrored.isin(existing), render_columns
+    ]
+
+
+def _full_plot_limits(dataframe, requested_limit):
+    """Resolve exact full-plot bounds, including an empty sparse matrix."""
+
+    requested_bounds = _requested_axis_bounds(requested_limit)
+    if requested_bounds is not None:
+        return requested_bounds
+    if not dataframe.empty:
+        return _data_axis_limits(dataframe, requested_limit)
+    if requested_limit:
+        return 0.0, float(requested_limit)
+    raise ValueError(
+        "Cannot infer full-plot bounds from an empty identity table; "
+        "provide explicit axis bounds"
+    )
+
+
+def _build_full_figure(
+    sdf,
+    name_x,
+    name_y,
+    palette,
+    palette_orientation,
+    custom_colors,
+    axes_labels,
+    xlim,
+    deraster,
+    width,
+    is_pairwise,
+):
+    """Build a sparse full or comparative dotplot with native Matplotlib.
+
+    The tile geometry intentionally retains the historical Plotnine contract:
+    BEDPE start coordinates are tile centers and ``q_en - q_st`` is the tile
+    width. The default rasterizes only the sparse tile collections in vector
+    output; ``--deraster`` leaves each tile as vector geometry.
+    """
+
+    display_x = display_sequence_name(name_x)
+    display_y = display_sequence_name(name_y)
+    title = (
+        f"Comparative Plot: {display_x} vs {display_y}"
+        if is_pairwise
+        else f"Self-Identity Plot: {display_x}"
+    )
+    region_start, region_end = _full_plot_limits(sdf, xlim)
+    breaks = (
+        [float(value) for value in axes_labels]
+        if axes_labels
+        else generate_breaks(int(region_start), int(region_end))
+    )
+
+    styled, direction_colors, direction_column = _direction_ani_style(sdf)
+    colors = direction_colors or _resolve_native_colors(
+        palette, palette_orientation, custom_colors
+    )
+    color_column = direction_column or "discrete"
+
+    figure, axis = plt.subplots(figsize=(float(width), float(width)))
+    try:
+        draw_rectangular_tiles(
+            axis,
+            styled,
+            colors,
+            color_column=color_column,
+            rasterized=not deraster,
+        )
+        if not is_pairwise:
+            missing_rows = _missing_symmetric_rows(styled)
+            if not missing_rows.empty:
+                draw_rectangular_tiles(
+                    axis,
+                    missing_rows,
+                    colors,
+                    color_column=color_column,
+                    transpose=True,
+                    rasterized=not deraster,
+                )
+
+        configure_dotplot_axis(
+            axis,
+            region_start,
+            region_end,
+            breaks=breaks,
+        )
+        _divisor, unit = genomic_scale(region_end)
+        axis.set_xlabel(
+            f"Genomic Position ({unit})",
+            fontsize=clamped_font_size(width, 2.8),
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
+        axis.tick_params(
+            axis="both",
+            labelsize=clamped_font_size(width, 2.0),
+            length=max(3.5, float(width)),
+            colors="black",
+        )
+        axis.grid(False)
+        axis.set_facecolor("none")
+        for spine in axis.spines.values():
+            spine.set_color("black")
+
+        # Plotnine's one-cell facet supplies a query label above the panel and
+        # a reference label at its right edge. Retain those identifiers while
+        # placing the descriptive title independently above them.
+        axis.set_title(
+            display_x,
+            fontsize=clamped_font_size(width, 1.2),
+            fontfamily=DEFAULT_FONT_FAMILY,
+            pad=5,
+        )
+        axis.set_ylabel(
+            display_y,
+            fontsize=clamped_font_size(width, 1.2),
+            fontfamily=DEFAULT_FONT_FAMILY,
+            rotation=-90,
+            labelpad=16,
+        )
+        axis.yaxis.set_label_position("right")
+
+        title_size = 2.0 * float(width)
+        if len(title) > 80:
+            title_size = float(width)
+        elif len(title) > 50:
+            title_size = 1.5 * float(width)
+        figure.suptitle(
+            title,
+            fontsize=max(MIN_TITLE_SIZE, title_size),
+            fontfamily=DEFAULT_FONT_FAMILY,
+            y=0.975,
+        )
+        figure.subplots_adjust(
+            left=0.14,
+            right=0.87,
+            bottom=0.14,
+            top=0.84,
+        )
+        set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
+    except Exception:
+        plt.close(figure)
+        raise
+    return figure
+
+
 def _triangle_limits(sdf, xlim):
-    if sdf.empty:
-        raise ValueError("Cannot render a triangle plot without identity tiles")
     requested_bounds = _requested_axis_bounds(xlim)
     if requested_bounds is not None:
         region_start, region_end = requested_bounds
-    else:
+    elif not sdf.empty:
         region_start = max(float(sdf["q_st"].min()), float(sdf["r_st"].min()))
         region_end = max(
             float(sdf["q_en"].max()),
             float(sdf["r_en"].max()),
             float(xlim or 0),
+        )
+    else:
+        raise ValueError(
+            "Cannot infer triangle bounds from an empty identity table; "
+            "provide explicit axis bounds"
         )
     if region_end <= region_start:
         raise ValueError("Triangle plot end must be greater than its start")
@@ -1763,6 +2017,8 @@ def _build_grid_figure(
                         )
 
                 if dataframe is not None and not dataframe.empty:
+                    if row_name == column_name:
+                        dataframe = check_st_en_equality(dataframe)
                     (
                         dataframe,
                         direction_colors,
@@ -1797,27 +2053,47 @@ def _build_grid_figure(
                         display_sequence_name(row_name),
                         fontsize=heading_size,
                         fontfamily=DEFAULT_FONT_FAMILY,
+                        labelpad=2,
                     )
 
-        figure.supxlabel(
-            f"Genomic Position ({axis_unit})",
+        # Keep both shared genomic-axis titles with the bottom-left cell, where
+        # both sets of numeric tick labels are visible. Figure-wide titles sit
+        # far from that cell and enlarge tightly cropped output canvases.
+        bottom_left_axis = axes[-1, 0]
+        axis_title = f"Genomic Position ({axis_unit})"
+        bottom_left_axis.set_xlabel(
+            axis_title,
             fontsize=axis_title_size,
             fontfamily=DEFAULT_FONT_FAMILY,
+            labelpad=2,
         )
-        figure.supylabel(
-            f"Genomic Position ({axis_unit})",
-            fontsize=axis_title_size,
-            fontfamily=DEFAULT_FONT_FAMILY,
-        )
+        bottom_margin = max(0.12, 0.35 / figure_width)
+        left_margin_inches = 0.72 + max(0.0, tick_size - MIN_TEXT_SIZE) / 72.0
+        left_margin = max(0.14, left_margin_inches / figure_width)
         figure.subplots_adjust(
-            left=0.14,
+            left=left_margin,
             right=0.98,
-            bottom=0.12,
+            bottom=bottom_margin,
             top=0.92,
             wspace=0.08,
             hspace=0.08,
         )
         _fit_grid_sequence_labels(figure, axes)
+        vertical_title = bottom_left_axis.annotate(
+            axis_title,
+            xy=(0, 0.5),
+            xycoords=bottom_left_axis.yaxis.label,
+            xytext=(-4, 0),
+            textcoords="offset points",
+            ha="center",
+            va="center",
+            rotation=90,
+            rotation_mode="anchor",
+            fontsize=axis_title_size,
+            fontfamily=DEFAULT_FONT_FAMILY,
+            annotation_clip=False,
+        )
+        vertical_title.set_gid("grid-y-axis-title")
         set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
     except Exception:
         plt.close(figure)
@@ -1878,7 +2154,7 @@ def create_grid(
             grid_prefix,
             vector_format,
             dpi,
-            bbox_inches="tight",
+            bbox_inches=figure.bbox_inches,
         )
     finally:
         plt.close(figure)
@@ -1979,41 +2255,32 @@ def create_plots(
             print("Skipping annotation track generation.\n")
 
     if is_pairwise:
-        heatmap = make_dot(
-            sdf,
-            name_x,
-            name_y,
-            palette,
-            palette_orientation,
-            custom_colors,
-            axes_labels,
-            axes_tick_number,
-            xlim,
-            deraster,
-            width,
-            True,
-        )
         print(f"Creating plots and saving to {plot_filename}...\n")
         full_suffix = "_DIRECTION_FULL" if directional else "_COMPARE"
         hist_suffix = "_DIRECTION_HIST" if directional else "_COMPARE_HIST"
-        _save_plot(
-            heatmap,
+        full_figure = _build_full_figure(
+            sdf=sdf,
+            name_x=name_x,
+            name_y=name_y,
+            palette=palette,
+            palette_orientation=palette_orientation,
+            custom_colors=custom_colors,
+            axes_labels=axes_labels,
+            xlim=xlim,
+            deraster=deraster,
             width=width,
-            height=width,
-            dpi=dpi,
-            format=vector_format,
-            filename=f"{plot_filename}{full_suffix}.{vector_format}",
-            verbose=False,
+            is_pairwise=True,
         )
-        _save_plot(
-            heatmap,
-            width=width,
-            height=width,
-            dpi=dpi,
-            format="png",
-            filename=f"{plot_filename}{full_suffix}.png",
-            verbose=False,
-        )
+        try:
+            save_figure_pair(
+                full_figure,
+                f"{plot_filename}{full_suffix}",
+                vector_format,
+                dpi,
+                bbox_inches=full_figure.bbox_inches,
+            )
+        finally:
+            plt.close(full_figure)
         created_files.extend(
             [
                 f"{plot_filename}{full_suffix}.{vector_format}",
@@ -2021,14 +2288,13 @@ def create_plots(
             ]
         )
         if not no_hist:
-            _save_plot(
+            _draw_and_save_plot_pair(
                 histy,
+                f"{plot_filename}{hist_suffix}",
                 width=3,
                 height=3,
                 dpi=dpi,
-                format=vector_format,
-                filename=f"{plot_filename}{hist_suffix}.{vector_format}",
-                verbose=False,
+                vector_format=vector_format,
             )
             created_files.extend(
                 [
@@ -2036,27 +2302,11 @@ def create_plots(
                     f"{plot_filename}{hist_suffix}.png",
                 ]
             )
-            _save_plot(
-                histy,
-                width=3,
-                height=3,
-                dpi=dpi,
-                format="png",
-                filename=f"{plot_filename}{hist_suffix}.png",
-                verbose=False,
-            )
-        try:
-            if not heatmap.data:
-                print(
-                    f"{plot_filename} comparative plots and histogram saved sucessfully. \n"
-                )
-                return created_files
-        except ValueError:
+        if not no_hist:
             print(
                 f"{plot_filename} comparative plots and histogram saved sucessfully. \n"
             )
-            return created_files
-        if no_hist:
+        else:
             print(
                 f"{plot_filename}{full_suffix}.{vector_format} and "
                 f"{plot_filename}{full_suffix}.png saved sucessfully. \n"
@@ -2067,46 +2317,37 @@ def create_plots(
             print(
                 f"Producing dotplots with derasterization turned off. This may take a while...\n"
             )
-        full_plot = make_dot(
-            check_st_en_equality(sdf),
-            name_x,
-            name_y,
-            palette,
-            palette_orientation,
-            custom_colors,
-            axes_labels,
-            axes_tick_number,
-            xlim,
-            deraster,
-            width,
-            False,
-        )
         full_suffix = "_DIRECTION_FULL" if directional else "_FULL"
         tri_suffix = "_DIRECTION_TRI" if directional else "_TRI"
         hist_suffix = "_DIRECTION_HIST" if directional else "_HIST"
-        _save_plot(
-            full_plot,
+        full_figure = _build_full_figure(
+            sdf=sdf,
+            name_x=name_x,
+            name_y=name_y,
+            palette=palette,
+            palette_orientation=palette_orientation,
+            custom_colors=custom_colors,
+            axes_labels=axes_labels,
+            xlim=xlim,
+            deraster=deraster,
             width=width,
-            height=width,
-            dpi=dpi,
-            format=vector_format,
-            filename=f"{plot_filename}{full_suffix}.{vector_format}",
-            verbose=False,
+            is_pairwise=False,
         )
+        try:
+            save_figure_pair(
+                full_figure,
+                f"{plot_filename}{full_suffix}",
+                vector_format,
+                dpi,
+                bbox_inches=full_figure.bbox_inches,
+            )
+        finally:
+            plt.close(full_figure)
         created_files.extend(
             [
                 f"{plot_filename}{full_suffix}.{vector_format}",
                 f"{plot_filename}{full_suffix}.png",
             ]
-        )
-        _save_plot(
-            full_plot,
-            width=width,
-            height=width,
-            dpi=dpi,
-            format="png",
-            filename=f"{plot_filename}{full_suffix}.png",
-            verbose=False,
         )
         tri_prefix = f"{plot_filename}{tri_suffix}"
         triangle_figure = _build_triangle_figure(
@@ -2168,23 +2409,13 @@ def create_plots(
                 f"Triangle plots and full plots for {plot_filename} saved sucessfully. \n"
             )
         else:
-            _save_plot(
+            _draw_and_save_plot_pair(
                 histy,
+                f"{plot_filename}{hist_suffix}",
                 width=3,
                 height=3,
                 dpi=dpi,
-                format=vector_format,
-                filename=plot_filename + f"{hist_suffix}.{vector_format}",
-                verbose=False,
-            )
-            _save_plot(
-                histy,
-                width=3,
-                height=3,
-                dpi=dpi,
-                format="png",
-                filename=plot_filename + f"{hist_suffix}.png",
-                verbose=False,
+                vector_format=vector_format,
             )
             created_files.extend(
                 [

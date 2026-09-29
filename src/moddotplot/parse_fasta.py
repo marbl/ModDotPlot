@@ -8,10 +8,12 @@ from typing import (
     TextIO,
     Tuple,
 )
+from bisect import bisect_right
 import sys
 import os
 import pickle
 import re
+import struct
 import numpy as np
 import gzip
 
@@ -28,9 +30,50 @@ class FastaIndexEntry(NamedTuple):
     line_width: int
 
 
+class BgzfIndexEntry(NamedTuple):
+    compressed_offset: int
+    uncompressed_offset: int
+
+
 def _is_gzip(filename: str) -> bool:
     with open(filename, "rb") as probe:
         return probe.read(2) == b"\x1f\x8b"
+
+
+def _is_bgzf(filename: str) -> bool:
+    """Return whether *filename* starts with a BGZF gzip member.
+
+    BGZF is distinguished from ordinary gzip by the ``BC`` extra subfield in
+    each member header.  Checking the header prevents an unrelated or stale
+    ``.gzi`` file from making a normal gzip stream look seekable.
+    """
+
+    try:
+        with open(filename, "rb") as compressed:
+            fixed_header = compressed.read(12)
+            if (
+                len(fixed_header) != 12
+                or fixed_header[:3] != b"\x1f\x8b\x08"
+                or not fixed_header[3] & 0x04
+            ):
+                return False
+            extra_length = struct.unpack_from("<H", fixed_header, 10)[0]
+            extra = compressed.read(extra_length)
+    except OSError:
+        return False
+
+    offset = 0
+    while offset + 4 <= len(extra):
+        subfield_id = extra[offset : offset + 2]
+        subfield_length = struct.unpack_from("<H", extra, offset + 2)[0]
+        offset += 4
+        subfield_end = offset + subfield_length
+        if subfield_end > len(extra):
+            return False
+        if subfield_id == b"BC" and subfield_length == 2:
+            return True
+        offset = subfield_end
+    return False
 
 
 def _open_fasta_text(filename: str) -> TextIO:
@@ -48,8 +91,6 @@ def _open_fasta_text(filename: str) -> TextIO:
 def _read_fasta_index(filename: str) -> Optional[List[FastaIndexEntry]]:
     """Read a fresh samtools-style ``.fai`` index when one is available."""
 
-    if _is_gzip(filename):
-        return None
     index_path = f"{os.fspath(filename)}.fai"
     if not os.path.isfile(index_path):
         return None
@@ -87,6 +128,70 @@ def _read_fasta_index(filename: str) -> Optional[List[FastaIndexEntry]]:
     return entries or None
 
 
+def _read_bgzf_index(filename: str) -> Optional[List[BgzfIndexEntry]]:
+    """Read a fresh samtools-style ``.gzi`` index for a BGZF stream.
+
+    ``.gzi`` stores compressed and uncompressed offsets for every BGZF block
+    after the first.  The implicit origin is added here so callers can binary
+    search every uncompressed FASTA byte offset, including offsets in block 0.
+    Malformed, stale, or unrelated indexes are ignored and the FASTA reader can
+    transparently fall back to sequential gzip decompression.
+    """
+
+    if not _is_bgzf(filename):
+        return None
+    index_path = f"{os.fspath(filename)}.gzi"
+    if not os.path.isfile(index_path):
+        return None
+    try:
+        if os.path.getmtime(index_path) < os.path.getmtime(filename):
+            return None
+        index_size = os.path.getsize(index_path)
+        compressed_size = os.path.getsize(filename)
+        with open(index_path, "rb") as index:
+            count_bytes = index.read(8)
+            if len(count_bytes) != 8:
+                return None
+            entry_count = struct.unpack("<Q", count_bytes)[0]
+            if index_size != 8 + entry_count * 16:
+                return None
+            entries = [
+                BgzfIndexEntry(*struct.unpack("<QQ", index.read(16)))
+                for _ in range(entry_count)
+            ]
+    except (OSError, OverflowError, struct.error):
+        return None
+
+    if not entries or entries[0] != BgzfIndexEntry(0, 0):
+        entries.insert(0, BgzfIndexEntry(0, 0))
+    previous = entries[0]
+    if previous != BgzfIndexEntry(0, 0):
+        return None
+    for entry in entries[1:]:
+        if (
+            entry.compressed_offset <= previous.compressed_offset
+            or entry.uncompressed_offset <= previous.uncompressed_offset
+            or entry.compressed_offset >= compressed_size
+        ):
+            return None
+        previous = entry
+    return entries
+
+
+def supports_indexed_fasta_access(filename: str) -> bool:
+    """Return whether individual records can be fetched without a full scan.
+
+    Plain FASTA needs a fresh ``.fai``.  Compressed FASTA additionally needs
+    to be BGZF with a usable ``.gzi``.  This predicate is intentionally
+    conservative because the chromosome process pool must never make every
+    worker decompress an ordinary gzip stream from the beginning.
+    """
+
+    if _read_fasta_index(filename) is None:
+        return False
+    return not _is_gzip(filename) or _read_bgzf_index(filename) is not None
+
+
 def _iter_fasta_headers(filename: str) -> Iterator[str]:
     """Yield FASTA identifiers without assembling or validating sequences."""
 
@@ -119,8 +224,38 @@ def _iter_fasta_headers(filename: str) -> Iterator[str]:
         raise ValueError(f"Invalid FASTA {filename!s}: no FASTA records found")
 
 
+def _read_bgzf_range(
+    filename: str,
+    bgzf_index: Sequence[BgzfIndexEntry],
+    start: int,
+    size: int,
+) -> bytes:
+    """Read an uncompressed byte range from a BGZF stream."""
+
+    if start < 0 or size < 0:
+        raise ValueError("BGZF byte ranges must be non-negative")
+    uncompressed_offsets = [entry.uncompressed_offset for entry in bgzf_index]
+    block_number = bisect_right(uncompressed_offsets, start) - 1
+    if block_number < 0:
+        raise ValueError("BGZF index does not contain the start of the stream")
+    block = bgzf_index[block_number]
+    skip = start - block.uncompressed_offset
+
+    with open(filename, "rb") as compressed:
+        compressed.seek(block.compressed_offset)
+        with gzip.GzipFile(fileobj=compressed, mode="rb") as uncompressed:
+            if len(uncompressed.read(skip)) != skip:
+                raise ValueError("BGZF index points past the end of the FASTA stream")
+            return uncompressed.read(size)
+
+
 def _fetch_indexed_region(
-    filename: str, entry: FastaIndexEntry, start: int, end: int
+    filename: str,
+    entry: FastaIndexEntry,
+    start: int,
+    end: int,
+    *,
+    bgzf_index: Optional[Sequence[BgzfIndexEntry]] = None,
 ) -> str:
     """Fetch one 1-based inclusive interval directly from an indexed FASTA."""
 
@@ -143,9 +278,21 @@ def _fetch_indexed_region(
         + (end_index // entry.line_bases) * entry.line_width
         + end_index % entry.line_bases
     )
-    with open(filename, "rb") as fasta:
-        fasta.seek(start_byte)
-        raw_sequence = fasta.read(end_byte - start_byte + 1)
+    byte_count = end_byte - start_byte + 1
+    if _is_gzip(filename):
+        if bgzf_index is None:
+            bgzf_index = _read_bgzf_index(filename)
+        if bgzf_index is None:
+            raise ValueError(
+                f"Compressed FASTA {filename!s} does not have a usable BGZF .gzi index"
+            )
+        raw_sequence = _read_bgzf_range(
+            filename, bgzf_index, start_byte, byte_count
+        )
+    else:
+        with open(filename, "rb") as fasta:
+            fasta.seek(start_byte)
+            raw_sequence = fasta.read(byte_count)
 
     sequence_bytes = raw_sequence.replace(b"\n", b"").replace(b"\r", b"")
     expected_length = end - start + 1
@@ -160,16 +307,25 @@ def _fetch_indexed_region(
 
 
 def _iter_selected_fasta_records(
-    filename: str, regions, single_record: bool
+    filename: str, regions, record_ids=None
 ) -> Iterator[Tuple[str, str]]:
-    """Stream selected intervals, stopping early for a one-record FASTA."""
+    """Stream requested FASTA records and intervals in file order."""
+
+    requested_ids = None if record_ids is None else list(record_ids)
+    if requested_ids is not None and len(requested_ids) != len(set(requested_ids)):
+        raise ValueError("FASTA record identifiers must be unique")
+    requested_set = None if requested_ids is None else set(requested_ids)
+    if requested_set == set():
+        return
 
     sequence_id = None
     sequence_parts = []
     sequence_position = 0
     selected_region = None
     selection_complete = False
+    collect_sequence = False
     seen_ids = set()
+    yielded_ids = set()
 
     def selected_sequence():
         sequence = "".join(sequence_parts)
@@ -186,8 +342,11 @@ def _iter_selected_fasta_records(
     with _open_fasta_text(filename) as fasta:
         for line_number, raw_line in enumerate(fasta, start=1):
             if raw_line.startswith(">"):
-                if sequence_id is not None:
+                if sequence_id is not None and collect_sequence:
                     yield sequence_id, selected_sequence()
+                    yielded_ids.add(sequence_id)
+                    if requested_set is not None and yielded_ids == requested_set:
+                        return
 
                 description = raw_line[1:].strip()
                 if not description:
@@ -203,7 +362,10 @@ def _iter_selected_fasta_records(
                 seen_ids.add(sequence_id)
                 sequence_parts = []
                 sequence_position = 0
-                selected_region = regions.get(sequence_id) if regions else None
+                collect_sequence = requested_set is None or sequence_id in requested_set
+                selected_region = (
+                    regions.get(sequence_id) if collect_sequence and regions else None
+                )
                 selection_complete = False
                 continue
 
@@ -225,6 +387,8 @@ def _iter_selected_fasta_records(
                     f"Invalid FASTA {filename!s}: whitespace within sequence data "
                     f"at line {line_number}"
                 )
+            if not collect_sequence:
+                continue
 
             line_start = sequence_position + 1
             line_end = sequence_position + len(line)
@@ -239,7 +403,10 @@ def _iter_selected_fasta_records(
                 sequence_position = line_end
                 if sequence_position >= end:
                     selection_complete = True
-                    if single_record:
+                    if (
+                        requested_set is not None
+                        and (yielded_ids | {sequence_id}) == requested_set
+                    ):
                         yield sequence_id, selected_sequence()
                         return
             else:
@@ -248,7 +415,108 @@ def _iter_selected_fasta_records(
 
     if sequence_id is None:
         raise ValueError(f"Invalid FASTA {filename!s}: no FASTA records found")
-    yield sequence_id, selected_sequence()
+    if collect_sequence:
+        yield sequence_id, selected_sequence()
+
+
+def _sequence_label(sequence_id: str, regions) -> str:
+    if regions and sequence_id in regions:
+        _name, start, end = regions[sequence_id]
+        return f"{sequence_id}:{start}-{end}"
+    return sequence_id
+
+
+def iter_fasta_records(
+    filename: str, regions=None, record_ids=None
+) -> Iterator[Tuple[str, str, str]]:
+    """Yield selected records as ``(identifier, sequence, display_label)``.
+
+    A supplied ``record_ids`` sequence controls output order; with no explicit
+    selection, records retain index or FASTA file order. Fresh ``.fai`` indexes
+    provide record metadata for every FASTA. Plain FASTA and BGZF inputs with a
+    valid ``.gzi`` are fetched directly, while ordinary gzip and unusable BGZF
+    indexes retain the sequential decompression fallback.
+    """
+
+    requested_ids = None if record_ids is None else list(record_ids)
+    if requested_ids is not None and len(requested_ids) != len(set(requested_ids)):
+        raise ValueError("FASTA record identifiers must be unique")
+
+    fasta_index = _read_fasta_index(filename)
+    indexed_entries = (
+        {entry.name: entry for entry in fasta_index} if fasta_index else None
+    )
+    if indexed_entries is not None:
+        selected_ids = (
+            list(indexed_entries) if requested_ids is None else requested_ids
+        )
+        missing_ids = [
+            sequence_id
+            for sequence_id in selected_ids
+            if sequence_id not in indexed_entries
+        ]
+        if missing_ids:
+            formatted = ", ".join(repr(sequence_id) for sequence_id in missing_ids)
+            raise ValueError(f"FASTA record(s) not found: {formatted}")
+
+        compressed = _is_gzip(filename)
+        bgzf_index = _read_bgzf_index(filename) if compressed else None
+        if not compressed or bgzf_index is not None:
+            for sequence_id in selected_ids:
+                entry = indexed_entries[sequence_id]
+                if regions and sequence_id in regions:
+                    _name, start, end = regions[sequence_id]
+                else:
+                    start, end = 1, entry.length
+                sequence = _fetch_indexed_region(
+                    filename,
+                    entry,
+                    start,
+                    end,
+                    bgzf_index=bgzf_index,
+                )
+                yield sequence_id, sequence, _sequence_label(sequence_id, regions)
+            return
+    else:
+        selected_ids = requested_ids
+
+    streamed_records = _iter_selected_fasta_records(
+        filename, regions, record_ids=selected_ids
+    )
+    if selected_ids is None:
+        for sequence_id, sequence in streamed_records:
+            yield sequence_id, sequence, _sequence_label(sequence_id, regions)
+        return
+
+    # Streaming naturally discovers records in file order. Buffer only records
+    # that precede the next explicitly requested identifier so the public API
+    # can preserve caller order without requiring a separate header scan.
+    pending = {}
+    seen_selected = set()
+    selected_position = 0
+    for sequence_id, sequence in streamed_records:
+        pending[sequence_id] = sequence
+        seen_selected.add(sequence_id)
+        while (
+            selected_position < len(selected_ids)
+            and selected_ids[selected_position] in pending
+        ):
+            selected_id = selected_ids[selected_position]
+            yield (
+                selected_id,
+                pending.pop(selected_id),
+                _sequence_label(selected_id, regions),
+            )
+            selected_position += 1
+
+    if selected_position != len(selected_ids):
+        missing_ids = [
+            sequence_id
+            for sequence_id in selected_ids
+            if sequence_id not in seen_selected
+        ]
+        formatted = ", ".join(repr(sequence_id) for sequence_id in missing_ids)
+        raise ValueError(f"FASTA record(s) not found: {formatted}")
 
 
 def _iter_fasta_records(filename: str) -> Iterator[Tuple[str, str]]:
@@ -521,54 +789,10 @@ def readKmersFromFile(
     Given a filename and an integer k, returns a list of all k-mers found in the sequences in the file.
     """
     all_kmers = []
-    record_ids = (
-        list(record_ids) if record_ids is not None else getInputHeaders(filename)
-    )
-    fasta_index = _read_fasta_index(filename)
-    indexed_entries = (
-        {entry.name: entry for entry in fasta_index}
-        if fasta_index and [entry.name for entry in fasta_index] == record_ids
-        else None
-    )
-
-    if indexed_entries is not None:
-
-        def indexed_records():
-            for seq_id in record_ids:
-                entry = indexed_entries[seq_id]
-                if regions and seq_id in regions:
-                    _name, start, end = regions[seq_id]
-                else:
-                    start, end = 1, entry.length
-                sequence_label = (
-                    f"{seq_id}:{start}-{end}"
-                    if regions and seq_id in regions
-                    else seq_id
-                )
-                print(f"Retrieving k-mers from {sequence_label}.... \n")
-                sequence = _fetch_indexed_region(filename, entry, start, end)
-                yield seq_id, sequence, sequence_label
-
-        selected_records = indexed_records()
-    else:
-        selected_records = (
-            (
-                seq_id,
-                sequence,
-                (
-                    f"{seq_id}:{regions[seq_id][1]}-{regions[seq_id][2]}"
-                    if regions and seq_id in regions
-                    else seq_id
-                ),
-            )
-            for seq_id, sequence in _iter_selected_fasta_records(
-                filename, regions, single_record=len(record_ids) == 1
-            )
-        )
-
-    for seq_id, sequence, sequence_label in selected_records:
-        if indexed_entries is None:
-            print(f"Retrieving k-mers from {sequence_label}.... \n")
+    for seq_id, sequence, sequence_label in iter_fasta_records(
+        filename, regions=regions, record_ids=record_ids
+    ):
+        print(f"Retrieving k-mers from {sequence_label}.... \n")
         if len(sequence) < ksize:
             if regions and seq_id in regions:
                 _name, start, end = regions[seq_id]
@@ -605,4 +829,7 @@ def getInputHeaders(filename: str) -> List[str]:
 
 
 def getInputSeqLength(filename: str) -> List[int]:
+    fasta_index = _read_fasta_index(filename)
+    if fasta_index is not None:
+        return [entry.length for entry in fasta_index]
     return [len(sequence) for _sequence_id, sequence in _iter_fasta_records(filename)]
