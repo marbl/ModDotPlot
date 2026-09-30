@@ -1647,9 +1647,11 @@ def _build_full_figure(
             breaks=breaks,
         )
         _divisor, unit = genomic_scale(region_end)
+        genomic_axis_title_size = clamped_font_size(width, 1.575)
+        sequence_axis_title_size = clamped_font_size(width, 3.0)
         axis.set_xlabel(
             f"Genomic Position ({unit})",
-            fontsize=clamped_font_size(width, 2.8),
+            fontsize=genomic_axis_title_size,
             fontfamily=DEFAULT_FONT_FAMILY,
         )
         axis.tick_params(
@@ -1668,16 +1670,16 @@ def _build_full_figure(
         # placing the descriptive title independently above them.
         axis.set_title(
             display_x,
-            fontsize=clamped_font_size(width, 1.2),
+            fontsize=sequence_axis_title_size,
             fontfamily=DEFAULT_FONT_FAMILY,
-            pad=5,
+            pad=9,
         )
         axis.set_ylabel(
             display_y,
-            fontsize=clamped_font_size(width, 1.2),
+            fontsize=sequence_axis_title_size,
             fontfamily=DEFAULT_FONT_FAMILY,
             rotation=-90,
-            labelpad=16,
+            labelpad=28,
         )
         axis.yaxis.set_label_position("right")
 
@@ -1690,7 +1692,7 @@ def _build_full_figure(
             title,
             fontsize=max(MIN_TITLE_SIZE, title_size),
             fontfamily=DEFAULT_FONT_FAMILY,
-            y=0.975,
+            y=0.92,
         )
         figure.subplots_adjust(
             left=0.14,

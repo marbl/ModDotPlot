@@ -77,6 +77,48 @@ def test_native_full_self_plot_mirrors_only_missing_triangle(deraster):
         plt.close(figure)
 
 
+@pytest.mark.parametrize("is_pairwise", [False, True])
+def test_native_full_plot_uses_requested_typography(is_pairwise):
+    name_y = "chr21" if is_pairwise else "chr20"
+    frame = _processed_tiles([("chr20", 0, 1_000_000, name_y, 0, 1_000_000, 100.0, 1)])
+
+    figure = static_plots._build_full_figure(
+        sdf=frame,
+        name_x="chr20",
+        name_y=name_y,
+        palette="Spectral_11",
+        palette_orientation="+",
+        custom_colors=None,
+        axes_labels=None,
+        xlim=(0, 66_000_000),
+        deraster=False,
+        width=9,
+        is_pairwise=is_pairwise,
+    )
+    try:
+        axis = figure.axes[0]
+        assert axis.xaxis.label.get_fontsize() == pytest.approx(14.175)
+        assert axis.title.get_fontsize() == pytest.approx(27.0)
+        assert axis.yaxis.label.get_fontsize() == pytest.approx(27.0)
+        assert axis.yaxis.labelpad == pytest.approx(28)
+        assert figure._suptitle.get_position()[1] == pytest.approx(0.92)
+        title_offset = axis.title.get_transform().transform((0, 0))[1]
+        axes_origin = axis.transAxes.transform((0, 0))[1]
+        assert title_offset - axes_origin == pytest.approx(9 * figure.dpi / 72)
+
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        axis_box = axis.get_window_extent(renderer)
+        assert axis.title.get_window_extent(renderer).y0 > axis_box.y1
+        assert axis.yaxis.label.get_window_extent(renderer).x0 > axis_box.x1
+        assert (
+            figure._suptitle.get_window_extent(renderer).y0
+            > axis.title.get_window_extent(renderer).y1
+        )
+    finally:
+        plt.close(figure)
+
+
 def test_native_full_self_plot_does_not_duplicate_loaded_symmetric_rows():
     frame = _processed_tiles(
         [
@@ -220,7 +262,8 @@ def test_native_comparative_direction_colors_preserve_hue_and_ani_strength():
         assert colors[0, 2] > colors[0, 0]
         assert colors[1, 0] > colors[1, 2]
         assert np.mean(colors[1, :3]) < np.mean(colors[0, :3])
-        assert figure.axes[0].get_title() == "query"
-        assert figure.axes[0].get_ylabel() == "reference"
+        axis = figure.axes[0]
+        assert axis.get_title() == "query"
+        assert axis.get_ylabel() == "reference"
     finally:
         plt.close(figure)
