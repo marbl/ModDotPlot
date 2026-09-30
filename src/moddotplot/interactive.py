@@ -1,4 +1,3 @@
-import plotly.express as px
 from moddotplot.estimate_identity import (
     getInteractiveColor,
     getMatchingColors,
@@ -9,13 +8,11 @@ from moddotplot.estimate_identity import (
 )
 
 import numpy as np
-import dash
-from dash import Input, Output, html, dcc, State
 import math
-import plotly.graph_objs as go
 import logging
 import os
 from moddotplot.annotations import visible_annotation_intervals
+from moddotplot.optional_dependencies import OptionalDependencyError
 from moddotplot.parse_fasta import extractRegion
 
 INTERACTIVE_FONT_FAMILY = "Helvetica, 'DejaVu Sans', sans-serif"
@@ -23,6 +20,29 @@ INTERACTIVE_FONT_FAMILY = "Helvetica, 'DejaVu Sans', sans-serif"
 # Prevent HTTP protocol requests from showing up in terminal
 log = logging.getLogger("werkzeug")
 log.setLevel(logging.ERROR)
+
+
+def require_interactive_dependencies():
+    """Load the optional Dash and Plotly stack on demand."""
+
+    try:
+        import dash
+        from dash import Input, Output, State, dcc, html
+        import plotly.express as px
+        import plotly.graph_objs as go
+    except ModuleNotFoundError as error:
+        raise OptionalDependencyError("Interactive mode") from error
+
+    return {
+        "dash": dash,
+        "Input": Input,
+        "Output": Output,
+        "State": State,
+        "dcc": dcc,
+        "html": html,
+        "px": px,
+        "go": go,
+    }
 
 
 def _plotly_annotation_color(color):
@@ -263,6 +283,16 @@ def run_dash(
     output_dir,
     annotations=None,
 ):
+    dependencies = require_interactive_dependencies()
+    dash = dependencies["dash"]
+    Input = dependencies["Input"]
+    Output = dependencies["Output"]
+    State = dependencies["State"]
+    dcc = dependencies["dcc"]
+    html = dependencies["html"]
+    px = dependencies["px"]
+    go = dependencies["go"]
+
     # Run Dash app
     app = dash.Dash(__name__, prevent_initial_callbacks="initial_duplicate")
     app.title = "ModDotPlot"

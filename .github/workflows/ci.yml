@@ -15,6 +15,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  base-install:
+    name: Base install without optional dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the base package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+
+      - name: Verify optional packages were not installed
+        run: |
+          python -m pip check
+          python -c "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('cooler', 'dash', 'plotly'))"
+          python -c "import sys; import moddotplot.moddotplot; assert not {'cooler', 'dash', 'plotly', 'moddotplot.interactive'}.intersection(sys.modules)"
+          python -m moddotplot --help
+
   tests:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -23,6 +53,7 @@ jobs:
       fail-fast: false
       matrix:
         python-version:
+          - "3.10"
           - "3.11"
           - "3.12"
           - "3.13"
@@ -46,7 +77,7 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --editable ".[test]"
+          python -m pip install --editable ".[test,interactive]"
 
       - name: Run unit and integration tests
         run: >-

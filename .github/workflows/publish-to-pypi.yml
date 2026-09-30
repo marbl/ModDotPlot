@@ -42,7 +42,7 @@ jobs:
       - name: Install package and tests
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[test]"
+          python -m pip install ".[test,interactive]"
 
       - name: Run the release test suite
         run: python -m pytest
@@ -100,13 +100,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # The extension uses CPython's stable ABI. Building once with CPython 3.11
+      # The extension uses CPython's stable ABI. Building once with CPython 3.10
       # produces a cp38-abi3 wheel that supports every Python version declared
       # by the package without compiling the same binary repeatedly.
       - name: Build stable-ABI wheel
         uses: pypa/cibuildwheel@v4.2.0
         env:
-          CIBW_BUILD: "cp311-*"
+          CIBW_BUILD: "cp310-*"
           CIBW_SKIP: "*-musllinux_*"
           CIBW_ARCHS_MACOS: universal2
           CIBW_TEST_COMMAND: >-

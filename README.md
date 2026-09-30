@@ -1,9 +1,9 @@
 ![](images/logo.png)
+
 ---
 [![PyPI](https://img.shields.io/pypi/v/ModDotPlot?color=blue&label=PyPI)](https://pypi.org/project/ModDotPlot/)
 [![CI](https://github.com/marbl/ModDotPlot/actions/workflows/ci.yml/badge.svg)](https://github.com/marbl/ModDotPlot/actions/workflows/ci.yml)
 
-- [](#)
 - [Cite](#cite)
 - [About](#about)
 - [Installation](#installation)
@@ -51,7 +51,7 @@ If you're interested in learning more about _ModDotPlot_ and how to visualize ta
 
 ## Installation
 
-_ModDotPlot_ can be installed by running `pip install moddotplot`. Version 1.0.0 supports Python 3.11 through 3.14 and uses the current Matplotlib 3.11 and Plotnine 0.15 release lines. Alternatively, you can download the current release from GitHub by using:
+_ModDotPlot_ can be installed for static plotting by running `pip install moddotplot`. Interactive plotting and Cooler export use optional dependencies; install them with `pip install "ModDotPlot[interactive]"`. ModDotPlot supports Python 3.10 through 3.14, using Matplotlib 3.10.9 or newer on Python 3.10, Matplotlib 3.11.2 or newer on later Python versions, and the Plotnine 0.15 release line. Alternatively, you can download the current release from GitHub by using:
 
 ```
 git clone https://github.com/marbl/ModDotPlot.git
@@ -65,10 +65,16 @@ python -m venv venv
 source venv/bin/activate
 ```
 
-Once activated, you can install the required dependencies:
+Once activated, install either the base package for static plotting:
 
 ```
 python -m pip install .
+```
+
+or include the optional interactive plotting and Cooler dependencies:
+
+```
+python -m pip install ".[interactive]"
 ```
 
 Finally, confirm that the installation was installed correctly and that your version is up to date by running `moddotplot -h`:
@@ -138,7 +144,9 @@ moddotplot interactive <ARGS>
 
 Interactive mode is deprecated and maintenance-only. It remains available, but
 will not receive new features. It runs only when the `interactive` subcommand is
-explicitly provided.
+explicitly provided. Install its optional dependencies with
+`pip install "ModDotPlot[interactive]"`, or `pip install ".[interactive]"` from
+a source checkout.
 
 Running _ModDotPlot_ in interactive mode will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot (this should happen automatically, but depending on your environment you might need to copy and paste this URL into your web browser). Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info, and [Sample run - Port Forwarding](#sample-run---port-forwarding) for tips on running interactive mode on an HPC environment).
 
@@ -224,7 +232,7 @@ IDs are errors. When using a config file, provide the same list under the
 
 `--cooler <bool>`
 
-If set, will output a matrix as a cooler file for each input sequence, in addition to a bedpe file.
+If set, will output a matrix as a Cooler file for each input sequence, in addition to a BEDPE file. Cooler support is part of the optional dependency set installed with `pip install "ModDotPlot[interactive]"` (or `pip install ".[interactive]"` from a source checkout).
 
 `--no-bedpe <bool>`
 
@@ -546,4 +554,4 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 
 - Mac users might encounter the following unexpected command line output: `/bin/sh: lscpu: command not found`. This is a known issue with Plotnine, the Python plotting library used by ModDotPlot. This can be safely ignored.
 
-- The error ` UserWarning: h5py is running against HDF5 1.xx.x when it was built against 1.xx.x, this may cause problems` is due to the h5py library used by cooler having conflicting versions in the dependency tree. This can also be safely ignored, but if you want to remove this message run `pip uninstall -y h5py` `pip install --no-binary=h5py h5py`
+- When the optional `ModDotPlot[interactive]` dependencies are installed, Cooler may report `UserWarning: h5py is running against HDF5 1.xx.x when it was built against 1.xx.x, this may cause problems`. This can be safely ignored. To remove the warning, reinstall h5py against the local HDF5 library with `pip uninstall -y h5py` followed by `pip install --no-binary=h5py h5py`.

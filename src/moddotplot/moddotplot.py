@@ -20,6 +20,7 @@ from moddotplot.estimate_identity import (
     convertMatrixToBedDataFrame,
     iterMatrixToBedChunks,
     convertMatrixToCool,
+    require_cooler_dependency,
     createSelfMatrix,
     createPairwiseMatrix,
     create_self_matrix_from_sketches,
@@ -28,9 +29,9 @@ from moddotplot.estimate_identity import (
     ModimizerSketchCache,
     partitionOverlaps,
 )
-from moddotplot.interactive import interactive_axis_bounds, run_dash
 from moddotplot.annotations import read_annotation_beds
 from moddotplot.const import ASCII_ART, VERSION
+from moddotplot.optional_dependencies import OptionalDependencyError
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -52,6 +53,9 @@ from moddotplot.plot_summary import PlotSummaryWriter
 read_df_from_file = None
 create_plots = None
 create_grid = None
+interactive_axis_bounds = None
+run_dash = None
+require_interactive_dependencies = None
 
 COMMANDS = frozenset({"interactive", "static"})
 INTERACTIVE_DEPRECATION_MESSAGE = (
@@ -71,6 +75,21 @@ def _load_static_plotting():
         create_plots = static_plots.create_plots
     if create_grid is None:
         create_grid = static_plots.create_grid
+
+
+def _load_interactive_plotting():
+    """Load Dash/Plotly integration only when an interactive UI is requested."""
+
+    global interactive_axis_bounds, run_dash, require_interactive_dependencies
+
+    from moddotplot import interactive
+
+    if interactive_axis_bounds is None:
+        interactive_axis_bounds = interactive.interactive_axis_bounds
+    if run_dash is None:
+        run_dash = interactive.run_dash
+    if require_interactive_dependencies is None:
+        require_interactive_dependencies = interactive.require_interactive_dependencies
 
 
 def get_parser():
@@ -359,7 +378,12 @@ def get_parser():
     )
 
     static_parser.add_argument(
-        "--cooler", action="store_true", help="Output matrix to cooler file."
+        "--cooler",
+        action="store_true",
+        help=(
+            "Output matrix to a Cooler file. Requires the optional "
+            "ModDotPlot[interactive] dependencies."
+        ),
     )
 
     static_parser.add_argument(
@@ -1248,6 +1272,25 @@ def main():
     print(ASCII_ART)
     print(f"v{VERSION} \n")
     args = parse_args()
+
+    # Matrix-only interactive exports do not use Dash or Plotly. Every path
+    # that opens the interactive UI validates its extra before doing expensive
+    # sequence work.
+    matrix_only_interactive = (
+        args.command == "interactive"
+        and args.save
+        and args.no_plot
+        and not getattr(args, "load", None)
+    )
+    needs_interactive_ui = args.command == "interactive" and not matrix_only_interactive
+    if needs_interactive_ui:
+        _load_interactive_plotting()
+        try:
+            require_interactive_dependencies()
+        except OptionalDependencyError as error:
+            print(f"Error: {error}", file=sys.stderr)
+            sys.exit(2)
+
     summary_writer = PlotSummaryWriter(shlex.join(sys.argv))
     annotation_df = None
     if args.command == "interactive" and args.bed:
@@ -1304,6 +1347,13 @@ def main():
             with open(args.config, "r") as f:
                 config = json.load(f)
                 _apply_static_config(args, config)
+
+        if args.cooler:
+            try:
+                require_cooler_dependency()
+            except OptionalDependencyError as error:
+                print(f"Error: {error}", file=sys.stderr)
+                sys.exit(2)
 
         try:
             args.processes = _validated_process_count(args.processes)

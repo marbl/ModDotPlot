@@ -11,10 +11,10 @@ from moddotplot.const import (
 from palettable import colorbrewer
 from typing import Collection, Hashable, List, Set, Dict, Tuple
 import pandas as pd
-import cooler
 from scipy.sparse import csr_matrix
 
 from moddotplot import _nthash
+from moddotplot.optional_dependencies import OptionalDependencyError
 from moddotplot.parse_fasta import printProgressBar
 
 
@@ -713,6 +713,16 @@ def convertMatrixToBed(
     return bed
 
 
+def require_cooler_dependency():
+    """Return Cooler or explain how to install the optional export support."""
+
+    try:
+        import cooler
+    except ModuleNotFoundError as error:
+        raise OptionalDependencyError("Cooler export") from error
+    return cooler
+
+
 def convertMatrixToCool(
     matrix,
     window_size,
@@ -740,6 +750,7 @@ def convertMatrixToCool(
         chromsizes (dict): Dict of chromosome lengths, e.g. {"chr1": 248956422}.
         output_cool (str): Path to save cooler file.
     """
+    cooler = require_cooler_dependency()
     rows, cols = matrix.shape
 
     # ---- build bin table ----

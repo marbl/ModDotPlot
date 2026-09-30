@@ -19,14 +19,18 @@ def _run_module(*arguments):
     )
 
 
-def test_help_does_not_import_static_rendering_stack():
+def test_base_entrypoint_imports_neither_rendering_nor_optional_stacks():
     result = subprocess.run(
         [
             sys.executable,
             "-c",
             (
                 "import sys; import moddotplot.moddotplot; "
-                "assert 'moddotplot.static_plots' not in sys.modules"
+                "unexpected = {"
+                "'moddotplot.static_plots', 'moddotplot.interactive', "
+                "'cooler', 'dash', 'plotly'"
+                "}.intersection(sys.modules); "
+                "assert not unexpected, sorted(unexpected)"
             ),
         ],
         cwd=PROJECT_ROOT,
