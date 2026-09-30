@@ -121,7 +121,7 @@ jobs:
         run: |
           python -c "import pathlib; wheel = next(pathlib.Path('dist').glob('*.whl')); assert 'cp38-abi3' in wheel.name, wheel.name"
           python -m pip install --no-deps --force-reinstall dist/*.whl
-          python -c "import importlib.metadata as m, pathlib, tomllib; expected = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']; actual = m.metadata('ModDotPlot'); assert m.version('ModDotPlot') == expected['version']; assert actual['Requires-Python'] == expected['requires-python']"
+          python -c "import importlib.metadata as m, pathlib, tomllib; from packaging.specifiers import SpecifierSet; expected = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']; actual = m.metadata('ModDotPlot'); assert m.version('ModDotPlot') == expected['version']; assert SpecifierSet(actual['Requires-Python']) == SpecifierSet(expected['requires-python'])"
           python -c "from moddotplot import _nthash; hashes, mask = _nthash.hash_kmers('ACGTACGT', 3, True); assert len(hashes) == 48 and mask == b''"
 
       - name: Store distributions

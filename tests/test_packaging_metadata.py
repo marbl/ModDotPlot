@@ -92,6 +92,13 @@ def test_ci_covers_every_supported_python_minor():
     assert '          - "3.10"' not in workflow
 
 
+def test_package_ci_compares_python_specifiers_semantically():
+    workflow = (PROJECT_ROOT / ".github/workflows/ci.yml").read_text()
+
+    assert "SpecifierSet(actual['Requires-Python'])" in workflow
+    assert "SpecifierSet(expected['requires-python'])" in workflow
+
+
 def test_release_workflow_is_tag_gated_and_uses_trusted_publishing():
     workflow = (PROJECT_ROOT / ".github/workflows/publish-to-pypi.yml").read_text()
     setup_config = (PROJECT_ROOT / "setup.cfg").read_text()

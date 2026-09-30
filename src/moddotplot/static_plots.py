@@ -156,7 +156,11 @@ def _fit_grid_sequence_labels(figure, axes):
             title_box = title.get_window_extent(renderer=renderer)
             axis_box = axis.get_window_extent(renderer=renderer)
             if title_box.width:
-                ratios.append(axis_box.width * 0.9 / title_box.width)
+                # Font fallback and hinting can change the final extent by a
+                # fraction of a pixel on another backend. Leave enough
+                # headroom that fitted labels remain inside their panels
+                # after the renderer rounds the scaled font size.
+                ratios.append(axis_box.width * 0.88 / title_box.width)
 
     for axis in axes[:, 0]:
         label = axis.yaxis.label
@@ -164,7 +168,7 @@ def _fit_grid_sequence_labels(figure, axes):
             label_box = label.get_window_extent(renderer=renderer)
             axis_box = axis.get_window_extent(renderer=renderer)
             if label_box.height:
-                ratios.append(axis_box.height * 0.9 / label_box.height)
+                ratios.append(axis_box.height * 0.88 / label_box.height)
 
     artists = [axis.title for axis in axes[0, :]] + [
         axis.yaxis.label for axis in axes[:, 0]
@@ -2077,7 +2081,9 @@ def _build_grid_figure(
             axis_title,
             xy=(0, 0.5),
             xycoords=bottom_left_axis.yaxis.label,
-            xytext=(-4, 0),
+            # Keep the shared title visibly separate from the adjacent row
+            # label under both Helvetica and Matplotlib's fallback fonts.
+            xytext=(-6, 0),
             textcoords="offset points",
             ha="center",
             va="center",

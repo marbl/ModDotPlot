@@ -4,6 +4,7 @@ import numpy as np
 from pathlib import Path
 import pytest
 
+import moddotplot.static_plots as static_plots
 from moddotplot.const import DIRECTION_COLORS
 from moddotplot.native_render import FALLBACK_FONT_FAMILY, set_figure_font_family
 from moddotplot.static_plots import _build_grid_figure, create_grid
@@ -331,7 +332,8 @@ def test_full_self_comparison_input_is_not_mirrored_twice():
         plt.close(figure)
 
 
-def test_grid_region_names_fit_panels_and_numeric_labels_are_doubled():
+def test_grid_region_names_fit_panels_and_numeric_labels_are_doubled(monkeypatch):
+    monkeypatch.setattr(static_plots, "DEFAULT_FONT_FAMILY", FALLBACK_FONT_FAMILY)
     names = [
         "PAN010.chr14.haplotype1.paternal:1-4000000",
         "PAN010.chr14.haplotype2.maternal:1-4000000",
@@ -430,7 +432,10 @@ def test_grid_exact_bounds_do_not_expand_to_next_nice_tick():
     ("axis_end", "unit"),
     [(100_000, "Kbp"), (103_156_783, "Mbp"), (500_000_000, "Gbp")],
 )
-def test_grid_labels_genomic_units_only_on_bottom_left_cell(axis_end, unit):
+def test_grid_labels_genomic_units_only_on_bottom_left_cell(
+    axis_end, unit, monkeypatch
+):
+    monkeypatch.setattr(static_plots, "DEFAULT_FONT_FAMILY", FALLBACK_FONT_FAMILY)
     kwargs = _basic_two_sequence_grid(
         xlim=(1, axis_end),
         axes_label=None,
@@ -470,7 +475,7 @@ def test_grid_labels_genomic_units_only_on_bottom_left_cell(axis_end, unit):
         assert horizontal_bounds.x0 + horizontal_bounds.width / 2 <= cell_bounds.x1
         assert cell_bounds.y0 <= vertical_bounds.y0 + vertical_bounds.height / 2
         assert vertical_bounds.y0 + vertical_bounds.height / 2 <= cell_bounds.y1
-        assert vertical_bounds.x1 <= row_label_bounds.x0
+        assert vertical_bounds.x1 + 1 <= row_label_bounds.x0
         for bounds in (horizontal_bounds, vertical_bounds):
             assert figure_bounds.contains(bounds.x0, bounds.y0)
             assert figure_bounds.contains(bounds.x1, bounds.y1)
