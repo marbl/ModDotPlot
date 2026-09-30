@@ -2,7 +2,6 @@ import sys
 
 from setuptools import Extension, setup
 
-
 if sys.platform == "win32":
     compile_args = ["/O2", "/std:c++17"]
 else:

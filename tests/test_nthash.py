@@ -9,7 +9,6 @@ from moddotplot.parse_fasta import (
     generateKmersFromFasta,
 )
 
-
 UPSTREAM_SEQUENCE = "ACATGCATGCA"
 UPSTREAM_CANONICAL_K5 = np.array(
     [

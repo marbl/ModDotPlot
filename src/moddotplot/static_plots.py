@@ -64,7 +64,6 @@ from moddotplot.annotations import (
     visible_annotation_intervals as _visible_annotation_intervals,
 )
 
-
 REGION_SUFFIX_PATTERN = re.compile(r"(?::\d+-\d+)+$")
 
 
@@ -1549,19 +1548,14 @@ def _missing_symmetric_rows(dataframe):
     # MultiIndexes for that common case; a strict start-coordinate ordering
     # proves that no transposed off-diagonal row can already be present.
     start_difference = (
-        q_start.loc[off_diagonal].to_numpy()
-        - r_start.loc[off_diagonal].to_numpy()
+        q_start.loc[off_diagonal].to_numpy() - r_start.loc[off_diagonal].to_numpy()
     )
     if np.all(start_difference < 0) or np.all(start_difference > 0):
         return dataframe.loc[off_diagonal, render_columns]
 
     existing = pd.MultiIndex.from_arrays([q_start, q_end, r_start, r_end])
-    mirrored = pd.MultiIndex.from_arrays(
-        [r_start, r_end, q_start, q_end]
-    )
-    return dataframe.loc[
-        off_diagonal & ~mirrored.isin(existing), render_columns
-    ]
+    mirrored = pd.MultiIndex.from_arrays([r_start, r_end, q_start, q_end])
+    return dataframe.loc[off_diagonal & ~mirrored.isin(existing), render_columns]
 
 
 def _full_plot_limits(dataframe, requested_limit):
@@ -2140,9 +2134,11 @@ def create_grid(
     )
     grid_size = axes.shape[0]
     directional = any(
-        "direction" in matrix.columns
-        if isinstance(matrix, pd.DataFrame)
-        else bool(matrix) and "direction" in matrix[0]
+        (
+            "direction" in matrix.columns
+            if isinstance(matrix, pd.DataFrame)
+            else bool(matrix) and "direction" in matrix[0]
+        )
         for matrix in [*singles, *doubles]
     )
     grid_label = "DIRECTION_GRID" if directional else "GRID"

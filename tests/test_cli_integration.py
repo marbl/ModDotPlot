@@ -5,7 +5,6 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 

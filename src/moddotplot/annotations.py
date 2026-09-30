@@ -3,7 +3,6 @@
 import numpy as np
 import pandas as pd
 
-
 DEFAULT_ANNOTATION_COLOR = "#4C72B0"
 BED_COLUMNS = [
     "chrom",

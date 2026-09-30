@@ -4,7 +4,6 @@ from plotnine.geoms.geom_tile import geom_tile
 
 from moddotplot.static_plots import make_dot, make_dot_final, make_dot_grid, make_tri
 
-
 GENOME_SIZE = 496_000_000
 WINDOW_SIZE = 2_000
 

@@ -46,7 +46,6 @@ import shlex
 
 from moddotplot.plot_summary import PlotSummaryWriter
 
-
 # Static plotting pulls in the Plotnine and Matplotlib stacks. Keep those
 # imports behind the static command boundary so ``--help`` and interactive
 # mode do not pay their startup cost.
@@ -797,9 +796,7 @@ def _matrix_config_for_length(kmer_count, args):
         requested_resolution = int(args.resolution)
         if requested_resolution <= 0:
             raise ValueError("resolution must be greater than zero")
-        window_size = max(
-            int(args.kmer), math.ceil(kmer_count / requested_resolution)
-        )
+        window_size = max(int(args.kmer), math.ceil(kmer_count / requested_resolution))
         resolution = math.ceil(kmer_count / window_size)
 
     if window_size < 10:
@@ -830,9 +827,7 @@ def _write_bedpe(path, rows):
     row_iterator = iter(rows)
     with open(path, "w") as bedfile:
         while batch := list(islice(row_iterator, 8192)):
-            bedfile.writelines(
-                "\t".join(map(str, row)) + "\n" for row in batch
-            )
+            bedfile.writelines("\t".join(map(str, row)) + "\n" for row in batch)
 
 
 def _write_matrix_bedpe(path, chunks):
@@ -869,9 +864,7 @@ def _annotate_bed_direction_frame(
     try:
         values = np.asarray(forward_matrix)[query_indices, reference_indices]
     except IndexError as error:
-        raise ValueError(
-            "BEDPE coordinates fall outside direction matrices"
-        ) from error
+        raise ValueError("BEDPE coordinates fall outside direction matrices") from error
     annotated["direction"] = np.where(values > 0, "Forward", "Reverse")
     return annotated
 
@@ -1034,9 +1027,7 @@ def _process_static_self_record(
                 chromsizes=kmer_count,
                 output_cool=cooler_output,
             )
-            print(
-                f"Saved self-identity matrix as a cooler file to {cooler_output}\n"
-            )
+            print(f"Saved self-identity matrix as a cooler file to {cooler_output}\n")
         except Exception as error:
             print(f"Error creating cooler file: {error}")
 
@@ -1201,9 +1192,8 @@ def _run_streaming_static_self(
         for sequence_id in fasta_headers[fasta_path]
     ]
     unique_record_ids = {task[2] for task in tasks}
-    indexed_access = (
-        len(unique_record_ids) == len(tasks)
-        and all(supports_indexed_fasta_access(path) for path in fasta_list)
+    indexed_access = len(unique_record_ids) == len(tasks) and all(
+        supports_indexed_fasta_access(path) for path in fasta_list
     )
     process_count = _streaming_process_count(args, len(tasks), indexed_access)
 
@@ -1575,8 +1565,7 @@ def main():
         and not args.grid_only
         and args.compare_order == "sequential"
         and all(
-            os.path.isfile(path) and os.path.getsize(path) > 0
-            for path in fasta_list
+            os.path.isfile(path) and os.path.getsize(path) > 0 for path in fasta_list
         )
     )
     if streaming_static_self:
@@ -2367,9 +2356,7 @@ def main():
                     )
 
                     try:
-                        matrix_config = _matrix_config_for_length(
-                            smaller_length, args
-                        )
+                        matrix_config = _matrix_config_for_length(smaller_length, args)
                     except ValueError as error:
                         print(f"Error: {error}.\n")
                         sys.exit(2)

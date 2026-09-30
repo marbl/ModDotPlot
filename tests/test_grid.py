@@ -8,7 +8,6 @@ from moddotplot.const import DIRECTION_COLORS
 from moddotplot.native_render import FALLBACK_FONT_FAMILY, set_figure_font_family
 from moddotplot.static_plots import _build_grid_figure, create_grid
 
-
 BED_HEADER = (
     "#query_name",
     "query_start",

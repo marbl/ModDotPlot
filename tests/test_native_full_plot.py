@@ -186,6 +186,8 @@ def test_create_plots_uses_native_comparative_renderer_and_exact_canvas(
     assert svg.read_bytes().lstrip().startswith(b"<?xml")
     with Image.open(png) as image:
         assert image.size == (80, 80)
+
+
 def test_native_comparative_direction_colors_preserve_hue_and_ani_strength():
     frame = _processed_tiles(
         [

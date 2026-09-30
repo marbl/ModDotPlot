@@ -8,7 +8,6 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from moddotplot.const import VERSION
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 

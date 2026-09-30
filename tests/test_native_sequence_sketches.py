@@ -12,9 +12,7 @@ from moddotplot.parse_fasta import _hash_sequence
 def _legacy_sketches(
     sequence, window_size, sparsity, delta, k, ambiguous, expectation, canonical
 ):
-    hashes = _hash_sequence(
-        sequence, k, fw_only=not canonical, ambiguous=ambiguous
-    )
+    hashes = _hash_sequence(sequence, k, fw_only=not canonical, ambiguous=ambiguous)
     return prepare_modimizer_sketches(
         len(hashes),
         hashes,

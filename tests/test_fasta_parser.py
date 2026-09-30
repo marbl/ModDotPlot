@@ -257,9 +257,7 @@ def test_stale_bgzf_gzi_keeps_sequential_fallback(tmp_path, monkeypatch):
 
     monkeypatch.setattr(fasta_parser, "_fetch_indexed_region", fail_indexed_fetch)
 
-    assert list(iter_fasta_records(fasta)) == [
-        ("alpha", records[0][1], "alpha")
-    ]
+    assert list(iter_fasta_records(fasta)) == [("alpha", records[0][1], "alpha")]
 
 
 def test_public_record_iterator_preserves_requested_order_and_reports_missing(tmp_path):

@@ -286,9 +286,7 @@ def _fetch_indexed_region(
             raise ValueError(
                 f"Compressed FASTA {filename!s} does not have a usable BGZF .gzi index"
             )
-        raw_sequence = _read_bgzf_range(
-            filename, bgzf_index, start_byte, byte_count
-        )
+        raw_sequence = _read_bgzf_range(filename, bgzf_index, start_byte, byte_count)
     else:
         with open(filename, "rb") as fasta:
             fasta.seek(start_byte)
@@ -447,9 +445,7 @@ def iter_fasta_records(
         {entry.name: entry for entry in fasta_index} if fasta_index else None
     )
     if indexed_entries is not None:
-        selected_ids = (
-            list(indexed_entries) if requested_ids is None else requested_ids
-        )
+        selected_ids = list(indexed_entries) if requested_ids is None else requested_ids
         missing_ids = [
             sequence_id
             for sequence_id in selected_ids

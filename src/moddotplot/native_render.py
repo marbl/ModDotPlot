@@ -21,7 +21,6 @@ from matplotlib.transforms import Bbox
 import numpy as np
 import pandas as pd
 
-
 ColorSource = Union[Sequence[str], Mapping[object, str]]
 TickFormatter = Callable[[float, int], str]
 
