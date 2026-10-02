@@ -288,15 +288,18 @@ def get_parser():
     )
 
     # -----------STATIC MODE SUBCOMMANDS-----------
-    static_input_group = static_parser.add_mutually_exclusive_group(required=True)
-    static_input_group.add_argument(
+    static_parser.add_argument(
         "-c",
         "--config",
         default=None,
         type=str,
-        help="Config file to use. Takes precedence over any other competing command line arguments.",
+        help=(
+            "Config file to use. Explicit input and output paths take precedence; "
+            "config values take precedence for other competing arguments."
+        ),
     )
 
+    static_input_group = static_parser.add_mutually_exclusive_group(required=False)
     static_input_group.add_argument(
         "-l",
         "--load",
@@ -609,14 +612,38 @@ def _arguments_with_default_command(arguments=None):
 def parse_args(arguments=None):
     """Parse command-line arguments, defaulting omitted subcommands to static."""
 
-    return get_parser().parse_args(_arguments_with_default_command(arguments))
+    parser = get_parser()
+    args = parser.parse_args(_arguments_with_default_command(arguments))
+    if args.command == "static" and not any(
+        (
+            args.config,
+            getattr(args, "load", None),
+            getattr(args, "fasta", None),
+        )
+    ):
+        subparsers_action = next(
+            action
+            for action in parser._actions
+            if isinstance(action, argparse._SubParsersAction)
+        )
+        subparsers_action.choices["static"].error(
+            "one of the arguments -c/--config -l/--load -f/--fasta is required"
+        )
+    return args
 
 
 def _apply_static_config(args, config):
     """Apply static-mode JSON configuration values to parsed arguments."""
     # TODO: Remove args that are interactive only
-    args.fasta = config.get("fasta")
-    args.load = config.get("load")
+    cli_fasta = getattr(args, "fasta", None)
+    cli_load = getattr(args, "load", None)
+    cli_output_dir = args.output_dir
+    if cli_fasta is not None or cli_load is not None:
+        args.fasta = cli_fasta
+        args.load = cli_load
+    else:
+        args.fasta = config.get("fasta")
+        args.load = config.get("load")
     args.bed = config.get("bed")
 
     # Distance matrix commands
@@ -624,12 +651,21 @@ def _apply_static_config(args, config):
     args.modimizer = config.get("modimizer", args.modimizer)
     args.resolution = config.get("resolution", args.resolution)
     args.window = config.get("window", args.window)
-    args.sequence = config.get("sequence", args.sequence)
-    args.pairs = config.get("pairs", args.pairs)
-    args.region = config.get("region", args.region)
+    if args.load:
+        args.sequence = None
+        args.pairs = None
+        args.region = None
+    else:
+        args.sequence = config.get("sequence", args.sequence)
+        args.pairs = config.get("pairs", args.pairs)
+        args.region = config.get("region", args.region)
     args.identity = config.get("identity", args.identity)
     args.delta = config.get("delta", args.delta)
-    args.output_dir = config.get("output_dir", args.output_dir)
+    args.output_dir = (
+        cli_output_dir
+        if cli_output_dir is not None
+        else config.get("output_dir", args.output_dir)
+    )
     args.compare = config.get("compare", args.compare)
     args.compare_only = config.get("compare_only", args.compare_only)
     args.compare_order = config.get("compare_order", args.compare_order)
@@ -797,6 +833,12 @@ def _bedpe_window_sizes(dataframe):
             sizes = dataframe[end] - dataframe[start]
             return sorted({int(size) for size in sizes if size > 0})
     return []
+
+
+def _filter_loaded_identity(dataframe, identity):
+    """Apply the requested identity threshold to loaded BEDPE rows."""
+
+    return dataframe.loc[dataframe["perID_by_events"] >= identity].copy()
 
 
 def _regions_from_names(names):
@@ -2200,6 +2242,7 @@ def _main(arguments):
             for bed in args.load:
                 # If args.load is provided as input, run static mode directly from the paired-end bed file. Skip counting input k-mers.
                 df = read_df_from_file(bed)
+                df = _filter_loaded_identity(df, args.identity)
 
                 unique_query_names = df["#query_name"].unique()
                 unique_reference_names = df["reference_name"].unique()

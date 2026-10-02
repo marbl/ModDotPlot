@@ -8,7 +8,37 @@ from moddotplot.static_plots import (
     generate_breaks,
     get_colors,
     make_dot,
+    read_df_from_file,
 )
+
+
+def test_read_df_from_file_normalizes_browser_bedpe_export(tmp_path):
+    bedpe = tmp_path / "browser.bedpe"
+    bedpe.write_text(
+        "# moddotplot-interactive current-view BEDPE export\n"
+        '# provenance={"software":"0.9.5"}\n'
+        "#chrom1\tstart1\tend1\tchrom2\tstart2\tend2\tname\tscore\t"
+        "strand1\tstrand2\tani_c\tdirection\tdirection_support\n"
+        "chr1\t10\t20\tchr1\t30\t40\tani_c=0.9750\t975\t+\t+\t"
+        "0.9750\t1.000000\t12\n"
+    )
+
+    data = read_df_from_file(bedpe)
+
+    assert data.columns.tolist() == [
+        "#query_name",
+        "query_start",
+        "query_end",
+        "reference_name",
+        "reference_start",
+        "reference_end",
+        "perID_by_events",
+    ]
+    assert data.loc[0, "#query_name"] == "chr1"
+    assert data.loc[0, "query_start"] == 10
+    assert data.loc[0, "reference_name"] == "chr1"
+    assert data.loc[0, "reference_start"] == 30
+    assert data.loc[0, "perID_by_events"] == pytest.approx(97.5)
 
 
 def test_get_colors_uses_string_custom_breakpoints():

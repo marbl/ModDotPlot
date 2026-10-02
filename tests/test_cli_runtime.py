@@ -3,6 +3,7 @@ import shlex
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import moddotplot.moddotplot as cli
@@ -281,6 +282,31 @@ def test_parser_defaults_omitted_subcommand_to_static():
     assert args.no_plot
 
 
+def test_static_parser_accepts_config_with_explicit_load_and_output():
+    args = cli.parse_args(
+        [
+            "--load",
+            "matrix.bedpe",
+            "--config",
+            "plot.json",
+            "--output-dir",
+            "plots",
+        ]
+    )
+
+    assert args.command == "static"
+    assert args.load == ["matrix.bedpe"]
+    assert args.config == "plot.json"
+    assert args.output_dir == "plots"
+
+
+def test_static_parser_still_rejects_load_with_fasta():
+    with pytest.raises(SystemExit) as exc_info:
+        cli.parse_args(["--load", "matrix.bedpe", "--fasta", "sequence.fa"])
+
+    assert exc_info.value.code == 2
+
+
 def test_parser_preserves_explicit_interactive_subcommand():
     args = cli.parse_args(["interactive", "--fasta", "sequence.fa"])
 
@@ -447,6 +473,48 @@ def test_static_config_accepts_sequence_selection():
     )
 
     assert args.sequence == ["chr1", "chr2"]
+
+
+def test_static_config_preserves_explicit_input_and_output_paths():
+    args = cli.parse_args(
+        [
+            "--config",
+            "plot.json",
+            "--load",
+            "provided/matrix.bedpe",
+            "--output-dir",
+            "provided/plots",
+        ]
+    )
+
+    cli._apply_static_config(
+        args,
+        {
+            "fasta": ["configured.fa"],
+            "load": ["configured/matrix.bedpe"],
+            "output_dir": "configured/plots",
+            "palette": "Blues_7",
+            "sequence": ["chr1"],
+            "pairs": "pairs.tsv",
+            "region": ["chr1:1-100"],
+        },
+    )
+
+    assert args.fasta is None
+    assert args.load == ["provided/matrix.bedpe"]
+    assert args.output_dir == "provided/plots"
+    assert args.palette == "Blues_7"
+    assert args.sequence is None
+    assert args.pairs is None
+    assert args.region is None
+
+
+def test_loaded_bedpe_rows_are_filtered_at_identity_threshold():
+    data = pd.DataFrame({"perID_by_events": [73.0, 91.699, 91.7, 100.0]})
+
+    filtered = cli._filter_loaded_identity(data, 91.7)
+
+    assert filtered["perID_by_events"].tolist() == [91.7, 100.0]
 
 
 def test_static_delta_defaults_to_half_window():

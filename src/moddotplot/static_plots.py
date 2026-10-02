@@ -441,6 +441,46 @@ def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
 
 # TODO: Remove pandas dependency
 def read_df_from_file(file_path):
+    browser_columns = None
+    with open(file_path, "r", encoding="utf-8") as bedpe:
+        for line in bedpe:
+            if line.startswith("#chrom1\t"):
+                browser_columns = line[1:].rstrip("\r\n").split("\t")
+                break
+            if not line.startswith("#"):
+                break
+
+    if browser_columns is not None:
+        data = pd.read_csv(
+            file_path,
+            delimiter="\t",
+            comment="#",
+            names=browser_columns,
+            usecols=(
+                "chrom1",
+                "start1",
+                "end1",
+                "chrom2",
+                "start2",
+                "end2",
+                "ani_c",
+            ),
+        )
+        data.rename(
+            columns={
+                "chrom1": "#query_name",
+                "start1": "query_start",
+                "end1": "query_end",
+                "chrom2": "reference_name",
+                "start2": "reference_start",
+                "end2": "reference_end",
+                "ani_c": "perID_by_events",
+            },
+            inplace=True,
+        )
+        data["perID_by_events"] *= 100
+        return data
+
     data = pd.read_csv(file_path, delimiter="\t")
     return data
 
