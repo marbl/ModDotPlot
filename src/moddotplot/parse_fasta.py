@@ -660,35 +660,12 @@ def generateKmersFromFasta(
     The public iterator remains compatible with existing callers.  Ambiguous
     windows are yielded as ``None`` unless ``ambiguous`` is enabled, while the
     FASTA reader below keeps the compact bulk NumPy representation in memory.
+    ``quiet`` is retained for call compatibility; hashing no longer emits a
+    progress display in either mode.
     """
-    total_kmers = max(len(seq) - k + 1, 0)
-    if not quiet:
-        printProgressBar(
-            0, total_kmers, prefix="Progress:", suffix="Complete", length=40
-        )
-
     hashes = _hash_sequence(seq, k, fw_only, ambiguous)
-    progress_threshold = max(round(total_kmers / 77), 1)
-    for index, kmer_hash in enumerate(hashes):
-        if not quiet and index % progress_threshold == 0:
-            printProgressBar(
-                index,
-                total_kmers,
-                prefix="Progress:",
-                suffix="Complete",
-                length=40,
-            )
-
+    for kmer_hash in hashes:
         yield None if np.ma.is_masked(kmer_hash) else int(kmer_hash)
-
-        if not quiet and index == total_kmers - 1:
-            printProgressBar(
-                total_kmers,
-                total_kmers,
-                prefix="Progress:",
-                suffix="Completed",
-                length=40,
-            )
 
 
 def isValidFasta(file_path):
@@ -759,17 +736,9 @@ def printProgressBar(
     fill="█",
     printEnd="\r",
 ):
-    if total <= 0:
-        percent = f"{100:.{decimals}f}"
-        filledLength = length
-    else:
-        percent = f"{100 * (iteration / total):.{decimals}f}"
-        filledLength = int(length * iteration // total)
-    bar = [fill] * filledLength + ["-"] * (length - filledLength)
-    bar_str = "".join(bar)
-    print(f"\r{prefix} |{bar_str}| {percent}% {suffix}", end=printEnd)
-    if iteration == total:
-        print()
+    """Compatibility no-op retained after removal of progress displays."""
+
+    return None
 
 
 def readKmersFromFile(
@@ -788,7 +757,8 @@ def readKmersFromFile(
     for seq_id, sequence, sequence_label in iter_fasta_records(
         filename, regions=regions, record_ids=record_ids
     ):
-        print(f"Retrieving k-mers from {sequence_label}.... \n")
+        if not quiet:
+            print(f"Retrieving k-mers from {sequence_label}.... \n")
         if len(sequence) < ksize:
             if regions and seq_id in regions:
                 _name, start, end = regions[seq_id]
@@ -797,22 +767,10 @@ def readKmersFromFile(
                     f"{ksize}"
                 )
 
-        total_kmers = max(len(sequence) - ksize + 1, 0)
-        if not quiet:
-            printProgressBar(
-                0, total_kmers, prefix="Progress:", suffix="Complete", length=40
-            )
         kmers_for_seq = _hash_sequence(sequence, ksize, fw_only, ambiguous)
-        if not quiet:
-            printProgressBar(
-                total_kmers,
-                total_kmers,
-                prefix="Progress:",
-                suffix="Completed",
-                length=40,
-            )
         all_kmers.append(kmers_for_seq)
-        print(f"\n{sequence_label} k-mers retrieved! \n")
+        if not quiet:
+            print(f"\n{sequence_label} k-mers retrieved! \n")
 
     return all_kmers
 

@@ -8,14 +8,12 @@ from moddotplot.const import (
     DIVERGING_PALETTES,
     QUALITATIVE_PALETTES,
 )
-from palettable import colorbrewer
 from typing import Collection, Hashable, List, Set, Dict, Tuple
 import pandas as pd
 from scipy.sparse import csr_matrix
 
 from moddotplot import _nthash
 from moddotplot.optional_dependencies import OptionalDependencyError
-from moddotplot.parse_fasta import printProgressBar
 
 
 @dataclass(frozen=True)
@@ -781,8 +779,6 @@ def convertMatrixToCool(
 
     # ---- write cooler ----
     cooler.create_cooler(output_cool, bins=bins, pixels=pixels, ordered=True)
-    print(bins)
-    print(pixels)
 
     return output_cool
 
@@ -1028,7 +1024,6 @@ def selfContainmentMatrix(
     n = len(mod_set)
     if len(mod_set_neighbors) != n:
         raise IndexError("core and expanded self sketches must have equal lengths")
-    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
     intersection_counts = _sketch_intersection_counts(mod_set, mod_set_neighbors)
     core_sizes = np.fromiter((len(sketch) for sketch in mod_set), dtype=float, count=n)
     directional_containment = np.zeros((n, n), dtype=float)
@@ -1038,11 +1033,14 @@ def selfContainmentMatrix(
         out=directional_containment,
         where=core_sizes[:, np.newaxis] != 0,
     )
-    symmetric_containment = np.maximum(
-        directional_containment, directional_containment.T
+    del intersection_counts
+    np.maximum(
+        directional_containment,
+        directional_containment.T,
+        out=directional_containment,
     )
     containment_matrix = _identity_matrix_from_containment(
-        symmetric_containment, identity, k
+        directional_containment, identity, k
     )
 
     diagonal = np.full(n, 100.0)
@@ -1050,10 +1048,6 @@ def selfContainmentMatrix(
         diagonal[core_sizes == 0] = 0.0
     np.fill_diagonal(containment_matrix, diagonal)
 
-    printProgressBar(
-        n, n, prefix="Progress:", suffix="Completed", length=40
-    )  # show completed progress bar
-    print("\n")
     return containment_matrix
 
 
@@ -1064,7 +1058,7 @@ def pairwiseContainmentMatrix(
     mod_set_y_neighbors: List[Set[int]],
     identity: int,
     k: int,
-    supress_progress: bool,
+    supress_progress: bool = False,
 ) -> np.ndarray:
     """
     Calculate an updated identity matrix using specified parameters.
@@ -1076,8 +1070,7 @@ def pairwiseContainmentMatrix(
         mod_set_y_neighbors (List[Set[int]]): Neighbor sets for y-axis windows.
         identity (int): Resolution parameter.
         k (int): Value for the k parameter in the binomial_distance function.
-        supress_progress (bool): if true supresses the progress bar
-
+        supress_progress (bool): Retained for compatibility; has no effect.
     Returns:
         np.ndarray: A ``(len(mod_set_y), len(mod_set_x))`` identity matrix.
     """
@@ -1085,8 +1078,6 @@ def pairwiseContainmentMatrix(
     cols = len(mod_set_x)
     if len(mod_set_x_neighbors) != cols or len(mod_set_y_neighbors) != rows:
         raise IndexError("core and expanded pairwise sketches must have equal lengths")
-    if not supress_progress:
-        printProgressBar(0, rows, prefix="Progress:", suffix="Complete", length=40)
     x_core_sizes = np.fromiter(
         (len(sketch) for sketch in mod_set_x), dtype=float, count=cols
     )
@@ -1094,39 +1085,51 @@ def pairwiseContainmentMatrix(
         (len(sketch) for sketch in mod_set_y), dtype=float, count=rows
     )
 
-    # core X against expanded Y, transposed into the public (Y, X) layout.
-    x_to_y_counts = _sketch_intersection_counts(mod_set_x, mod_set_y_neighbors).T
-    x_to_y = np.zeros((rows, cols), dtype=float)
-    np.divide(
-        x_to_y_counts,
-        x_core_sizes[np.newaxis, :],
-        out=x_to_y,
-        where=x_core_sizes[np.newaxis, :] != 0,
-    )
-    if not supress_progress:
-        printProgressBar(
-            rows // 2, rows, prefix="Progress:", suffix="Complete", length=40
+    # Keep only the final containment matrix at full size. Both directional
+    # count calculations and the second floating-point direction are bounded
+    # row blocks, avoiding several simultaneous dense matrix-sized arrays.
+    containment_matrix = np.zeros((rows, cols), dtype=float)
+    # A default 1000x1000 plot stays in one native call per direction. Larger
+    # or rectangular matrices are split so their count temporaries remain
+    # bounded without penalizing the common resolution.
+    max_block_cells = 1_048_576
+    rows_per_block = max(1, max_block_cells // max(cols, 1))
+    for row_start in range(0, rows, rows_per_block):
+        row_end = min(row_start + rows_per_block, rows)
+        block = containment_matrix[row_start:row_end]
+
+        # core X against expanded Y, transposed into public (Y, X) layout.
+        x_to_y_counts = _sketch_intersection_counts(
+            mod_set_x, mod_set_y_neighbors[row_start:row_end]
+        ).T
+        np.divide(
+            x_to_y_counts,
+            x_core_sizes[np.newaxis, :],
+            out=block,
+            where=x_core_sizes[np.newaxis, :] != 0,
         )
+        del x_to_y_counts
 
-    # core Y against expanded X already has the public (Y, X) orientation.
-    y_to_x_counts = _sketch_intersection_counts(mod_set_y, mod_set_x_neighbors)
-    y_to_x = np.zeros((rows, cols), dtype=float)
-    np.divide(
-        y_to_x_counts,
-        y_core_sizes[:, np.newaxis],
-        out=y_to_x,
-        where=y_core_sizes[:, np.newaxis] != 0,
-    )
-    symmetric_containment = np.maximum(x_to_y, y_to_x)
+        # core Y against expanded X already has public (Y, X) orientation.
+        y_to_x_counts = _sketch_intersection_counts(
+            mod_set_y[row_start:row_end], mod_set_x_neighbors
+        )
+        y_to_x = np.zeros(block.shape, dtype=float)
+        block_y_sizes = y_core_sizes[row_start:row_end, np.newaxis]
+        np.divide(
+            y_to_x_counts,
+            block_y_sizes,
+            out=y_to_x,
+            where=block_y_sizes != 0,
+        )
+        del y_to_x_counts
+        np.maximum(block, y_to_x, out=block)
+        del y_to_x
+
     containment_matrix = _identity_matrix_from_containment(
-        symmetric_containment, identity, k
+        containment_matrix, identity, k
     )
 
-    if not supress_progress:
-        printProgressBar(
-            rows, rows, prefix="Progress:", suffix="Completed", length=40
-        )  # show completed progress bar
-        print("\n")
     return containment_matrix
 
 
@@ -1140,6 +1143,8 @@ def findElementsWithPrefix(lst, prefix):
 
 
 def getInteractiveColor(palette_name, palette_orientation):
+    from palettable import colorbrewer
+
     palettes = colorbrewer.COLOR_MAPS
     tmp_color = []
     new_palette = palette_name.split("_")

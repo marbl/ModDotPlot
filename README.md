@@ -175,6 +175,11 @@ K-mer size to use. This should be large enough to distinguish unique k-mers with
 
 Name of output directory for bed file & plots. Default is current working directory.
 
+`--quiet`
+
+Suppress all console output, including warnings and errors. The process exit
+status still indicates whether the run succeeded.
+
 `-id / --identity <int>`
 
 Minimum sequence identity cutoff threshold. Default is 86. While it is possible to go as low as 50% sequence identity, anything below 80% is not recommended. 
@@ -230,6 +235,15 @@ fallback (so `chr1` selects `Chr1`). Unknown, ambiguous, and duplicate requested
 IDs are errors. When using a config file, provide the same list under the
 `sequence` key, for example `"sequence": ["chr1", "chr2"]`.
 
+`--pairs <FILE>`
+
+Limit `--compare` or `--compare-only` to explicitly requested sequence pairs.
+The file contains two whitespace-delimited FASTA identifiers per line, in
+x-axis then y-axis order. Blank lines and lines beginning with `#` are ignored.
+Duplicate, self, unknown, and ambiguous pairs are errors. Indexed FASTA input
+is required so each requested record can be fetched without scanning the full
+genome.
+
 `--cooler <bool>`
 
 If set, will output a matrix as a Cooler file for each input sequence, in addition to a BEDPE file. Cooler support is part of the optional dependency set installed with `pip install "ModDotPlot[interactive]"` (or `pip install ".[interactive]"` from a source checkout).
@@ -248,13 +262,28 @@ Save .bedpe to file, but skip rendering of plots.
 
 `--processes <1-4>`
 
-Set the number of independent chromosome workers for self-only static runs.
-When omitted, ModDotPlot uses two workers while rendering or up to four for a
+Set the number of independent chromosome or comparison-group workers. When
+omitted, ModDotPlot uses two workers while rendering or up to four for a
 `--no-plot` run on multi-record FASTA files that have random-access indexes
-(`.fai`, plus `.gzi` for BGZF). This keeps default aggregate memory bounded;
-`--processes 4` opts into maximum plotting throughput. Ordinary gzip and
-unindexed inputs remain single-pass and sequential so they are not scanned
-once per worker. Use `--processes 1` for explicitly serial execution.
+(`.fai`, plus `.gzi` for BGZF). Comparative workers group pairs by their y-axis
+record and reuse that record's exact sketch. This keeps default aggregate
+memory bounded; `--processes 4` opts into maximum throughput. Ordinary gzip and
+unindexed inputs remain single-pass and sequential so they are not scanned once
+per worker. Use `--processes 1` for explicitly serial execution.
+
+`--memory-limit <GiB>`
+
+Set an aggregate memory budget for comparative workers. ModDotPlot estimates
+the largest pair-local sequence, sketch, matrix, and rendering footprint and
+reduces the worker count when necessary. When omitted, available memory is used
+when the operating system exposes it.
+
+`--sketch-cache <DIRECTORY>`
+
+Persist compact, prepared comparison sketches for reuse by later indexed runs.
+Cache entries are keyed by the FASTA path, size, modification time, record and
+region, strand mode, and every sketch parameter. Positional chromosome-wide
+k-mer arrays are never stored in this cache.
 
 `--width <float>`
 
@@ -369,9 +398,7 @@ $ moddotplot static -c config/config.json
 
 Running ModDotPlot in static mode
 
-Retrieving k-mers from Chr1:14000001-18000000.... 
-
-Progress: |████████████████████████████████████████| 100.0% Completed
+Retrieving k-mers from Chr1:14000001-18000000....
 
 Chr1:14000001-18000000 k-mers retrieved! 
 
@@ -384,9 +411,6 @@ Computing self identity matrix for Chr1:14000001-18000000...
         Modimizer sketch size: 1000
 
         Plot Resolution r: 1000
-
-Progress: |████████████████████████████████████████| 100.0% Completed
-
 
 Saved self-identity matrix as a paired-end bed file to Arabadopsis/Chr1:14000001-18000000/Chr1:14000001-18000000.bedpe
 
@@ -433,6 +457,26 @@ ModDotPlot can produce an a vs. b style dotplot for each pairwise combination of
 ```
 moddotplot static -f sequences/*_MATERNAL*.fa --compare-only
 ```
+
+For a diploid multi-record assembly, a pair manifest avoids comparing every
+chromosome and unplaced contig against every other record:
+
+```text
+# homologs.tsv
+chr1_mat_hsa1 chr1_pat_hsa1
+chr2_mat_hsa3 chr2_pat_hsa3
+```
+
+```bash
+moddotplot static -f diploid.fa.gz --compare-only \
+  --pairs homologs.tsv --processes 4 --memory-limit 32 \
+  --sketch-cache .moddotplot-sketches
+```
+
+For BGZF-compressed FASTA, both `.fai` and `.gzi` indexes must accompany the
+input. Indexed comparative mode fetches one record at a time, sketches it
+directly, and releases pair-local data before continuing; it does not retain a
+`uint64` positional hash for every base in the genome.
 
 ![](images/chr13_MATERNAL:1-4000000_chr14_MATERNAL:1-4000000_COMPARE.png)
 
@@ -495,9 +539,7 @@ $ moddotplot interactive -f sequences/Chr1_cen.fa
 
 Running ModDotPlot in interactive mode
 
-Retrieving k-mers from Chr1:14000000-18000000.... 
-
-Progress: |████████████████████████████████████████| 100.0% Completed
+Retrieving k-mers from Chr1:14000000-18000000....
 
 Chr1:14000000-18000000 k-mers retrieved! 
 
@@ -505,13 +547,7 @@ Building self-identity matrices for Chr1:14000000-18000000, using a minimum wind
 
 Layer 1 using window length 2000
 
-Progress: |████████████████████████████████████████| 100.0% Completed
-
-
 Layer 2 using window length 4000
-
-Progress: |████████████████████████████████████████| 100.0% Completed
-
 
 ModDotPlot interactive mode is successfully running on http://127.0.0.1:8050/ 
 

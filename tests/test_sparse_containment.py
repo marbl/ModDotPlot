@@ -69,7 +69,6 @@ def test_sparse_pairwise_matches_scalar_reference(identity, k):
         expanded_y,
         identity,
         k,
-        supress_progress=True,
     )
 
     np.testing.assert_allclose(actual, expected)
@@ -228,9 +227,7 @@ def test_matrix_path_does_not_fall_back_to_per_cell_set_intersections(monkeypatc
     core = [{index, index + 1} for index in range(250)]
     expanded = [sketch | {index + 2} for index, sketch in enumerate(core)]
 
-    matrix = pairwiseContainmentMatrix(
-        core, core, expanded, expanded, 0, 21, supress_progress=True
-    )
+    matrix = pairwiseContainmentMatrix(core, core, expanded, expanded, 0, 21)
 
     assert matrix.shape == (250, 250)
 

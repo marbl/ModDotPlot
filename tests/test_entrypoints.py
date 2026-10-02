@@ -63,3 +63,26 @@ def test_module_without_arguments_defaults_to_static_parser():
         result.stderr
     )
     assert "the following arguments are required: command" not in result.stderr
+
+
+def test_quiet_suppresses_parser_errors():
+    result = _run_module("--quiet")
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_quiet_suppresses_explicit_help_output():
+    result = _run_module("--quiet", "--help")
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+
+
+def test_abbreviated_quiet_option_is_rejected_without_silencing_the_error():
+    result = _run_module("--fasta", "sequence.fa", "--qui")
+
+    assert result.returncode == 2
+    assert "unrecognized arguments: --qui" in result.stderr

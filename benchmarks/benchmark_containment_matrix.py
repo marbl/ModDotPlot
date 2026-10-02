@@ -81,7 +81,6 @@ def main(argv=None):
         expanded,
         args.identity,
         args.kmer,
-        supress_progress=True,
     )
     pair_seconds = time.perf_counter() - started
 

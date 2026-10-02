@@ -42,6 +42,60 @@ def test_matrix_config_preserves_default_nuclear_chromosome_parameters():
     assert config.expectation == 1941
 
 
+def test_pair_plan_groups_by_y_axis_for_sketch_reuse(tmp_path):
+    records = [
+        cli.StaticSequenceRecord("input.fa", "alpha", 300),
+        cli.StaticSequenceRecord("input.fa", "beta", 200),
+        cli.StaticSequenceRecord("input.fa", "gamma", 100),
+    ]
+    args = SimpleNamespace(pairs=None, compare_order="sequential")
+
+    pairs = cli._plan_static_pairs(args, records)
+    groups = cli._group_static_pairs(pairs)
+
+    assert [(x.name, y.name) for x, y in pairs] == [
+        ("alpha", "beta"),
+        ("alpha", "gamma"),
+        ("beta", "gamma"),
+    ]
+    assert [(y.name, [x.name for x in xs]) for y, xs in groups] == [
+        ("beta", ["alpha"]),
+        ("gamma", ["alpha", "beta"]),
+    ]
+
+
+def test_persistent_sketch_cache_avoids_refetch_and_rehash(monkeypatch, tmp_path):
+    record = cli.StaticSequenceRecord(str(tmp_path / "input.fa"), "alpha", 400)
+    (tmp_path / "input.fa").write_text(">alpha\n" + "ACGT" * 100 + "\n")
+    args = SimpleNamespace(
+        sketch_cache=str(tmp_path / "cache"),
+        forward=False,
+        delta=0.5,
+        kmer=21,
+        ambiguous=False,
+    )
+    config = cli.MatrixConfig(100, 4, 10, 8, 12)
+    calls = []
+
+    def fetch(_record):
+        calls.append("fetch")
+        return "ACGT" * 100, "alpha", 1, 400
+
+    def prepare(*_args, **_kwargs):
+        calls.append("prepare")
+        values = np.asarray([1, 2, 3], dtype=np.uint64)
+        return cli.PreparedModimizerSketches([values], [values])
+
+    monkeypatch.setattr(cli, "_fetch_static_record", fetch)
+    monkeypatch.setattr(cli, "prepare_sequence_sketches", prepare)
+
+    first = cli._prepare_static_record_sketches(record, config, args, False)[0]
+    second = cli._prepare_static_record_sketches(record, config, args, False)[0]
+
+    assert calls == ["fetch", "prepare"]
+    np.testing.assert_array_equal(first.core[0], second.core[0])
+
+
 def test_streaming_self_runner_finishes_one_record_before_requesting_next(
     monkeypatch,
 ):
@@ -245,6 +299,44 @@ def test_static_parser_accepts_bounded_process_request():
     args = cli.parse_args(["--fasta", "sequence.fa", "--processes", "3"])
 
     assert args.processes == 3
+
+
+def test_quiet_is_available_in_static_and_interactive_modes():
+    static_args = cli.parse_args(["--fasta", "sequence.fa", "--quiet"])
+    leading_static_args = cli.parse_args(
+        ["--quiet", "static", "--fasta", "sequence.fa"]
+    )
+    interactive_args = cli.parse_args(
+        ["interactive", "--fasta", "sequence.fa", "--quiet"]
+    )
+    leading_interactive_args = cli.parse_args(
+        ["--quiet", "interactive", "--fasta", "sequence.fa"]
+    )
+
+    assert static_args.quiet is True
+    assert leading_static_args.quiet is True
+    assert leading_static_args.command == "static"
+    assert interactive_args.quiet is True
+    assert leading_interactive_args.quiet is True
+    assert leading_interactive_args.command == "interactive"
+
+
+def test_quiet_long_option_cannot_be_abbreviated():
+    with pytest.raises(SystemExit) as exc_info:
+        cli.parse_args(["--fasta", "sequence.fa", "--qui"])
+
+    assert exc_info.value.code == 2
+
+
+def test_quiet_output_redirection_is_restored(capsys):
+    with cli._silence_output(True):
+        print("hidden")
+        print("also hidden", file=sys.stderr)
+
+    print("visible")
+    captured = capsys.readouterr()
+    assert captured.out == "visible\n"
+    assert captured.err == ""
 
 
 @pytest.mark.parametrize("value", [0, 5, True, "many"])

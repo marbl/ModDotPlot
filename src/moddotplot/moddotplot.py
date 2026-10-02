@@ -6,6 +6,7 @@ from moddotplot.parse_fasta import (
     iter_fasta_records,
     supports_indexed_fasta_access,
     getInputHeaders,
+    getInputSeqLength,
     isValidFasta,
     extractFiles,
     extractRegion,
@@ -26,6 +27,7 @@ from moddotplot.estimate_identity import (
     create_self_matrix_from_sketches,
     create_pairwise_matrix_from_sketches,
     prepare_sequence_sketches,
+    PreparedModimizerSketches,
     ModimizerSketchCache,
     partitionOverlaps,
 )
@@ -35,9 +37,11 @@ from moddotplot.optional_dependencies import OptionalDependencyError
 
 import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from itertools import islice
 import math
+import hashlib
 import json
 import numpy as np
 import pickle
@@ -62,6 +66,19 @@ INTERACTIVE_DEPRECATION_MESSAGE = (
     "Warning: interactive mode is deprecated and maintenance-only. "
     "It remains available, but will not receive new features."
 )
+
+
+@contextmanager
+def _silence_output(enabled):
+    """Discard Python-level stdout and stderr while a quiet command runs."""
+
+    if not enabled:
+        yield
+        return
+
+    with open(os.devnull, "w", encoding="utf-8") as sink:
+        with redirect_stdout(sink), redirect_stderr(sink):
+            yield
 
 
 def _load_static_plotting():
@@ -100,6 +117,12 @@ def get_parser():
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description="ModDotPlot: Visualization of Tandem Repeats",
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress all console output, including warnings and errors.",
     )
     subparsers = parser.add_subparsers(
         dest="command",
@@ -107,16 +130,25 @@ def get_parser():
         help="Choose mode; static is used when omitted",
     )
     static_parser = subparsers.add_parser(
-        "static", help="Static mode commands (default)"
+        "static", help="Static mode commands (default)", allow_abbrev=False
     )
     interactive_parser = subparsers.add_parser(
         "interactive",
         help="Interactive mode commands (deprecated; explicit use only)",
+        allow_abbrev=False,
         description=(
             "Deprecated interactive mode. This mode remains available but is "
             "maintenance-only and will not receive new features."
         ),
     )
+
+    for mode_parser in (static_parser, interactive_parser):
+        mode_parser.add_argument(
+            "--quiet",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Suppress all console output, including warnings and errors.",
+        )
 
     # -----------INTERACTIVE MODE SUBCOMMANDS-----------
     interactive_input_group = interactive_parser.add_mutually_exclusive_group(
@@ -292,6 +324,17 @@ def get_parser():
         ),
     )
 
+    static_parser.add_argument(
+        "--pairs",
+        default=None,
+        metavar="FILE",
+        help=(
+            "Compare only the sequence pairs listed in a two-column text file. "
+            "Blank lines and lines beginning with '#' are ignored. Requires "
+            "--compare or --compare-only."
+        ),
+    )
+
     # Add a mutually exclusive group for compare and compare only.
     static_compare_group = static_parser.add_mutually_exclusive_group(required=False)
     static_window_size_group = static_parser.add_mutually_exclusive_group(
@@ -405,9 +448,31 @@ def get_parser():
         choices=range(1, 5),
         metavar="N",
         help=(
-            "Number of independent chromosome workers (1-4). The default "
-            "automatically uses up to four workers for indexed multi-record "
-            "FASTA input."
+            "Number of independent chromosome or comparison-group workers "
+            "(1-4). The default automatically uses a bounded worker count for "
+            "indexed multi-record FASTA input."
+        ),
+    )
+
+    static_parser.add_argument(
+        "--memory-limit",
+        default=None,
+        type=float,
+        metavar="GIB",
+        help=(
+            "Maximum aggregate memory budget for comparison workers in GiB. "
+            "When omitted, available memory is detected when the platform "
+            "exposes it."
+        ),
+    )
+
+    static_parser.add_argument(
+        "--sketch-cache",
+        default=None,
+        metavar="DIRECTORY",
+        help=(
+            "Persist compact prepared sketches in this directory for reuse "
+            "across indexed comparative runs."
         ),
     )
 
@@ -533,7 +598,10 @@ def _arguments_with_default_command(arguments=None):
     normalized = list(sys.argv[1:] if arguments is None else arguments)
     if normalized[:1] and normalized[0] in ("-h", "--help"):
         return normalized
-    if not normalized or normalized[0] not in COMMANDS:
+    explicit_command = bool(normalized and normalized[0] in COMMANDS)
+    if not explicit_command and normalized[:1] == ["--quiet"] and len(normalized) > 1:
+        explicit_command = normalized[1] in COMMANDS
+    if not explicit_command:
         normalized.insert(0, "static")
     return normalized
 
@@ -557,6 +625,7 @@ def _apply_static_config(args, config):
     args.resolution = config.get("resolution", args.resolution)
     args.window = config.get("window", args.window)
     args.sequence = config.get("sequence", args.sequence)
+    args.pairs = config.get("pairs", args.pairs)
     args.region = config.get("region", args.region)
     args.identity = config.get("identity", args.identity)
     args.delta = config.get("delta", args.delta)
@@ -570,6 +639,8 @@ def _apply_static_config(args, config):
     args.no_plot = config.get("no_plot", args.no_plot)
     args.no_hist = config.get("no_hist", args.no_hist)
     args.processes = config.get("processes", args.processes)
+    args.memory_limit = config.get("memory_limit", args.memory_limit)
+    args.sketch_cache = config.get("sketch_cache", args.sketch_cache)
     args.width = config.get("width", args.width)
     args.axes_limits = config.get("axes_limits", args.axes_limits)
     args.dpi = config.get("dpi", args.dpi)
@@ -798,6 +869,128 @@ class MatrixConfig:
     expectation: int
 
 
+@dataclass(frozen=True)
+class StaticSequenceRecord:
+    """Indexed FASTA metadata needed by the record-local static pipeline."""
+
+    source_path: str
+    name: str
+    length: int
+    region: tuple | None = None
+
+    @property
+    def selected_length(self):
+        if self.region is None:
+            return self.length
+        return self.region[2] - self.region[1] + 1
+
+
+def _selected_sequence_records(fasta_headers, region_by_name):
+    """Return selected records with lengths obtained without reading sequences."""
+
+    records = []
+    for source_path, selected_headers in fasta_headers.items():
+        all_headers = getInputHeaders(source_path)
+        all_lengths = getInputSeqLength(source_path)
+        lengths = dict(zip(all_headers, all_lengths))
+        for name in selected_headers:
+            records.append(
+                StaticSequenceRecord(
+                    source_path=os.fspath(source_path),
+                    name=name,
+                    length=lengths[name],
+                    region=region_by_name.get(name),
+                )
+            )
+    return records
+
+
+def _resolve_pair_selector(selector, records):
+    """Resolve one pair-file identifier with CLI sequence matching semantics."""
+
+    exact = [record for record in records if record.name == selector]
+    matches = exact or [
+        record for record in records if record.name.casefold() == selector.casefold()
+    ]
+    if not matches:
+        raise ValueError(
+            f"pair identifier {selector!r} does not match a selected FASTA record"
+        )
+    if len(matches) > 1:
+        formatted = ", ".join(
+            f"{record.name!r} in {record.source_path!r}" for record in matches
+        )
+        raise ValueError(f"pair identifier {selector!r} is ambiguous: {formatted}")
+    return matches[0]
+
+
+def _read_pair_file(path, records):
+    """Read and validate an explicitly ordered two-column comparison plan."""
+
+    pairs = []
+    seen = set()
+    with open(path, "rt", encoding="utf-8") as pair_file:
+        for line_number, raw_line in enumerate(pair_file, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split()
+            if len(fields) != 2:
+                raise ValueError(
+                    f"{path!s}:{line_number}: expected exactly two sequence identifiers"
+                )
+            x_record = _resolve_pair_selector(fields[0], records)
+            y_record = _resolve_pair_selector(fields[1], records)
+            if x_record == y_record:
+                raise ValueError(
+                    f"{path!s}:{line_number}: a sequence cannot be compared with itself"
+                )
+            unordered_key = frozenset((x_record, y_record))
+            if unordered_key in seen:
+                raise ValueError(
+                    f"{path!s}:{line_number}: duplicate comparison for "
+                    f"{x_record.name!r} and {y_record.name!r}"
+                )
+            seen.add(unordered_key)
+            pairs.append((x_record, y_record))
+    if not pairs:
+        raise ValueError(f"pair file {path!s} does not contain any comparisons")
+    return pairs
+
+
+def _plan_static_pairs(args, records):
+    """Build oriented ``(x, y)`` comparisons in deterministic output order."""
+
+    if getattr(args, "pairs", None):
+        pairs = _read_pair_file(args.pairs, records)
+        if args.compare_order == "size":
+            pairs = [
+                (y_record, x_record)
+                if x_record.selected_length < y_record.selected_length
+                else (x_record, y_record)
+                for x_record, y_record in pairs
+            ]
+        return pairs
+
+    ordered = list(records)
+    if args.compare_order == "size":
+        ordered.sort(key=lambda record: record.selected_length, reverse=True)
+    return [
+        (ordered[i], ordered[j])
+        for i in range(len(ordered))
+        for j in range(i + 1, len(ordered))
+    ]
+
+
+def _group_static_pairs(pairs):
+    """Group pairs by y-axis record so its exact sketch is prepared once."""
+
+    groups = {}
+    for x_record, y_record in pairs:
+        groups.setdefault(y_record, []).append(x_record)
+    return [(y_record, tuple(x_records)) for y_record, x_records in groups.items()]
+
+
 def _matrix_config_for_length(kmer_count, args):
     """Resolve matrix parameters without mutating the parsed CLI arguments.
 
@@ -929,6 +1122,14 @@ def _validated_process_count(value):
 
 def _process_static_self_task(task):
     """Reopen and process one indexed FASTA record in a spawned worker."""
+
+    args = task[0]
+    with _silence_output(getattr(args, "quiet", False)):
+        return _process_static_self_task_inner(task)
+
+
+def _process_static_self_task_inner(task):
+    """Implement a worker task under its requested output policy."""
 
     args, fasta_path, sequence_id, selected_region, summary_command = task
     if not args.no_plot:
@@ -1191,6 +1392,431 @@ def _process_static_self_record(
             )
 
 
+def _fetch_static_record(record):
+    """Fetch one selected FASTA record or region through the indexed reader."""
+
+    regions = {record.name: record.region} if record.region is not None else None
+    records = iter_fasta_records(
+        record.source_path,
+        regions=regions,
+        record_ids=[record.name],
+    )
+    try:
+        sequence_id, sequence, sequence_label = next(records)
+    except StopIteration as error:
+        raise ValueError(
+            f"sequence {record.name!r} was not found in {record.source_path!r}"
+        ) from error
+    if sequence_id != record.name:
+        raise ValueError(
+            f"indexed FASTA returned {sequence_id!r} while fetching {record.name!r}"
+        )
+    if record.region is None:
+        start, end = 1, len(sequence)
+    else:
+        _name, start, end = record.region
+    return sequence, sequence_label, start, end
+
+
+def _sketch_cache_path(record, config, args, canonical):
+    """Return a content-addressed persistent sketch-cache path."""
+
+    if not args.sketch_cache:
+        return None
+    source = os.path.abspath(record.source_path)
+    source_stat = os.stat(source)
+    cache_key = repr(
+        (
+            "prepared-sketch-v1",
+            VERSION,
+            HASH_ALGORITHM,
+            source,
+            source_stat.st_size,
+            source_stat.st_mtime_ns,
+            record.name,
+            record.region,
+            config.window_size,
+            config.sparsity,
+            config.expectation,
+            args.delta,
+            args.kmer,
+            args.ambiguous,
+            bool(canonical),
+        )
+    ).encode("utf-8")
+    digest = hashlib.sha256(cache_key).hexdigest()
+    return os.path.join(os.fspath(args.sketch_cache), digest + ".npz")
+
+
+def _pack_sketch_arrays(sketches):
+    offsets = np.zeros(len(sketches) + 1, dtype=np.int64)
+    if sketches:
+        offsets[1:] = np.cumsum(
+            np.fromiter((len(sketch) for sketch in sketches), dtype=np.int64)
+        )
+        values = np.concatenate(sketches).astype(np.uint64, copy=False)
+    else:
+        values = np.empty(0, dtype=np.uint64)
+    return values, offsets
+
+
+def _unpack_sketch_arrays(values, offsets):
+    return [values[offsets[i] : offsets[i + 1]] for i in range(len(offsets) - 1)]
+
+
+def _load_cached_sketch(path):
+    if path is None or not os.path.isfile(path):
+        return None
+    try:
+        with np.load(path, allow_pickle=False) as cached:
+            core_values = cached["core_values"]
+            core_offsets = cached["core_offsets"]
+            neighbor_values = cached["neighbor_values"]
+            neighbor_offsets = cached["neighbor_offsets"]
+    except (KeyError, OSError, ValueError):
+        return None
+    return PreparedModimizerSketches(
+        core=_unpack_sketch_arrays(core_values, core_offsets),
+        neighbors=_unpack_sketch_arrays(neighbor_values, neighbor_offsets),
+    )
+
+
+def _store_cached_sketch(path, prepared):
+    if path is None:
+        return
+    cache_directory = os.path.dirname(path)
+    os.makedirs(cache_directory, exist_ok=True)
+    core_values, core_offsets = _pack_sketch_arrays(prepared.core)
+    neighbor_values, neighbor_offsets = _pack_sketch_arrays(prepared.neighbors)
+    temporary_path = f"{path}.{os.getpid()}.tmp.npz"
+    np.savez(
+        temporary_path,
+        core_values=core_values,
+        core_offsets=core_offsets,
+        neighbor_values=neighbor_values,
+        neighbor_offsets=neighbor_offsets,
+    )
+    os.replace(temporary_path, path)
+
+
+def _prepare_static_record_sketches(record, config, args, direction_rendering):
+    """Fetch a record once and return its main and optional direction sketches."""
+
+    main_canonical = not args.forward
+    main_cache_path = _sketch_cache_path(record, config, args, main_canonical)
+    prepared = _load_cached_sketch(main_cache_path)
+    alternate_canonical = bool(args.forward)
+    alternate_cache_path = (
+        _sketch_cache_path(record, config, args, alternate_canonical)
+        if direction_rendering
+        else None
+    )
+    alternate = _load_cached_sketch(alternate_cache_path)
+    if prepared is not None and (not direction_rendering or alternate is not None):
+        if record.region is None:
+            sequence_label, start, end = record.name, 1, record.length
+        else:
+            _name, start, end = record.region
+            sequence_label = f"{record.name}:{start}-{end}"
+        return prepared, alternate, sequence_label, start, end
+
+    sequence, sequence_label, start, end = _fetch_static_record(record)
+    if len(sequence) < args.kmer:
+        raise ValueError(
+            f"sequence {sequence_label!r} is shorter than k-mer size {args.kmer}"
+        )
+    if prepared is None:
+        prepared = prepare_sequence_sketches(
+            sequence,
+            config.window_size,
+            config.sparsity,
+            args.delta,
+            args.kmer,
+            args.ambiguous,
+            config.expectation,
+            canonical=main_canonical,
+        )
+        _store_cached_sketch(main_cache_path, prepared)
+    if direction_rendering and alternate is None:
+        alternate = prepare_sequence_sketches(
+            sequence,
+            config.window_size,
+            config.sparsity,
+            args.delta,
+            args.kmer,
+            args.ambiguous,
+            config.expectation,
+            canonical=alternate_canonical,
+        )
+        _store_cached_sketch(alternate_cache_path, alternate)
+    del sequence
+    return prepared, alternate, sequence_label, start, end
+
+
+def _emit_static_pair(
+    *,
+    args,
+    x_record,
+    y_record,
+    x_name,
+    y_name,
+    x_start,
+    x_end,
+    y_start,
+    y_end,
+    config,
+    pair_mat,
+    direction_pair_mat,
+    summary_writer,
+):
+    """Write and render one pair without constructing Python BEDPE row lists."""
+
+    direction_rendering = direction_pair_mat is not None
+    canonical_matrix = (
+        direction_pair_mat if direction_rendering and args.forward else pair_mat
+    )
+    if np.all(canonical_matrix == 0):
+        print(
+            f"The pairwise identity matrix for {x_name} and {y_name} is empty. "
+            "Skipping.\n"
+        )
+        return
+
+    output_prefix = f"{x_name}_{y_name}"
+    output_directory = os.path.join(args.output_dir or ".", output_prefix)
+    if (not args.no_bedpe) or (not args.no_plot):
+        os.makedirs(output_directory, exist_ok=True)
+
+    if args.cooler:
+        try:
+            os.makedirs(output_directory, exist_ok=True)
+            cooler_output = os.path.join(output_directory, output_prefix + ".cooler")
+            convertMatrixToCool(
+                matrix=pair_mat,
+                window_size=config.window_size,
+                id_threshold=args.identity,
+                x_name=x_name,
+                y_name=y_name,
+                self_identity=False,
+                x_offset=x_start,
+                y_offset=y_start,
+                chromsizes=max(x_record.selected_length - args.kmer + 1, 0),
+                output_cool=cooler_output,
+            )
+            print(f"Saved comparative matrix as a cooler file to {cooler_output}\n")
+        except Exception as error:
+            print(f"Error creating pairwise cooler file: {error}")
+
+    bed_frame = None
+    direction_frame = None
+    if not args.no_plot:
+        bed_frame = convertMatrixToBedDataFrame(
+            pair_mat,
+            config.window_size,
+            args.identity,
+            x_name,
+            y_name,
+            False,
+            x_start,
+            y_start,
+            x_end,
+            y_end,
+        )
+        if direction_rendering:
+            if args.forward:
+                canonical_frame = convertMatrixToBedDataFrame(
+                    direction_pair_mat,
+                    config.window_size,
+                    args.identity,
+                    x_name,
+                    y_name,
+                    False,
+                    x_start,
+                    y_start,
+                    x_end,
+                    y_end,
+                )
+                forward_matrix = pair_mat
+            else:
+                canonical_frame = bed_frame
+                forward_matrix = direction_pair_mat
+            direction_frame = _annotate_bed_direction_frame(
+                canonical_frame,
+                forward_matrix,
+                config.window_size,
+                x_start,
+                y_start,
+            )
+
+    if not args.no_bedpe:
+        bedfile_output = os.path.join(
+            output_directory, output_prefix + "_COMPARE.bedpe"
+        )
+        chunks = (
+            [bed_frame]
+            if bed_frame is not None
+            else iterMatrixToBedChunks(
+                pair_mat,
+                config.window_size,
+                args.identity,
+                x_name,
+                y_name,
+                False,
+                x_start,
+                y_start,
+                x_end,
+                y_end,
+            )
+        )
+        _write_matrix_bedpe(bedfile_output, chunks)
+        print(
+            "Saved comparative matrix as a paired-end bed file to "
+            f"{bedfile_output}\n"
+        )
+
+    if args.no_plot:
+        return
+
+    pair_axis_bounds = args.axes_limits or (
+        min(x_start, y_start),
+        max(x_end, y_end),
+    )
+    plot_files = create_plots(
+        sdf=None,
+        directory=output_directory,
+        name_x=x_name,
+        name_y=y_name,
+        palette=args.palette,
+        palette_orientation=args.palette_orientation,
+        no_hist=args.no_hist,
+        width=args.width,
+        dpi=args.dpi,
+        is_freq=args.bin_freq,
+        xlim=pair_axis_bounds,
+        custom_colors=args.colors,
+        custom_breakpoints=args.breakpoints,
+        from_file=bed_frame,
+        is_pairwise=True,
+        axes_labels=args.axes_ticks,
+        axes_tick_number=args.axes_number,
+        vector_format=args.vector,
+        deraster=args.deraster,
+        annotation=args.bed,
+    )
+    summary_writer.add(
+        output_directory,
+        plot_files or [],
+        fasta_files=[x_record.source_path, y_record.source_path],
+        window_sizes=[config.window_size],
+        regions=_regions_from_names([x_name, y_name]),
+        bed_file=args.bed,
+    )
+
+    if direction_rendering:
+        direction_directory = os.path.join(output_directory, "directionality")
+        direction_files = create_plots(
+            sdf=None,
+            directory=direction_directory,
+            name_x=x_name,
+            name_y=y_name,
+            palette=args.palette,
+            palette_orientation=args.palette_orientation,
+            no_hist=args.no_hist,
+            width=args.width,
+            dpi=args.dpi,
+            is_freq=args.bin_freq,
+            xlim=pair_axis_bounds,
+            custom_colors=args.colors,
+            custom_breakpoints=args.breakpoints,
+            from_file=direction_frame,
+            is_pairwise=True,
+            axes_labels=args.axes_ticks,
+            axes_tick_number=args.axes_number,
+            vector_format=args.vector,
+            deraster=args.deraster,
+            annotation=None,
+        )
+        summary_writer.add(
+            direction_directory,
+            direction_files or [],
+            fasta_files=[x_record.source_path, y_record.source_path],
+            window_sizes=[config.window_size],
+            regions=_regions_from_names([x_name, y_name]),
+            bed_file=args.bed,
+        )
+
+
+def _process_static_pair_group(task):
+    """Process one y-axis record and every x-axis partner assigned to it."""
+
+    args = task[0]
+    with _silence_output(getattr(args, "quiet", False)):
+        return _process_static_pair_group_inner(task)
+
+
+def _process_static_pair_group_inner(task):
+    args, y_record, x_records, summary_command = task
+    if not args.no_plot:
+        _load_static_plotting()
+
+    y_kmer_count = y_record.selected_length - args.kmer + 1
+    config = _matrix_config_for_length(y_kmer_count, args)
+    direction_rendering = args.plot_direction and not args.no_plot
+    prepared_y, alternate_y, y_name, y_start, y_end = _prepare_static_record_sketches(
+        y_record, config, args, direction_rendering
+    )
+    summary_writer = PlotSummaryWriter(summary_command)
+
+    for x_record in x_records:
+        print(
+            f"Computing pairwise identity matrix for {x_record.name} and {y_name}... \n"
+        )
+        (
+            prepared_x,
+            alternate_x,
+            x_name,
+            x_start,
+            x_end,
+        ) = _prepare_static_record_sketches(x_record, config, args, direction_rendering)
+        print(f"\tSequence length {x_name}: {x_record.selected_length}\n")
+        print(f"\tSequence length {y_name}: {y_record.selected_length}\n")
+        print(f"\tWindow size w: {config.window_size}\n")
+        print(f"\tModimizer sketch size: {config.expectation}\n")
+        print(f"\tPlot Resolution r: {config.resolution}\n")
+
+        # Preserve the established matrix orientation: the y-axis record is
+        # the first sketch argument and the x-axis record is the second.
+        pair_mat = create_pairwise_matrix_from_sketches(
+            prepared_y, prepared_x, args.identity, args.kmer
+        )
+        direction_pair_mat = None
+        if direction_rendering:
+            direction_pair_mat = create_pairwise_matrix_from_sketches(
+                alternate_y, alternate_x, args.identity, args.kmer
+            )
+        del prepared_x, alternate_x
+
+        _emit_static_pair(
+            args=args,
+            x_record=x_record,
+            y_record=y_record,
+            x_name=x_name,
+            y_name=y_name,
+            x_start=x_start,
+            x_end=x_end,
+            y_start=y_start,
+            y_end=y_end,
+            config=config,
+            pair_mat=pair_mat,
+            direction_pair_mat=direction_pair_mat,
+            summary_writer=summary_writer,
+        )
+        del pair_mat, direction_pair_mat
+
+    del prepared_y, alternate_y
+    return y_record.name
+
+
 def _run_streaming_static_self(
     args, fasta_list, fasta_headers, region_by_name, summary_writer
 ):
@@ -1268,10 +1894,155 @@ def _run_streaming_static_self(
             )
 
 
-def main():
+def _available_memory_bytes():
+    """Return currently available physical memory when the OS exposes it."""
+
+    try:
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        available_pages = int(os.sysconf("SC_AVPHYS_PAGES"))
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+    if page_size <= 0 or available_pages <= 0:
+        return None
+    return page_size * available_pages
+
+
+def _estimate_pair_group_peak_bytes(args, group):
+    """Conservatively estimate one comparison group's largest pair footprint."""
+
+    y_record, x_records = group
+    y_kmers = max(y_record.selected_length - args.kmer + 1, 1)
+    config = _matrix_config_for_length(y_kmers, args)
+    largest_x = max(record.selected_length for record in x_records)
+    x_kmers = max(largest_x - args.kmer + 1, 1)
+    x_windows = math.ceil(x_kmers / config.window_size)
+    y_windows = math.ceil(y_kmers / config.window_size)
+    matrix_cells = x_windows * y_windows
+
+    # The native sketcher may briefly encode the selected sequence while the
+    # Python string is live. Prepared core and expanded sketches average at
+    # most ``expectation`` uint64 hashes per window. Rendering additionally
+    # retains compact BEDPE columns and figure buffers.
+    sequence_bytes = largest_x * 3
+    sketch_bytes = (x_windows + y_windows) * config.expectation * 16
+    matrix_bytes = matrix_cells * (24 if args.no_plot else 72)
+    rendering_bytes = 0 if args.no_plot else 256 * 1024**2
+    return max(1, sequence_bytes + sketch_bytes + matrix_bytes + rendering_bytes)
+
+
+def _comparison_process_count(args, groups):
+    """Choose pair workers using CPU, task count, and aggregate memory budget."""
+
+    process_count = _streaming_process_count(args, len(groups), indexed_access=True)
+    if process_count <= 1:
+        return process_count
+
+    if args.memory_limit is not None:
+        budget = int(float(args.memory_limit) * 1024**3)
+    else:
+        available = _available_memory_bytes()
+        budget = int(available * 0.75) if available is not None else None
+    if budget is None:
+        return process_count
+
+    largest_peak = max(_estimate_pair_group_peak_bytes(args, group) for group in groups)
+    memory_workers = max(1, budget // largest_peak)
+    return min(process_count, memory_workers)
+
+
+def _run_streaming_static_compare(
+    args,
+    fasta_list,
+    fasta_headers,
+    region_by_name,
+    summary_writer,
+):
+    """Run indexed pairwise plots with record-local sequence memory."""
+
+    records = _selected_sequence_records(fasta_headers, region_by_name)
+    pairs = _plan_static_pairs(args, records)
+    if not pairs:
+        if args.compare_only:
+            raise ValueError(
+                "can't create a comparative plot with fewer than two sequences"
+            )
+        _run_streaming_static_self(
+            args,
+            fasta_list,
+            fasta_headers,
+            region_by_name,
+            summary_writer,
+        )
+        return
+    groups = _group_static_pairs(pairs)
+    print(
+        f"Planning {len(pairs)} pairwise comparison"
+        f"{'s' if len(pairs) != 1 else ''} across {len(groups)} sketch group"
+        f"{'s' if len(groups) != 1 else ''}.\n"
+    )
+
+    if not args.compare_only:
+        _run_streaming_static_self(
+            args,
+            fasta_list,
+            fasta_headers,
+            region_by_name,
+            summary_writer,
+        )
+
+    tasks = [
+        (args, y_record, x_records, summary_writer.command)
+        for y_record, x_records in groups
+    ]
+    process_count = _comparison_process_count(args, groups)
+    if process_count > 1:
+        print(
+            f"Processing {len(pairs)} comparisons with {process_count} "
+            "bounded-memory workers.\n"
+        )
+        context = multiprocessing.get_context("spawn")
+        try:
+            with ProcessPoolExecutor(
+                max_workers=process_count,
+                mp_context=context,
+            ) as executor:
+                future_records = {
+                    executor.submit(_process_static_pair_group, task): task[1].name
+                    for task in tasks
+                }
+                for future in as_completed(future_records):
+                    sequence_id = future_records[future]
+                    try:
+                        future.result()
+                    except Exception as error:
+                        for pending in future_records:
+                            pending.cancel()
+                        raise ValueError(
+                            "failed while processing comparisons grouped by "
+                            f"{sequence_id!r}: {error}"
+                        ) from error
+        except ValueError:
+            raise
+        except (OSError, RuntimeError) as error:
+            raise ValueError(f"unable to run comparison workers: {error}") from error
+        return
+
+    for task in tasks:
+        _process_static_pair_group(task)
+
+
+def main(arguments=None):
+    """Run ModDotPlot, suppressing every output stream when requested."""
+
+    raw_arguments = list(sys.argv[1:] if arguments is None else arguments)
+    with _silence_output("--quiet" in raw_arguments):
+        return _main(raw_arguments)
+
+
+def _main(arguments):
     print(ASCII_ART)
     print(f"v{VERSION} \n")
-    args = parse_args()
+    args = parse_args(arguments)
 
     # Matrix-only interactive exports do not use Dash or Plotly. Every path
     # that opens the interactive UI validates its extra before doing expensive
@@ -1360,6 +2131,9 @@ def main():
         except ValueError as error:
             print(f"Error: {error}.", file=sys.stderr)
             sys.exit(2)
+        if args.memory_limit is not None and args.memory_limit <= 0:
+            print("Error: --memory-limit must be greater than zero.", file=sys.stderr)
+            sys.exit(2)
 
         # Plotting imports are comparatively expensive. Compute-only static
         # runs should not import Plotnine or initialize Matplotlib at all.
@@ -1375,6 +2149,20 @@ def main():
         if args.sequence and getattr(args, "load", None):
             print(
                 "Error: --sequence requires FASTA input; it cannot be used with --load.\n"
+            )
+            sys.exit(2)
+
+        if args.pairs and getattr(args, "load", None):
+            print("Error: --pairs requires FASTA input; it cannot be used with --load.")
+            sys.exit(2)
+
+        if args.pairs and not (args.compare or args.compare_only):
+            print("Error: --pairs requires --compare or --compare-only.")
+            sys.exit(2)
+
+        if args.pairs and (args.grid or args.grid_only):
+            print(
+                "Error: --pairs currently targets individual comparative plots, not grids."
             )
             sys.exit(2)
 
@@ -1602,6 +2390,35 @@ def main():
         print(f"Error: {error}.\n")
         sys.exit(2)
 
+    streaming_static_compare = (
+        args.command == "static"
+        and bool(fasta_list)
+        and (args.compare or args.compare_only)
+        and not args.grid
+        and not args.grid_only
+        and all(supports_indexed_fasta_access(path) for path in fasta_list)
+    )
+    if streaming_static_compare:
+        try:
+            _run_streaming_static_compare(
+                args,
+                fasta_list,
+                fasta_headers,
+                region_by_name,
+                summary_writer,
+            )
+        except (OSError, UnicodeError, ValueError) as error:
+            print(f"Error processing comparative FASTA input: {error}", file=sys.stderr)
+            sys.exit(2)
+        return
+    if getattr(args, "pairs", None):
+        print(
+            "Error: --pairs requires random-access FASTA input (.fai, plus "
+            ".gzi for BGZF-compressed files).",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
     # Independent static self plots have no cross-record dependency. Stream
     # them directly instead of retaining every positional hash in ``k_list``.
     # The file-existence condition preserves unit tests and third-party callers
@@ -1640,7 +2457,7 @@ def main():
                 readKmersFromFile(
                     i,
                     args.kmer,
-                    False,
+                    args.quiet,
                     True,
                     args.ambiguous,
                     region_by_name,
@@ -1652,7 +2469,7 @@ def main():
                 readKmersFromFile(
                     i,
                     args.kmer,
-                    False,
+                    args.quiet,
                     False,
                     args.ambiguous,
                     region_by_name,
@@ -1670,7 +2487,7 @@ def main():
             readKmersFromFile(
                 path,
                 args.kmer,
-                False,
+                args.quiet,
                 not args.forward,
                 args.ambiguous,
                 region_by_name,
@@ -1896,7 +2713,6 @@ def main():
                     smaller_mods_neigh,
                     args.identity,
                     args.kmer,
-                    False,
                 )
                 image_pyramid.insert(0, matrix_layer)
             matrices.append(image_pyramid)

@@ -94,6 +94,109 @@ def test_indexed_self_plots_are_identical_with_spawned_chromosome_workers(tmp_pa
     assert parallel_files == serial_files
 
 
+def test_indexed_pairwise_plots_are_identical_with_bounded_workers(tmp_path):
+    fasta = tmp_path / "indexed.fa"
+    serial_output = tmp_path / "pair-serial"
+    parallel_output = tmp_path / "pair-parallel"
+    _write_indexed_multifasta(fasta)
+    common = (
+        "static",
+        "--fasta",
+        fasta,
+        "--window",
+        100,
+        "--modimizer",
+        10,
+        "--identity",
+        80,
+        "--compare-only",
+        "--no-plot",
+    )
+
+    serial = _run_cli(*common, "--processes", 1, "--output-dir", serial_output)
+    parallel = _run_cli(*common, "--processes", 2, "--output-dir", parallel_output)
+
+    assert serial.returncode == 0, serial.stderr + serial.stdout
+    assert parallel.returncode == 0, parallel.stderr + parallel.stdout
+    assert "3 pairwise comparisons across 2 sketch groups" in serial.stdout
+    assert "with 2 bounded-memory workers" in parallel.stdout
+    serial_files = {
+        path.relative_to(serial_output): path.read_bytes()
+        for path in serial_output.rglob("*.bedpe")
+    }
+    parallel_files = {
+        path.relative_to(parallel_output): path.read_bytes()
+        for path in parallel_output.rglob("*.bedpe")
+    }
+    assert parallel_files == serial_files
+
+
+def test_pair_manifest_limits_indexed_comparisons(tmp_path):
+    fasta = tmp_path / "indexed.fa"
+    output = tmp_path / "selected-pairs"
+    pair_file = tmp_path / "pairs.tsv"
+    _write_indexed_multifasta(fasta)
+    pair_file.write_text("# selected comparisons\nalpha beta\nbeta gamma\n")
+
+    result = _run_cli(
+        "static",
+        "--fasta",
+        fasta,
+        "--compare-only",
+        "--pairs",
+        pair_file,
+        "--window",
+        100,
+        "--modimizer",
+        10,
+        "--identity",
+        80,
+        "--no-plot",
+        "--processes",
+        1,
+        "--output-dir",
+        output,
+    )
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert sorted(path.relative_to(output) for path in output.rglob("*.bedpe")) == [
+        Path("alpha_beta/alpha_beta_COMPARE.bedpe"),
+        Path("beta_gamma/beta_gamma_COMPARE.bedpe"),
+    ]
+
+
+def test_quiet_static_cli_suppresses_parent_and_worker_output(tmp_path):
+    fasta = tmp_path / "indexed.fa"
+    output = tmp_path / "quiet"
+    _write_indexed_multifasta(fasta)
+
+    result = _run_cli(
+        "--fasta",
+        fasta,
+        "--window",
+        100,
+        "--modimizer",
+        10,
+        "--identity",
+        80,
+        "--no-plot",
+        "--processes",
+        2,
+        "--quiet",
+        "--output-dir",
+        output,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert sorted(path.name for path in output.rglob("*.bedpe")) == [
+        "alpha.bedpe",
+        "beta.bedpe",
+        "gamma.bedpe",
+    ]
+
+
 def test_static_cli_computes_all_self_and_pairwise_outputs(tmp_path):
     fasta = tmp_path / "three.fa"
     output = tmp_path / "static"
@@ -352,11 +455,14 @@ def test_static_cli_reads_gzip_and_renders_bed_annotations(tmp_path):
         "--identity",
         80,
         "--no-hist",
+        "--quiet",
         "--output-dir",
         output,
     )
 
     assert result.returncode == 0, result.stderr + result.stdout
+    assert result.stdout == ""
+    assert result.stderr == ""
     sequence_output = output / "alpha"
     expected = [
         sequence_output / "alpha_ANNOTATION_TRACK.svg",
@@ -400,3 +506,35 @@ def test_interactive_cli_forward_mode_saves_matrix_without_launching_server(tmp_
     assert (saved / "metadata.pkl").is_file()
     assert "Saved matrices" in result.stdout
     assert "interactive mode is deprecated and maintenance-only" in result.stderr
+
+
+def test_quiet_interactive_matrix_export_has_no_console_output(tmp_path):
+    fasta = tmp_path / "one.fa"
+    fasta.write_text(">alpha\n" + "ACGT" * 300 + "\n")
+    output = tmp_path / "interactive-quiet"
+
+    result = _run_cli(
+        "--quiet",
+        "interactive",
+        "--fasta",
+        fasta,
+        "--window",
+        100,
+        "--resolution",
+        10,
+        "--modimizer",
+        10,
+        "--quick",
+        "--forward",
+        "--save",
+        "--no-plot",
+        "--output-dir",
+        output,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == ""
+    assert result.stderr == ""
+    saved = output / "interactive_matrices"
+    assert (saved / "alpha_0.npz").is_file()
+    assert (saved / "metadata.pkl").is_file()

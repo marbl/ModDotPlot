@@ -63,7 +63,7 @@ def test_prepared_sketch_matrix_results_match_compatibility_apis():
         parameters["expectation"],
     )
     actual_pair = create_pairwise_matrix_from_sketches(
-        prepared_first, prepared_second, 0, parameters["k"], True
+        prepared_first, prepared_second, 0, parameters["k"]
     )
     np.testing.assert_array_equal(actual_pair, expected_pair)
 

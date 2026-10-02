@@ -406,7 +406,6 @@ def test_pairwise_containment_matrix_is_rectangular_and_keeps_axis_orientation()
         mod_set_y_neighbors=[{1}, {3}],
         identity=0,
         k=1,
-        supress_progress=True,
     )
 
     np.testing.assert_array_equal(
@@ -429,7 +428,6 @@ def test_pairwise_containment_matrix_supports_more_rows_than_columns():
         mod_set_y_neighbors=[{1}, {2}, {3}],
         identity=0,
         k=1,
-        supress_progress=True,
     )
 
     np.testing.assert_array_equal(matrix, np.array([[0.0], [100.0], [0.0]]))
@@ -454,7 +452,6 @@ def test_pairwise_containment_matrix_preserves_empty_axis_dimensions(
         mod_set_y_neighbors=list(mod_set_y),
         identity=0,
         k=1,
-        supress_progress=True,
     )
 
     assert matrix.shape == expected_shape
@@ -469,28 +466,46 @@ def test_pairwise_containment_matrix_does_not_hide_misaligned_neighbor_data():
             mod_set_y_neighbors=[{1}],
             identity=0,
             k=1,
-            supress_progress=True,
         )
 
 
+@pytest.mark.parametrize("legacy_progress_setting", [False, True])
+def test_pairwise_legacy_progress_argument_is_silent(legacy_progress_setting, capsys):
+    pairwiseContainmentMatrix(
+        mod_set_x=[{1}],
+        mod_set_y=[{1}],
+        mod_set_x_neighbors=[{1}],
+        mod_set_y_neighbors=[{1}],
+        identity=0,
+        k=1,
+        supress_progress=legacy_progress_setting,
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
 @pytest.mark.parametrize("sequence", ["", "A", "AC"])
-def test_generate_kmers_shorter_than_k_with_progress_returns_empty(sequence, capsys):
+def test_generate_kmers_shorter_than_k_returns_empty_without_progress(sequence, capsys):
     assert list(generateKmersFromFasta(sequence, 3, quiet=False, fw_only=True)) == []
-    assert "100.0%" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
 
 
-def test_generate_one_kmer_with_progress_does_not_use_zero_modulus(capsys):
+def test_generate_one_kmer_does_not_emit_progress(capsys):
     result = list(generateKmersFromFasta("ACG", 3, quiet=False, fw_only=True))
 
     assert result == [np.uint64(0xB13A5310100F646E)]
-    output = capsys.readouterr().out
-    assert "100.0%" in output
-    assert "Completed" in output
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
 
 
-def test_print_progress_bar_accepts_zero_total(capsys):
-    printProgressBar(0, 0, prefix="Progress:", suffix="Completed", length=4)
+def test_legacy_progress_helper_is_a_silent_noop(capsys):
+    assert printProgressBar(1, 1, prefix="Progress:", suffix="Completed") is None
 
-    output = capsys.readouterr().out
-    assert "|████|" in output
-    assert "100.0%" in output
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
