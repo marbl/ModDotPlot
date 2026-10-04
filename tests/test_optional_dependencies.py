@@ -9,7 +9,6 @@ import moddotplot.moddotplot as cli
 from moddotplot.estimate_identity import convertMatrixToCool, require_cooler_dependency
 from moddotplot.optional_dependencies import OptionalDependencyError
 
-
 INSTALL_HINT = 'python -m pip install "ModDotPlot[interactive]"'
 
 

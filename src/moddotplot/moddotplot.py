@@ -1097,9 +1097,11 @@ def _plan_static_pairs(args, records):
         pairs = _read_pair_file(args.pairs, records)
         if args.compare_order == "size":
             pairs = [
-                (y_record, x_record)
-                if x_record.selected_length < y_record.selected_length
-                else (x_record, y_record)
+                (
+                    (y_record, x_record)
+                    if x_record.selected_length < y_record.selected_length
+                    else (x_record, y_record)
+                )
                 for x_record, y_record in pairs
             ]
         return pairs

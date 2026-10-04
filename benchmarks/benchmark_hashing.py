@@ -142,10 +142,10 @@ def benchmark(sequence: str, k: int, repeats: int, seed: int) -> Dict[str, objec
             )
         }
         if mmh3_module is not None:
-            implementations[
-                "legacy_mmh3"
-            ] = lambda canonical=canonical: _legacy_mmh3_hashes(
-                sequence, k, canonical, mmh3_module
+            implementations["legacy_mmh3"] = (
+                lambda canonical=canonical: _legacy_mmh3_hashes(
+                    sequence, k, canonical, mmh3_module
+                )
             )
 
         raw: Dict[str, List[float]] = {name: [] for name in implementations}
