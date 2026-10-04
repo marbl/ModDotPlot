@@ -1,6 +1,7 @@
 import sys
 import shlex
 from types import SimpleNamespace
+import gzip
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,20 @@ def _matrix_args(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def test_static_input_kind_detects_content_including_compressed_fasta(tmp_path):
+    config = tmp_path / "settings.data"
+    config.write_text('{"identity": 90}\n')
+    bedpe = tmp_path / "matrix.data"
+    bedpe.write_text("#chrom1\tstart1\tend1\tchrom2\tstart2\tend2\tani_c\n")
+    fasta = tmp_path / "sequence.data.gz"
+    with gzip.open(fasta, "wt") as output:
+        output.write(">chr1\nACGT\n")
+
+    assert cli._static_input_kind(config) == "json"
+    assert cli._static_input_kind(bedpe) == "bedpe"
+    assert cli._static_input_kind(fasta) == "fasta"
 
 
 def test_matrix_config_caps_resolution_at_one_valid_kmer_per_window():

@@ -86,3 +86,30 @@ def test_abbreviated_quiet_option_is_rejected_without_silencing_the_error():
 
     assert result.returncode == 2
     assert "unrecognized arguments: --qui" in result.stderr
+
+
+def test_static_options_explain_when_a_known_input_type_uses_the_wrong_flag(tmp_path):
+    config = tmp_path / "settings.json"
+    config.write_text('{"identity": 90}\n')
+    fasta = tmp_path / "sequence.fa"
+    fasta.write_text(">chr1\nACGT\n")
+    bedpe = tmp_path / "matrix.bedpe"
+    bedpe.write_text(
+        "#query_name\tquery_start\tquery_end\treference_name\t"
+        "reference_start\treference_end\tperID_by_events\n"
+    )
+    cases = [
+        ("--load", config, "--load expects a BEDPE file", "Use --config"),
+        ("--load", fasta, "--load expects a BEDPE file", "Use --fasta"),
+        ("--fasta", config, "--fasta expects a FASTA file", "Use --config"),
+        ("--fasta", bedpe, "--fasta expects a FASTA file", "Use --load"),
+        ("--config", fasta, "--config expects a JSON config file", "Use --fasta"),
+        ("--config", bedpe, "--config expects a JSON config file", "Use --load"),
+    ]
+
+    for option, path, expectation, suggestion in cases:
+        result = _run_module(option, str(path))
+        assert result.returncode == 2
+        assert expectation in result.stderr
+        assert suggestion in result.stderr
+        assert "Traceback" not in result.stderr

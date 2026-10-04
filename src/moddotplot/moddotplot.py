@@ -39,6 +39,7 @@ import argparse
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
+import gzip
 from itertools import islice
 import math
 import hashlib
@@ -62,6 +63,11 @@ run_dash = None
 require_interactive_dependencies = None
 
 COMMANDS = frozenset({"interactive", "static"})
+STATIC_INPUT_OPTIONS = {
+    "bedpe": ("--load", "BEDPE file"),
+    "fasta": ("--fasta", "FASTA file"),
+    "json": ("--config", "JSON config file"),
+}
 INTERACTIVE_DEPRECATION_MESSAGE = (
     "Warning: interactive mode is deprecated and maintenance-only. "
     "It remains available, but will not receive new features."
@@ -698,6 +704,90 @@ def _apply_static_config(args, config):
     args.deraster = config.get("deraster", args.deraster)
 
     return args
+
+
+def _static_input_kind(path):
+    """Identify known static input formats from content, then filename."""
+
+    path_string = os.fspath(path)
+    lines = []
+    try:
+        with open(path_string, "rb") as probe:
+            compressed = probe.read(2) == b"\x1f\x8b"
+        opener = gzip.open if compressed else open
+        with opener(
+            path_string,
+            "rt",
+            encoding="utf-8",
+            errors="replace",
+        ) as input_file:
+            lines = list(islice(input_file, 16))
+    except (OSError, EOFError):
+        pass
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(">"):
+            return "fasta"
+        if stripped.startswith(("{", "[")):
+            return "json"
+        columns = set(stripped.removeprefix("#").split("\t"))
+        if {
+            "query_name",
+            "query_start",
+            "query_end",
+            "reference_name",
+            "reference_start",
+            "reference_end",
+            "perID_by_events",
+        }.issubset(columns) or {
+            "chrom1",
+            "start1",
+            "end1",
+            "chrom2",
+            "start2",
+            "end2",
+            "ani_c",
+        }.issubset(
+            columns
+        ):
+            return "bedpe"
+
+    lower_path = path_string.lower()
+    if lower_path.endswith(".json"):
+        return "json"
+    if lower_path.endswith(".bedpe"):
+        return "bedpe"
+    fasta_path = lower_path
+    for compression_suffix in (".gz", ".bgz", ".bgzf"):
+        if fasta_path.endswith(compression_suffix):
+            fasta_path = fasta_path[: -len(compression_suffix)]
+            break
+    if fasta_path.endswith((".fa", ".fasta", ".fna", ".fas")):
+        return "fasta"
+    return None
+
+
+def _validate_static_input_types(args):
+    """Reject known input formats passed through the wrong static option."""
+
+    checks = []
+    if getattr(args, "config", None):
+        checks.append(("json", args.config))
+    checks.extend(("bedpe", path) for path in (getattr(args, "load", None) or []))
+    checks.extend(("fasta", path) for path in (getattr(args, "fasta", None) or []))
+    for expected, path in checks:
+        detected = _static_input_kind(path)
+        if detected is None or detected == expected:
+            continue
+        expected_option, expected_name = STATIC_INPUT_OPTIONS[expected]
+        detected_option, detected_name = STATIC_INPUT_OPTIONS[detected]
+        raise ValueError(
+            f"{expected_option} expects a {expected_name}, but {path!r} appears "
+            f"to be a {detected_name}. Use {detected_option} for this file"
+        )
 
 
 def _select_fasta_headers(fasta_headers, requested_sequences):
@@ -2154,12 +2244,22 @@ def _main(arguments):
             sys.exit(0)
     elif args.command == "static":
         print(f"Running ModDotPlot in static mode\n")
+        try:
+            _validate_static_input_types(args)
+        except ValueError as error:
+            print(f"Error: {error}.", file=sys.stderr)
+            sys.exit(2)
         # -----------CONFIG PARSING-----------
         # TODO: Change to yml file, add readme to config folder
         if args.config:
             with open(args.config, "r") as f:
                 config = json.load(f)
                 _apply_static_config(args, config)
+            try:
+                _validate_static_input_types(args)
+            except ValueError as error:
+                print(f"Error: {error}.", file=sys.stderr)
+                sys.exit(2)
 
         if args.cooler:
             try:
