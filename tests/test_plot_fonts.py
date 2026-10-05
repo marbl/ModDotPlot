@@ -1,0 +1,82 @@
+import matplotlib.pyplot as plt
+
+import moddotplot.static_plots as static_plots
+from moddotplot.native_render import (
+    DEFAULT_FONT_FAMILY,
+    FALLBACK_FONT_FAMILY,
+    MIN_TEXT_SIZE,
+    MIN_TITLE_SIZE,
+    clamped_font_size,
+    save_figure_pair,
+)
+
+
+def test_width_scaled_fonts_have_readable_minimums():
+    assert clamped_font_size(1, 1.0) == MIN_TEXT_SIZE
+    assert clamped_font_size(1, 1.4, MIN_TITLE_SIZE) == MIN_TITLE_SIZE
+    assert clamped_font_size(9, 1.4, MIN_TITLE_SIZE) == 12.6
+
+
+def test_native_outputs_default_to_helvetica(tmp_path):
+    figure, axis = plt.subplots()
+    title = axis.set_title("Helvetica title")
+    try:
+        save_figure_pair(figure, tmp_path / "helvetica", "svg", 72)
+        assert title.get_fontfamily() == [DEFAULT_FONT_FAMILY]
+        assert (tmp_path / "helvetica.png").stat().st_size > 0
+        assert (tmp_path / "helvetica.svg").stat().st_size > 0
+    finally:
+        plt.close(figure)
+
+
+def test_native_outputs_retry_with_dejavu_on_glyph_failure(tmp_path, monkeypatch):
+    figure, axis = plt.subplots()
+    title = axis.set_title("Fallback title")
+    original_savefig = figure.savefig
+    attempted_families = []
+
+    def fail_for_helvetica(*args, **kwargs):
+        family = title.get_fontfamily()[0]
+        attempted_families.append(family)
+        if family == DEFAULT_FONT_FAMILY:
+            raise RuntimeError("failed to load glyph")
+        return original_savefig(*args, **kwargs)
+
+    monkeypatch.setattr(figure, "savefig", fail_for_helvetica)
+    try:
+        save_figure_pair(figure, tmp_path / "fallback", "svg", 72)
+        assert attempted_families == [
+            DEFAULT_FONT_FAMILY,
+            FALLBACK_FONT_FAMILY,
+            FALLBACK_FONT_FAMILY,
+        ]
+        assert title.get_fontfamily() == [FALLBACK_FONT_FAMILY]
+        assert (tmp_path / "fallback.png").stat().st_size > 0
+        assert (tmp_path / "fallback.svg").stat().st_size > 0
+    finally:
+        plt.close(figure)
+
+
+def test_matplotlib_pair_uses_one_figure_for_png_and_vector(monkeypatch, tmp_path):
+    figure = plt.figure()
+
+    saved = []
+
+    def fake_save_figure_pair(current, prefix, vector_format, dpi, **kwargs):
+        saved.append((current, prefix, vector_format, dpi, kwargs))
+        return tmp_path / "plot.png", tmp_path / "plot.svg"
+
+    monkeypatch.setattr(static_plots, "save_figure_pair", fake_save_figure_pair)
+    static_plots._draw_and_save_plot_pair(
+        figure,
+        tmp_path / "plot",
+        width=9,
+        height=9,
+        dpi=300,
+        vector_format="svg",
+    )
+
+    assert saved[0][0] is figure
+    assert saved[0][2:4] == ("svg", 300)
+    assert saved[0][4] == {"bbox_inches": figure.bbox_inches}
+    assert not plt.fignum_exists(figure.number)

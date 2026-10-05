@@ -1,4 +1,5 @@
-VERSION = "0.9.9"
+VERSION = "1.0.0"
+DIRECTION_COLORS = {"Forward": "#2166AC", "Reverse": "#D01C8B"}
 COLS = [
     "#query_name",
     "query_start",
@@ -9,7 +10,7 @@ COLS = [
     "perID_by_events",
 ]
 
-ASCII_ART = """
+ASCII_ART = r"""
   __  __           _   _____        _     _____  _       _   
  |  \/  |         | | |  __ \      | |   |  __ \| |     | |  
  | \  / | ___   __| | | |  | | ___ | |_  | |__) | | ___ | |_ 

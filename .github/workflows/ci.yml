@@ -1,0 +1,163 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  base-install:
+    name: Base install without optional dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install the base package
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .
+
+      - name: Verify optional packages were not installed
+        run: |
+          python -m pip check
+          python -c "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('cooler', 'dash', 'plotly'))"
+          python -c "import sys; import moddotplot.moddotplot; assert not {'cooler', 'dash', 'plotly', 'moddotplot.interactive'}.intersection(sys.modules)"
+          python -m moddotplot --help
+
+  tests:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
+          - "3.13"
+          - "3.14"
+    env:
+      MPLBACKEND: Agg
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --editable ".[test,interactive,cooler]"
+
+      - name: Run unit and integration tests
+        run: >-
+          python -m pytest
+          --cov=moddotplot
+          --cov-report=term-missing
+          --cov-report=xml
+          --junitxml=junit.xml
+
+      - name: Store test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-python-${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            junit.xml
+          if-no-files-found: warn
+
+  style:
+    name: Formatting
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install Black
+        run: python -m pip install black
+
+      - name: Check formatting
+        run: python -m black --check src tests setup.py
+
+  package:
+    name: Build and validate package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install packaging tools
+        run: python -m pip install build twine
+
+      - name: Build wheel and source distribution
+        run: python -m build
+
+      - name: Validate distribution metadata
+        run: python -m twine check --strict dist/*
+
+      - name: Install and inspect the wheel
+        run: |
+          python -c "import pathlib; wheel = next(pathlib.Path('dist').glob('*.whl')); assert 'cp38-abi3' in wheel.name, wheel.name"
+          python -m pip install --no-deps --force-reinstall dist/*.whl
+          python -c "import importlib.metadata as m, pathlib, tomllib; from packaging.specifiers import SpecifierSet; expected = tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']; actual = m.metadata('ModDotPlot'); assert m.version('ModDotPlot') == expected['version']; assert SpecifierSet(actual['Requires-Python']) == SpecifierSet(expected['requires-python'])"
+          python -c "from moddotplot import _nthash; hashes, mask = _nthash.hash_kmers('ACGTACGT', 3, True); assert len(hashes) == 48 and mask == b''"
+
+      - name: Store distributions
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-package-distributions
+          path: dist/
+          if-no-files-found: error

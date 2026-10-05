@@ -1,31 +1,216 @@
 #!/usr/bin/env python3
 import math
+from collections import OrderedDict
+from dataclasses import dataclass
 import numpy as np
 from moddotplot.const import (
     SEQUENTIAL_PALETTES,
     DIVERGING_PALETTES,
     QUALITATIVE_PALETTES,
 )
-from palettable import colorbrewer
-from typing import List, Set, Dict, Tuple
-import mmh3
+from typing import Collection, Hashable, List, Set, Dict, Tuple
 import pandas as pd
-import cooler
+from scipy.sparse import csr_matrix
 
-from moddotplot.parse_fasta import printProgressBar
+from moddotplot import _nthash
+from moddotplot.color_palettes import palette_colors
+from moddotplot.optional_dependencies import OptionalDependencyError
 
 
-def removeAmbiguousBases(mod_list, k):
-    # Ambiguous IUPAC codes
-    bases_to_remove = ["R", "Y", "M", "K", "S", "W", "H", "B", "V", "D", "N"]
-    kmers_to_remove = set()
-    for i in range(len(bases_to_remove)):
-        result_string = str(bases_to_remove[i]) * k
-        kmers_to_remove.add(mmh3.hash(result_string))
-    mod_set = set(mod_list)
-    # Remove homopolymers of ambiguous nucleotides
-    mod_set.difference_update(kmers_to_remove)
-    return mod_set
+@dataclass(frozen=True)
+class PreparedModimizerSketches:
+    """Core and expanded window sketches prepared for a matrix calculation.
+
+    The compact sorted NumPy arrays are deliberately retained by reference. A
+    prepared value can therefore be shared by self and pairwise calculations
+    without copying sketch data. Public conversion helpers continue to return
+    sets for backward compatibility.
+    """
+
+    core: List[Collection[int]]
+    neighbors: List[Collection[int]]
+
+
+def prepare_sequence_sketches(
+    sequence,
+    window_size,
+    sparsity,
+    delta,
+    k,
+    ambiguous,
+    expectation,
+    canonical=True,
+):
+    """Hash *sequence* directly into exact adaptive window sketches.
+
+    Unlike :func:`prepare_modimizer_sketches`, this path never materializes the
+    chromosome-wide array containing one ``uint64`` per genomic k-mer. The
+    native kernel streams positional hashes through the currently active core
+    and expanded windows and returns only the sorted, unique sketches retained
+    by the existing adaptive-sparsity algorithm.
+
+    The returned arrays and all interval/ambiguity semantics are identical to
+    hashing with ``_hash_sequence`` and then calling
+    :func:`prepare_modimizer_sketches`.
+    """
+
+    if k <= 0:
+        raise ValueError("k-mer size must be greater than zero")
+    if window_size <= 0:
+        raise ValueError("window size must be greater than zero")
+
+    # ``s#`` accepts str and immutable bytes. Other contiguous byte-oriented
+    # sequence representations are normalized once, without uppercasing: the
+    # native ntHash implementation already handles ASCII case and U/T.
+    native_sequence = (
+        sequence if isinstance(sequence, (str, bytes)) else bytes(sequence)
+    )
+    kmer_count = max(len(native_sequence) - k + 1, 0)
+    core_bounds = _partition_bounds(kmer_count, window_size, 0, k)
+    neighbor_bounds = (
+        _partition_bounds(kmer_count, window_size, delta, k) if delta > 0 else None
+    )
+    bounds = core_bounds if neighbor_bounds is None else core_bounds + neighbor_bounds
+    packed_sketches = _nthash.sketch_kmers(
+        native_sequence,
+        k,
+        bool(canonical),
+        bounds,
+        int(sparsity),
+        round(expectation / 2),
+        bool(ambiguous),
+    )
+    arrays = [np.frombuffer(packed, dtype=np.uint64) for packed in packed_sketches]
+    core = arrays[: len(core_bounds)]
+    if neighbor_bounds is None:
+        neighbors = core
+    else:
+        neighbors = arrays[len(core_bounds) :]
+    return PreparedModimizerSketches(core=core, neighbors=neighbors)
+
+
+def prepare_modimizer_sketches(
+    sequence_length,
+    sequence,
+    window_size,
+    sparsity,
+    delta,
+    k,
+    ambiguous,
+    expectation,
+):
+    """Partition one sequence and build the sketches used by matrix routines."""
+
+    core_partitions = partitionOverlaps(sequence, window_size, 0, sequence_length, k)
+    if delta > 0:
+        neighbor_partitions = partitionOverlaps(
+            sequence, window_size, delta, sequence_length, k
+        )
+    else:
+        neighbor_partitions = core_partitions
+
+    # Prepared values stay as compact sorted ndarrays.  The public conversion
+    # helpers still return sets for API compatibility, but keeping millions of
+    # selected hashes as Python ints in Python hash tables costs roughly ten
+    # times more memory on chromosome-sized inputs.
+    core = _convert_to_modimizer_arrays(
+        core_partitions, sparsity, ambiguous, k, expectation
+    )
+    if neighbor_partitions is core_partitions:
+        neighbors = core
+    else:
+        neighbors = _convert_to_modimizer_arrays(
+            neighbor_partitions, sparsity, ambiguous, k, expectation
+        )
+    return PreparedModimizerSketches(core=core, neighbors=neighbors)
+
+
+def create_self_matrix_from_sketches(prepared, k, identity, ambiguous):
+    """Build a self matrix from an already prepared sequence sketch."""
+
+    return selfContainmentMatrix(
+        prepared.core, prepared.neighbors, k, identity, ambiguous
+    )
+
+
+def create_pairwise_matrix_from_sketches(
+    prepared_x, prepared_y, identity, k, supress_progress=False
+):
+    """Build a pairwise matrix from two already prepared sequence sketches."""
+
+    return pairwiseContainmentMatrix(
+        prepared_x.core,
+        prepared_y.core,
+        prepared_x.neighbors,
+        prepared_y.neighbors,
+        identity,
+        k,
+        supress_progress,
+    )
+
+
+class ModimizerSketchCache:
+    """Small LRU cache for prepared sequence sketches.
+
+    ``source_key`` identifies the underlying sequence slice.  Calculation
+    parameters are incorporated automatically, preventing reuse when a
+    pairwise plot uses a different window size from the corresponding self
+    plot. The default capacity matches a two-sequence comparison and bounds
+    retained memory for larger grids.
+    """
+
+    def __init__(self, max_entries=2):
+        if max_entries < 1:
+            raise ValueError("max_entries must be at least one")
+        self.max_entries = max_entries
+        self._cache = OrderedDict()
+
+    def get_or_prepare(
+        self,
+        source_key: Hashable,
+        sequence_length,
+        sequence,
+        window_size,
+        sparsity,
+        delta,
+        k,
+        ambiguous,
+        expectation,
+    ):
+        cache_key = (
+            source_key,
+            sequence_length,
+            window_size,
+            sparsity,
+            delta,
+            k,
+            ambiguous,
+            expectation,
+        )
+        try:
+            prepared = self._cache.pop(cache_key)
+        except KeyError:
+            # Evict before constructing the replacement so a miss cannot
+            # briefly exceed the configured memory bound by one full sketch.
+            if len(self._cache) >= self.max_entries:
+                self._cache.popitem(last=False)
+            prepared = prepare_modimizer_sketches(
+                sequence_length,
+                sequence,
+                window_size,
+                sparsity,
+                delta,
+                k,
+                ambiguous,
+                expectation,
+            )
+        self._cache[cache_key] = prepared
+        return prepared
+
+    def clear(self):
+        """Release references to all retained sketches."""
+
+        self._cache.clear()
 
 
 def createSelfMatrix(
@@ -39,20 +224,17 @@ def createSelfMatrix(
     ambiguous,
     sketch_size,
 ):
-    no_neighbors = partitionOverlaps(sequence, window_size, 0, sequence_length, k)
-    if delta > 0:
-        neighbors = partitionOverlaps(sequence, window_size, delta, sequence_length, k)
-    else:
-        neighbors = no_neighbors
-
-    neighbors_mods = convertToModimizers(neighbors, sparsity, ambiguous, k, sketch_size)
-    no_neighbors_mods = convertToModimizers(
-        no_neighbors, sparsity, ambiguous, k, sketch_size
+    prepared = prepare_modimizer_sketches(
+        sequence_length,
+        sequence,
+        window_size,
+        sparsity,
+        delta,
+        k,
+        ambiguous,
+        sketch_size,
     )
-    matrix = selfContainmentMatrix(
-        no_neighbors_mods, neighbors_mods, k, identity, ambiguous
-    )
-    return matrix
+    return create_self_matrix_from_sketches(prepared, k, identity, ambiguous)
 
 
 def createPairwiseMatrix(
@@ -68,146 +250,476 @@ def createPairwiseMatrix(
     ambiguous,
     expectation,
 ):
-    no_neighbors_large = partitionOverlaps(larger_seq, window_size, 0, larger_length, k)
-    no_neighbors_small = partitionOverlaps(
-        smaller_seq, window_size, 0, smaller_length, k
-    )
-    if delta > 0:
-        neighbors_large = partitionOverlaps(
-            larger_seq, window_size, delta, larger_length, k
-        )
-        neighbors_small = partitionOverlaps(
-            smaller_seq, window_size, delta, smaller_length, k
-        )
-    else:
-        neighbors_large = no_neighbors_large
-        neighbors_small = no_neighbors_small
-
-    neighbors_mods_large = convertToModimizers(
-        neighbors_large, sparsity, ambiguous, k, expectation
-    )
-    no_neighbors_mods_large = convertToModimizers(
-        no_neighbors_large, sparsity, ambiguous, k, expectation
-    )
-    neighbors_mods_small = convertToModimizers(
-        neighbors_small, sparsity, ambiguous, k, expectation
-    )
-    no_neighbors_mods_small = convertToModimizers(
-        no_neighbors_small, sparsity, ambiguous, k, expectation
-    )
-    matrix = pairwiseContainmentMatrix(
-        no_neighbors_mods_large,
-        no_neighbors_mods_small,
-        neighbors_mods_large,
-        neighbors_mods_small,
-        identity,
+    prepared_large = prepare_modimizer_sketches(
+        larger_length,
+        larger_seq,
+        window_size,
+        sparsity,
+        delta,
         k,
-        False,
+        ambiguous,
+        expectation,
     )
-    return matrix
+    prepared_small = prepare_modimizer_sketches(
+        smaller_length,
+        smaller_seq,
+        window_size,
+        sparsity,
+        delta,
+        k,
+        ambiguous,
+        expectation,
+    )
+    return create_pairwise_matrix_from_sketches(
+        prepared_large, prepared_small, identity, k
+    )
 
 
 def partitionOverlaps(
     lst: List[int], win: int, delta: float, seq_len: int, k: int
 ) -> List[List[int]]:
-    kmer_list = []
-    kmer_to_genomic_coordinate_offset = win - k + 1
+    if win <= 0:
+        raise ValueError("window size must be greater than zero")
+    if k <= 0:
+        raise ValueError("k-mer size must be greater than zero")
+
+    kmer_count = min(len(lst), max(seq_len, 0))
+    if kmer_count == 0:
+        return []
+
+    return [
+        lst[start:end] for start, end in _partition_bounds(kmer_count, win, delta, k)
+    ]
+
+
+def _partition_bounds(kmer_count: int, win: int, delta: float, k: int):
+    """Return the half-open k-mer-index bounds used by window partitioning."""
+
+    if win <= 0:
+        raise ValueError("window size must be greater than zero")
+    if k <= 0:
+        raise ValueError("k-mer size must be greater than zero")
+    if kmer_count <= 0:
+        return []
+
+    # A sequence with n bases has n - k + 1 k-mers.  Reconstruct the genomic
+    # length so that every partition starts on a multiple of ``win``.  The old
+    # counter started the second partition at ``win - k + 2`` and then advanced
+    # by ``win``, making all but the first window begin k - 2 bases too early.
+    sequence_length = kmer_count + k - 1
     delta_offset = win * delta
+    bounds = []
 
-    # Set the first window to contain win - k + 1 kmers.
-    starting_end_index = int(round(kmer_to_genomic_coordinate_offset + delta_offset))
-    kmer_list.append(lst[0:starting_end_index])
-    counter = win - k + 1
+    # A trailing genomic fragment shorter than k has no k-mer and therefore no
+    # matrix cell, so iterate over valid k-mer starts rather than base length.
+    for window_start in range(0, kmer_count, win):
+        window_end = min(window_start + win, sequence_length)
+        expanded_start = max(0, int(round(window_start - delta_offset)))
+        expanded_end = min(sequence_length, int(round(window_end + delta_offset)))
 
-    # Set normal windows
-    while counter <= (seq_len - win):
-        start_index = counter + 1
-        end_index = win + counter + 1
-        delta_start_index = int(round(start_index - delta_offset))
-        delta_end_index = int(round(end_index + delta_offset))
-        if delta_end_index > seq_len:
-            delta_end_index = seq_len
-        try:
-            kmer_list.append(lst[delta_start_index:delta_end_index])
-        except Exception as e:
-            print("Error in appending list of kmers...\n")
-            print(e)
-            kmer_list.append(lst[delta_start_index:seq_len])
-        counter += win
+        # K-mers are indexed by their genomic start.  Subtracting k - 1 from
+        # the right boundary excludes k-mers that cross out of the interval.
+        start_index = min(expanded_start, kmer_count)
+        end_index = min(max(expanded_end - k + 1, start_index), kmer_count)
+        bounds.append((start_index, end_index))
 
-    # Set the last window to get the remainder
-    if counter <= seq_len - 2:
-        final_start_index = int(round(counter + 1 - delta_offset))
-        kmer_list.append(lst[final_start_index:seq_len])
+    return bounds
 
-    # Test that last value was added on correctly
+
+def _valid_hashes(partition):
+    """Return the unmasked hashes in *partition* as a flat NumPy array.
+
+    FASTA input uses a ``uint64`` ``MaskedArray``.  Keeping that representation
+    here is important: iterating over a masked array produces a Python object
+    for every genomic k-mer and was the dominant cost of sketch construction.
+    The object-array fallback retains compatibility with legacy callers that
+    pass lists containing ``None`` or masked scalar values.
+    """
+
+    if isinstance(partition, np.ma.MaskedArray):
+        values = np.asarray(partition.data).reshape(-1)
+        raw_mask = partition.mask
+        # ``getmaskarray`` materializes a full all-False array for ``nomask``.
+        # Avoid allocating and scanning that temporary for every 100 kb window.
+        if raw_mask is np.ma.nomask or (np.ndim(raw_mask) == 0 and not bool(raw_mask)):
+            return values
+        mask = np.asarray(raw_mask, dtype=bool).reshape(-1)
+        if np.any(mask):
+            values = values[~mask]
+        return values
+
+    values = np.asarray(partition)
+    # NumPy may infer ``float64`` for a Python list containing uint64-range
+    # integers on some supported versions, irreversibly rounding hash values.
+    # Send non-integral legacy sequences through the exact Python-int fallback
+    # below; native numeric arrays can still be converted in bulk.
+    legacy_requires_exact_conversion = (
+        not isinstance(partition, np.ndarray) and values.dtype.kind not in "biu"
+    )
+    if values.dtype.kind != "O" and not legacy_requires_exact_conversion:
+        values = values.reshape(-1)
+        # ``populateModimizers`` historically called int() on every value.
+        # Hash arrays are already integral, but retain that behavior for older
+        # callers that provide a floating-point sequence.
+        if values.dtype.kind not in "biu":
+            values = values.astype(np.int64)
+        return values
+
+    # Mixed Python sequences cannot be converted to a numeric array until
+    # ``None`` and masked sentinels have been removed.  This path is for API
+    # compatibility; normal FASTA processing always takes the vectorized path
+    # above.
+    object_values = np.asarray(partition, dtype=object).reshape(-1)
+    valid_values = [
+        int(kmer)
+        for kmer in object_values
+        if kmer is not None and not np.ma.is_masked(kmer)
+    ]
+    if not valid_values:
+        return np.empty(0, dtype=np.uint64)
+
     try:
-        assert kmer_list[-1][-1] == lst[-1]
-    except (AssertionError, IndexError) as e:
-        print(f"Error: Last k-mer does not match original sequence: {e}\n")
-    return kmer_list
+        return np.asarray(valid_values, dtype=np.uint64)
+    except (OverflowError, ValueError):
+        # Preserve arbitrary-size and negative Python integers for legacy
+        # callers. NumPy still performs the modulo and uniqueness operations
+        # in bulk, albeit with object arithmetic.
+        return np.asarray(valid_values, dtype=object)
+
+
+def _divisible_hashes(values, sparsity):
+    """Select hashes divisible by an integer sparsity without Python loops."""
+
+    if values.size == 0:
+        return values
+
+    # All production sparsities are powers of two.  A bit mask avoids creating
+    # the full-size temporary remainder array and is valid for signed and
+    # unsigned integer hashes alike.
+    if values.dtype.kind in "biu" and sparsity & (sparsity - 1) == 0:
+        return values[np.bitwise_and(values, sparsity - 1) == 0]
+    return values[np.remainder(values, sparsity) == 0]
+
+
+def _populate_modimizer_array(partition, sparsity, ambiguous, expectation, k):
+    """Build one adaptive modimizer sketch using vectorized NumPy operations.
+
+    ``ambiguous`` and ``k`` remain in the public signature for compatibility;
+    ambiguity is represented by the mask on ``partition``.  If a sketch is
+    smaller than half its expectation, sparsity is repeatedly halved just as
+    before.  The sparsity now stays integer throughout that fallback rather
+    than becoming a float after the first recursive call.
+    """
+
+    del ambiguous, k
+
+    current_sparsity = int(sparsity)
+    if current_sparsity < 1:
+        raise ValueError("sparsity must be a positive integer")
+
+    values = _valid_hashes(partition)
+    minimum_size = round(expectation / 2)
+
+    while True:
+        selected = _divisible_hashes(values, current_sparsity)
+        unique = np.unique(selected)
+        if unique.size >= minimum_size or current_sparsity == 1:
+            return unique
+        current_sparsity = max(1, current_sparsity // 2)
 
 
 def populateModimizers(partition, sparsity, ambiguous, expectation, k):
-    mod_set = set()
-    for kmer in partition:
-        if kmer % sparsity == 0:
-            mod_set.add(kmer)
-    if not ambiguous:
-        mod_set = removeAmbiguousBases(mod_set, k)
-    if (len(mod_set) < round(expectation / 2)) and (sparsity > 1):
-        populateModimizers(partition, sparsity / 2, ambiguous, expectation, k)
-    return mod_set
+    """Build one adaptive sketch and return its historical ``set`` type."""
+
+    unique = _populate_modimizer_array(partition, sparsity, ambiguous, expectation, k)
+    # ``tolist`` converts NumPy integer scalars to Python ints, preserving the
+    # public return type while internal prepared sketches retain compact arrays.
+    return set(unique.tolist())
+
+
+def _convert_to_modimizer_arrays(
+    kmer_list, sparsity: int, ambiguous: bool, k: int, expectation: int
+):
+    return [
+        _populate_modimizer_array(partition, sparsity, ambiguous, expectation, k)
+        for partition in kmer_list
+    ]
 
 
 def convertToModimizers(
     kmer_list: List[List[int]], sparsity: int, ambiguous: bool, k: int, expectation: int
 ) -> List[Set[int]]:
-    mod_total = []
-    for partition in kmer_list:
-        mod_set = populateModimizers(partition, sparsity, ambiguous, expectation, k)
-        mod_total.append(mod_set)
-    return mod_total
+    return [
+        populateModimizers(partition, sparsity, ambiguous, expectation, k)
+        for partition in kmer_list
+    ]
+
+
+BEDPE_HEADER = (
+    "#query_name",
+    "query_start",
+    "query_end",
+    "reference_name",
+    "reference_start",
+    "reference_end",
+    "perID_by_events",
+)
+
+# Bound the largest temporary threshold mask/nonzero result created while
+# converting a dense identity matrix.  The returned compatibility list can of
+# course still be large; callers that need bounded output memory can consume
+# ``iterMatrixToBedChunks`` directly.
+DEFAULT_BEDPE_CHUNK_CELLS = 262_144
+
+
+def _iter_matrix_blocks(values, max_chunk_cells):
+    """Yield C-order matrix blocks containing at most ``max_chunk_cells``.
+
+    Normally a block is a band of complete matrix rows.  If one row itself is
+    wider than the configured bound, that row is split into consecutive column
+    blocks.  In both cases the blocks, and cells within each block, retain the
+    same order as a nested row-then-column loop.
+    """
+
+    if isinstance(max_chunk_cells, bool) or not isinstance(
+        max_chunk_cells, (int, np.integer)
+    ):
+        raise TypeError("max_chunk_cells must be a positive integer")
+    max_chunk_cells = int(max_chunk_cells)
+    if max_chunk_cells <= 0:
+        raise ValueError("max_chunk_cells must be a positive integer")
+
+    rows, cols = values.shape
+    if rows == 0 or cols == 0:
+        return
+
+    if cols <= max_chunk_cells:
+        rows_per_band = max(1, max_chunk_cells // cols)
+        for row_start in range(0, rows, rows_per_band):
+            row_stop = min(row_start + rows_per_band, rows)
+            yield values[row_start:row_stop, :], row_start, 0
+        return
+
+    # An individual row exceeds the cell budget. Splitting it by columns is
+    # the only way to maintain the strict bound without changing C-order.
+    for row_index in range(rows):
+        for column_start in range(0, cols, max_chunk_cells):
+            column_stop = min(column_start + max_chunk_cells, cols)
+            yield (
+                values[row_index : row_index + 1, column_start:column_stop],
+                row_index,
+                column_start,
+            )
+
+
+def _iter_matrix_to_bed_columns(
+    matrix,
+    window_size,
+    id_threshold,
+    self_identity,
+    x_offset,
+    y_offset,
+    x_end,
+    y_end,
+    max_chunk_cells,
+):
+    """Yield column arrays for retained BEDPE cells in exact legacy order."""
+
+    values = np.asarray(matrix)
+    if values.ndim != 2:
+        raise ValueError("identity matrix must be two-dimensional")
+
+    cutoff = id_threshold / 100
+    for block, row_offset, column_offset in _iter_matrix_blocks(
+        values, max_chunk_cells
+    ):
+        # Threshold one bounded block at a time instead of allocating an
+        # additional matrix-sized boolean array. ``nonzero`` emits C-order
+        # indices, matching the historical nested x-then-y iteration.
+        local_x, local_y = np.nonzero(block >= cutoff)
+        if local_x.size == 0:
+            continue
+
+        x_indices = local_x + row_offset
+        y_indices = local_y + column_offset
+        if self_identity:
+            upper_triangle = x_indices <= y_indices
+            if not bool(np.all(upper_triangle)):
+                x_indices = x_indices[upper_triangle]
+                y_indices = y_indices[upper_triangle]
+            if x_indices.size == 0:
+                continue
+
+        start_x = x_indices * window_size + x_offset
+        end_x = start_x + window_size - 1
+        start_y = y_indices * window_size + y_offset
+        end_y = start_y + window_size - 1
+        if x_end is not None:
+            end_x = np.minimum(end_x, x_end)
+        if y_end is not None:
+            end_y = np.minimum(end_y, y_end)
+
+        # Coordinate calculations may be floating point for interactive
+        # exports. Integer conversion deliberately happens after clipping,
+        # preserving the legacy scalar ``int(...)`` truncation semantics.
+        start_x = np.asarray(start_x).astype(np.int64, copy=False)
+        end_x = np.asarray(end_x).astype(np.int64, copy=False)
+        start_y = np.asarray(start_y).astype(np.int64, copy=False)
+        end_y = np.asarray(end_y).astype(np.int64, copy=False)
+        selected_values = np.asarray(values[x_indices, y_indices], dtype=float)
+        yield start_x, end_x, start_y, end_y, selected_values
+
+
+def iterMatrixToBedChunks(
+    matrix,
+    window_size,
+    id_threshold,
+    x_name,
+    y_name,
+    self_identity,
+    x_offset,
+    y_offset,
+    x_end=None,
+    y_end=None,
+    max_chunk_cells=DEFAULT_BEDPE_CHUNK_CELLS,
+):
+    """Yield retained BEDPE records as bounded, columnar DataFrames.
+
+    Every yielded frame contains at most ``max_chunk_cells`` records and uses
+    :data:`BEDPE_HEADER` as its exact column order. Empty matrix blocks are not
+    yielded. Consuming these frames incrementally avoids both a matrix-sized
+    threshold mask and the compatibility API's list of Python tuples.
+    """
+
+    for start_x, end_x, start_y, end_y, selected_values in _iter_matrix_to_bed_columns(
+        matrix,
+        window_size,
+        id_threshold,
+        self_identity,
+        x_offset,
+        y_offset,
+        x_end,
+        y_end,
+        max_chunk_cells,
+    ):
+        record_count = selected_values.size
+        yield pd.DataFrame(
+            {
+                BEDPE_HEADER[0]: np.full(record_count, x_name, dtype=object),
+                BEDPE_HEADER[1]: start_x,
+                BEDPE_HEADER[2]: end_x,
+                BEDPE_HEADER[3]: np.full(record_count, y_name, dtype=object),
+                BEDPE_HEADER[4]: start_y,
+                BEDPE_HEADER[5]: end_y,
+                BEDPE_HEADER[6]: selected_values,
+            },
+            columns=BEDPE_HEADER,
+        )
+
+
+def convertMatrixToBedDataFrame(
+    matrix,
+    window_size,
+    id_threshold,
+    x_name,
+    y_name,
+    self_identity,
+    x_offset,
+    y_offset,
+    x_end=None,
+    y_end=None,
+    max_chunk_cells=DEFAULT_BEDPE_CHUNK_CELLS,
+):
+    """Return BEDPE records as one columnar DataFrame.
+
+    For fully bounded consumption, prefer :func:`iterMatrixToBedChunks`.
+    This convenience helper avoids the substantially larger list of Python
+    row tuples expected by the historical :func:`convertMatrixToBed` API.
+    """
+
+    chunks = list(
+        iterMatrixToBedChunks(
+            matrix,
+            window_size,
+            id_threshold,
+            x_name,
+            y_name,
+            self_identity,
+            x_offset,
+            y_offset,
+            x_end,
+            y_end,
+            max_chunk_cells,
+        )
+    )
+    if chunks:
+        return pd.concat(chunks, ignore_index=True, copy=False)
+    return pd.DataFrame(
+        {
+            BEDPE_HEADER[0]: pd.Series(dtype=object),
+            BEDPE_HEADER[1]: pd.Series(dtype=np.int64),
+            BEDPE_HEADER[2]: pd.Series(dtype=np.int64),
+            BEDPE_HEADER[3]: pd.Series(dtype=object),
+            BEDPE_HEADER[4]: pd.Series(dtype=np.int64),
+            BEDPE_HEADER[5]: pd.Series(dtype=np.int64),
+            BEDPE_HEADER[6]: pd.Series(dtype=float),
+        },
+        columns=BEDPE_HEADER,
+    )
 
 
 def convertMatrixToBed(
-    matrix, window_size, id_threshold, x_name, y_name, self_identity, x_offset, y_offset
+    matrix,
+    window_size,
+    id_threshold,
+    x_name,
+    y_name,
+    self_identity,
+    x_offset,
+    y_offset,
+    x_end=None,
+    y_end=None,
+    max_chunk_cells=DEFAULT_BEDPE_CHUNK_CELLS,
 ):
-    bed = [
-        (
-            "#query_name",
-            "query_start",
-            "query_end",
-            "reference_name",
-            "reference_start",
-            "reference_end",
-            "perID_by_events",
+    """Return the historical header-plus-row-tuples BEDPE representation."""
+
+    bed = [BEDPE_HEADER]
+    for start_x, end_x, start_y, end_y, selected_values in _iter_matrix_to_bed_columns(
+        matrix,
+        window_size,
+        id_threshold,
+        self_identity,
+        x_offset,
+        y_offset,
+        x_end,
+        y_end,
+        max_chunk_cells,
+    ):
+        bed.extend(
+            (
+                x_name,
+                int(current_start_x),
+                int(current_end_x),
+                y_name,
+                int(current_start_y),
+                int(current_end_y),
+                float(value),
+            )
+            for current_start_x, current_end_x, current_start_y, current_end_y, value in zip(
+                start_x, end_x, start_y, end_y, selected_values
+            )
         )
-    ]
-
-    rows, cols = matrix.shape
-    for x in range(rows):
-        for y in range(cols):
-            value = matrix[x, y]
-            if (not self_identity) or (self_identity and x <= y):
-                if value >= id_threshold / 100:
-                    start_x = x * window_size + x_offset
-                    end_x = start_x + window_size - 1
-                    start_y = y * window_size + y_offset
-                    end_y = start_y + window_size - 1
-
-                    bed.append(
-                        (
-                            x_name,
-                            int(start_x),
-                            int(end_x),
-                            y_name,
-                            int(start_y),
-                            int(end_y),
-                            float(value),
-                        )
-                    )
     return bed
+
+
+def require_cooler_dependency():
+    """Return Cooler or explain how to install the optional export support."""
+
+    try:
+        import cooler
+    except ModuleNotFoundError as error:
+        raise OptionalDependencyError("Cooler export") from error
+    return cooler
 
 
 def convertMatrixToCool(
@@ -237,6 +749,7 @@ def convertMatrixToCool(
         chromsizes (dict): Dict of chromosome lengths, e.g. {"chr1": 248956422}.
         output_cool (str): Path to save cooler file.
     """
+    cooler = require_cooler_dependency()
     rows, cols = matrix.shape
 
     # ---- build bin table ----
@@ -267,8 +780,6 @@ def convertMatrixToCool(
 
     # ---- write cooler ----
     cooler.create_cooler(output_cool, bins=bins, pixels=pixels, ordered=True)
-    print(bins)
-    print(pixels)
 
     return output_cool
 
@@ -296,41 +807,201 @@ def containment_neighbors(
     k: int,
 ) -> float:
     """
-    Calculate the containment neighbors based on four sets and an identity threshold.
+    Calculate symmetric containment using the opposite expanded window.
+
+    ``set1`` and ``set2`` are sketches of the two core windows, while ``set3``
+    and ``set4`` are the corresponding sketches expanded by ``delta``.  A core
+    is compared with the *other* window's expanded sketch in both directions.
+    This is what lets a repeat that straddles a partition boundary match a core
+    window instead of being missed solely because the partitions are offset.
+
+    The maximum directional containment is thresholded after both directions
+    have been evaluated.  Applying the cutoff to only the first direction made
+    the result depend on argument order in the original implementation.
 
     Args:
         set1 (Set[int]): The first set.
         set2 (Set[int]): The second set.
-        set3 (Set[int]): The third set.
-        set4 (Set[int]): The fourth set.
+        set3 (Set[int]): Expanded sketch corresponding to ``set1``.
+        set4 (Set[int]): Expanded sketch corresponding to ``set2``.
         identity (int): The identity threshold.
         k (int): Kmer value.
 
     Returns:
         float: The containment neighbors value.
     """
-    len_a = len(set1)
-    len_b = len(set2)
+    containment_a_b_expanded = len(set1 & set4) / len(set1) if set1 else 0.0
+    containment_b_a_expanded = len(set2 & set3) / len(set2) if set2 else 0.0
+    symmetric_containment = max(containment_a_b_expanded, containment_b_a_expanded)
 
-    intersection_a_b_prime = len(set1 & set4)
-    if len_a != 0:
-        containment_a_b_prime = intersection_a_b_prime / len_a
-    else:
-        # If len_a is zero, handle it by setting containment_a_b_prime to a default value
-        containment_a_b_prime = 0
-
-    if binomial_distance(containment_a_b_prime, k) < identity / 100:
+    if binomial_distance(symmetric_containment, k) < identity / 100:
         return 0.0
+    return symmetric_containment
 
+
+def _sketch_intersection_counts(sketches_a, sketches_b):
+    """Return every pairwise sketch intersection count as a dense array.
+
+    The previous matrix implementation performed two Python set intersections
+    for every output cell.  At the default resolution that means roughly two
+    million intersections per matrix, each scanning about 1,600 hashes.  Here
+    hashes are coordinate-compressed once and the sketches are represented as
+    sparse incidence matrices.  Sparse matrix multiplication then calculates
+    the exact same intersection counts in compiled code.
+
+    Only the small ``len(sketches_a) x len(sketches_b)`` result is dense.  The
+    incidence matrices retain one entry per selected hash, so chromosome size
+    does not create a dense hash universe.  Production ntHash values take the
+    fast unsigned-64-bit path; the mapping fallback preserves exact behavior
+    for legacy callers using negative, oversized, or other hashable values.
+    """
+
+    rows = len(sketches_a)
+    cols = len(sketches_b)
+    lengths_a = np.fromiter(
+        (len(sketch) for sketch in sketches_a), dtype=np.int64, count=rows
+    )
+    lengths_b = np.fromiter(
+        (len(sketch) for sketch in sketches_b), dtype=np.int64, count=cols
+    )
+    total_a = int(lengths_a.sum())
+    total_b = int(lengths_b.sum())
+    total = total_a + total_b
+
+    count_dtype = np.int32
+    if total == 0:
+        return np.zeros((rows, cols), dtype=count_dtype)
+
+    collections = (sketches_a, sketches_b)
+    compact_uint64_arrays = all(
+        isinstance(sketch, np.ndarray)
+        and sketch.ndim == 1
+        and sketch.dtype == np.dtype(np.uint64)
+        for sketches in collections
+        for sketch in sketches
+    )
+
+    # Prepared production sketches are sorted and unique. Merge their streams
+    # natively, retaining only one cursor per sketch and the dense output. This
+    # avoids the chromosome-scale concatenated hash array, int64 inverse map,
+    # coordinate universe, and two CSR incidence matrices. Unsorted or
+    # duplicate-bearing arrays continue through the compatibility path below.
+    if compact_uint64_arrays and all(
+        sketch.size < 2 or bool(np.all(sketch[1:] > sketch[:-1]))
+        for sketches in collections
+        for sketch in sketches
+    ):
+
+        def packed(sketch):
+            # Native sequence sketches are zero-copy views of immutable bytes,
+            # so their original packed buffer can be reused. Compatibility
+            # arrays require one compact copy but no inverse/CSR structures.
+            return (
+                sketch.base
+                if isinstance(sketch.base, bytes) and sketch.nbytes == len(sketch.base)
+                else sketch.tobytes()
+            )
+
+        packed_counts = _nthash.intersection_counts(
+            [packed(sketch) for sketch in sketches_a],
+            [packed(sketch) for sketch in sketches_b],
+        )
+        return np.frombuffer(packed_counts, dtype=np.int32).reshape(rows, cols).copy()
+
+    if compact_uint64_arrays:
+        # This is the normal prepared-sketch path. Concatenating the arrays in
+        # C avoids boxing millions of hashes back into Python integers.
+        hashes = np.concatenate(
+            tuple(sketch for sketches in collections for sketch in sketches)
+        )
+        unique_hashes, inverse = np.unique(hashes, return_inverse=True)
+        hash_count = len(unique_hashes)
+        del hashes, unique_hashes
     else:
-        intersection_a_prime_b = len(set2 & set3)
-        if len_b != 0:
-            containment_a_prime_b = intersection_a_prime_b / len_b
-        else:
-            # If len_a is zero, handle it by setting containment_a_b_prime to a default value
-            containment_a_prime_b = 0
+        uint64_max = np.iinfo(np.uint64).max
+        uint64_compatible = all(
+            isinstance(value, (int, np.integer)) and 0 <= int(value) <= uint64_max
+            for sketches in collections
+            for sketch in sketches
+            for value in sketch
+        )
 
-        return max(containment_a_b_prime, containment_a_prime_b)
+    if not compact_uint64_arrays and uint64_compatible:
+        hashes = np.fromiter(
+            (
+                int(value)
+                for sketches in collections
+                for sketch in sketches
+                for value in sketch
+            ),
+            dtype=np.uint64,
+            count=total,
+        )
+        unique_hashes, inverse = np.unique(hashes, return_inverse=True)
+        hash_count = len(unique_hashes)
+        del hashes, unique_hashes
+    elif not compact_uint64_arrays:
+        # This compatibility path is not used by FASTA processing, but keeps
+        # the public matrix functions exact for arbitrary hashable set values.
+        hash_columns = {}
+        inverse = np.empty(total, dtype=np.int64)
+        position = 0
+        for sketches in collections:
+            for sketch in sketches:
+                for value in sketch:
+                    try:
+                        column = hash_columns[value]
+                    except KeyError:
+                        column = len(hash_columns)
+                        hash_columns[value] = column
+                    inverse[position] = column
+                    position += 1
+        hash_count = len(hash_columns)
+
+    # SciPy uses 32-bit sparse indices whenever dimensions and nonzero counts
+    # fit.  Keeping that representation saves tens of megabytes at r=1000.
+    index_dtype = (
+        np.int32
+        if hash_count <= np.iinfo(np.int32).max and total <= np.iinfo(np.int32).max
+        else np.int64
+    )
+    indices_a = inverse[:total_a].astype(index_dtype, copy=False)
+    indices_b = inverse[total_a:].astype(index_dtype, copy=False)
+    del inverse
+
+    indptr_a = np.empty(rows + 1, dtype=index_dtype)
+    indptr_b = np.empty(cols + 1, dtype=index_dtype)
+    indptr_a[0] = 0
+    indptr_b[0] = 0
+    np.cumsum(lengths_a, out=indptr_a[1:])
+    np.cumsum(lengths_b, out=indptr_b[1:])
+
+    incidence_a = csr_matrix(
+        (
+            np.ones(total_a, dtype=count_dtype),
+            indices_a,
+            indptr_a,
+        ),
+        shape=(rows, hash_count),
+    )
+    incidence_b = csr_matrix(
+        (
+            np.ones(total_b, dtype=count_dtype),
+            indices_b,
+            indptr_b,
+        ),
+        shape=(cols, hash_count),
+    )
+    return (incidence_a @ incidence_b.T).toarray()
+
+
+def _identity_matrix_from_containment(containment_matrix, identity, k):
+    """Apply ModDotPlot's k-mer identity transform and cutoff in place."""
+
+    np.power(containment_matrix, 1.0 / k, out=containment_matrix)
+    containment_matrix[containment_matrix < identity / 100] = 0.0
+    containment_matrix *= 100.0
+    return containment_matrix
 
 
 def selfContainmentMatrix(
@@ -352,105 +1023,114 @@ def selfContainmentMatrix(
         np.ndarray: A NumPy array representing the self-containment matrix.
     """
     n = len(mod_set)
-    progress_thresholds = round(n / 77)
+    if len(mod_set_neighbors) != n:
+        raise IndexError("core and expanded self sketches must have equal lengths")
+    intersection_counts = _sketch_intersection_counts(mod_set, mod_set_neighbors)
+    core_sizes = np.fromiter((len(sketch) for sketch in mod_set), dtype=float, count=n)
+    directional_containment = np.zeros((n, n), dtype=float)
+    np.divide(
+        intersection_counts,
+        core_sizes[:, np.newaxis],
+        out=directional_containment,
+        where=core_sizes[:, np.newaxis] != 0,
+    )
+    del intersection_counts
+    np.maximum(
+        directional_containment,
+        directional_containment.T,
+        out=directional_containment,
+    )
+    containment_matrix = _identity_matrix_from_containment(
+        directional_containment, identity, k
+    )
 
-    if progress_thresholds == 0:
-        progress_thresholds = 1
+    diagonal = np.full(n, 100.0)
+    if not ambiguous:
+        diagonal[core_sizes == 0] = 0.0
+    np.fill_diagonal(containment_matrix, diagonal)
 
-    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
-    containment_matrix = np.empty((n, n))
-
-    for w in range(n):
-        if w % progress_thresholds == 0:
-            printProgressBar(w, n, prefix="Progress:", suffix="Complete", length=40)
-        containment_matrix[w, w] = 100.0
-        if len(mod_set[w]) == 0 and not ambiguous:
-            containment_matrix[w, w] = 0
-
-        for r in range(w + 1, n):
-            c_hat = binomial_distance(
-                containment_neighbors(
-                    mod_set[w],
-                    mod_set[r],
-                    mod_set_neighbors[w],
-                    mod_set_neighbors[r],
-                    identity,
-                    k,
-                ),
-                k,
-            )
-            containment_matrix[r, w] = c_hat * 100.0
-            containment_matrix[w, r] = c_hat * 100.0
-
-    printProgressBar(
-        n, n, prefix="Progress:", suffix="Completed", length=40
-    )  # show completed progress bar
-    print("\n")
     return containment_matrix
 
 
 def pairwiseContainmentMatrix(
-    mod_set_x: List[int],
-    mod_set_y: List[int],
-    mod_set_x_neighbors: List[List[int]],
-    mod_set_y_neighbors: List[List[int]],
+    mod_set_x: List[Set[int]],
+    mod_set_y: List[Set[int]],
+    mod_set_x_neighbors: List[Set[int]],
+    mod_set_y_neighbors: List[Set[int]],
     identity: int,
     k: int,
-    supress_progress: bool,
+    supress_progress: bool = False,
 ) -> np.ndarray:
     """
     Calculate an updated identity matrix using specified parameters.
 
     Args:
-        mod_set_x (List[int]): List of values for the x-axis.
-        mod_set_y (List[int]): List of values for the y-axis.
-        mod_set_x_neighbors (List[List[int]]): List of lists representing neighbors of mod_set_x values.
-        mod_set_y_neighbors (List[List[int]]): List of lists representing neighbors of mod_set_y values.
+        mod_set_x (List[Set[int]]): Modimizer sets for columns on the x-axis.
+        mod_set_y (List[Set[int]]): Modimizer sets for rows on the y-axis.
+        mod_set_x_neighbors (List[Set[int]]): Neighbor sets for x-axis windows.
+        mod_set_y_neighbors (List[Set[int]]): Neighbor sets for y-axis windows.
         identity (int): Resolution parameter.
         k (int): Value for the k parameter in the binomial_distance function.
-        supress_progress (bool): if true supresses the progress bar
-
+        supress_progress (bool): Retained for compatibility; has no effect.
     Returns:
-        np.ndarray: An identity matrix containing containment values.
+        np.ndarray: A ``(len(mod_set_y), len(mod_set_x))`` identity matrix.
     """
-    n = max(len(mod_set_y), len(mod_set_x))
-    progress_thresholds = round(n / 77)
-    if progress_thresholds == 0:
-        progress_thresholds = 1
+    rows = len(mod_set_y)
+    cols = len(mod_set_x)
+    if len(mod_set_x_neighbors) != cols or len(mod_set_y_neighbors) != rows:
+        raise IndexError("core and expanded pairwise sketches must have equal lengths")
+    x_core_sizes = np.fromiter(
+        (len(sketch) for sketch in mod_set_x), dtype=float, count=cols
+    )
+    y_core_sizes = np.fromiter(
+        (len(sketch) for sketch in mod_set_y), dtype=float, count=rows
+    )
 
-    if not supress_progress:
-        printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
-    containment_matrix = np.zeros((n, n), dtype=float)
+    # Keep only the final containment matrix at full size. Both directional
+    # count calculations and the second floating-point direction are bounded
+    # row blocks, avoiding several simultaneous dense matrix-sized arrays.
+    containment_matrix = np.zeros((rows, cols), dtype=float)
+    # A default 1000x1000 plot stays in one native call per direction. Larger
+    # or rectangular matrices are split so their count temporaries remain
+    # bounded without penalizing the common resolution.
+    max_block_cells = 1_048_576
+    rows_per_block = max(1, max_block_cells // max(cols, 1))
+    for row_start in range(0, rows, rows_per_block):
+        row_end = min(row_start + rows_per_block, rows)
+        block = containment_matrix[row_start:row_end]
 
-    for w in range(len(mod_set_y)):
-        if not supress_progress:
-            if w % progress_thresholds == 0:
-                printProgressBar(w, n, prefix="Progress:", suffix="Complete", length=40)
-        for q in range(n):
-            try:
-                containment_matrix[w, q] = (
-                    binomial_distance(
-                        containment_neighbors(
-                            mod_set_x[q],
-                            mod_set_y[w],
-                            mod_set_x_neighbors[q],
-                            mod_set_y_neighbors[w],
-                            identity,
-                            k,
-                        ),
-                        k,
-                    )
-                    * 100.0
-                )
-            # Bandaid solution for too sequences that are too small.
-            except IndexError as e:
-                pass
+        # core X against expanded Y, transposed into public (Y, X) layout.
+        x_to_y_counts = _sketch_intersection_counts(
+            mod_set_x, mod_set_y_neighbors[row_start:row_end]
+        ).T
+        np.divide(
+            x_to_y_counts,
+            x_core_sizes[np.newaxis, :],
+            out=block,
+            where=x_core_sizes[np.newaxis, :] != 0,
+        )
+        del x_to_y_counts
 
-    if not supress_progress:
-        printProgressBar(
-            n, n, prefix="Progress:", suffix="Completed", length=40
-        )  # show completed progress bar
-        print("\n")
+        # core Y against expanded X already has public (Y, X) orientation.
+        y_to_x_counts = _sketch_intersection_counts(
+            mod_set_y[row_start:row_end], mod_set_x_neighbors
+        )
+        y_to_x = np.zeros(block.shape, dtype=float)
+        block_y_sizes = y_core_sizes[row_start:row_end, np.newaxis]
+        np.divide(
+            y_to_x_counts,
+            block_y_sizes,
+            out=y_to_x,
+            where=block_y_sizes != 0,
+        )
+        del y_to_x_counts
+        np.maximum(block, y_to_x, out=block)
+        del y_to_x
+
+    containment_matrix = _identity_matrix_from_containment(
+        containment_matrix, identity, k
+    )
+
     return containment_matrix
 
 
@@ -464,30 +1144,26 @@ def findElementsWithPrefix(lst, prefix):
 
 
 def getInteractiveColor(palette_name, palette_orientation):
-    palettes = colorbrewer.COLOR_MAPS
-    tmp_color = []
-    new_palette = palette_name.split("_")
+    colors = palette_colors(palette_name)
     if palette_name in DIVERGING_PALETTES:
-        tmp_color = palettes["Diverging"][new_palette[0]][new_palette[1]]["Colors"]
         if palette_orientation == "+":
             palette_orientation = "-"
         else:
             palette_orientation = "+"
-    elif palette_name in SEQUENTIAL_PALETTES:
-        tmp_color = palettes["Sequential"][new_palette[0]][new_palette[1]]["Colors"]
-    elif palette_name in QUALITATIVE_PALETTES:
-        tmp_color = palettes["Qualitative"][new_palette[0]][new_palette[1]]["Colors"]
-    else:
+    elif palette_name not in SEQUENTIAL_PALETTES + QUALITATIVE_PALETTES:
         print("Unable to determine color palette. Selecting default \n")
-        tmp_color = palettes["Diverging"]["Spectral"]["11"]["Colors"]
         palette_orientation = "-"
     if palette_orientation == "-":
-        tmp_color = tmp_color[::-1]
-    tmp_color = [[255, 255, 255]] + tmp_color
-    total_values = len(tmp_color)
+        colors = colors[::-1]
+    colors = ["#FFFFFF", *colors]
+    total_values = len(colors)
     formatted_values = [
-        [i / (total_values - 1), f"rgb({r}, {g}, {b})"]
-        for i, (r, g, b) in enumerate(tmp_color)
+        [
+            i / (total_values - 1),
+            f"rgb({int(color[1:3], 16)}, {int(color[3:5], 16)}, "
+            f"{int(color[5:7], 16)})",
+        ]
+        for i, color in enumerate(colors)
     ]
     return formatted_values
 

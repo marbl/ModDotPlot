@@ -1,396 +1,280 @@
-from plotnine import (
-    ggsave,
-    ggplot,
-    aes,
-    geom_histogram,
-    scale_color_discrete,
-    element_blank,
-    theme,
-    xlab,
-    scale_fill_manual,
-    scale_color_cmap,
-    coord_cartesian,
-    ylab,
-    scale_x_continuous,
-    scale_y_continuous,
-    geom_tile,
-    coord_fixed,
-    facet_grid,
-    labs,
-    element_line,
-    element_text,
-    theme_light,
-    geom_blank,
-    annotate,
-    element_rect,
-    coord_flip,
-    theme_minimal,
-    geom_raster,
-)
-import svgutils.transform as sg
-import cairosvg
 import pandas as pd
 import numpy as np
-import glob
-from PIL import Image
-import patchworklib as pw
 import math
 import os
-import xml.etree.ElementTree as ET
-import sys
 import re
-from moddotplot.parse_fasta import printProgressBar
-from lxml import etree
-from pygenometracks.utilities import get_region
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_hex, to_rgb
+from matplotlib.figure import Figure
+from matplotlib.patches import Rectangle
+from matplotlib.ticker import ScalarFormatter
+from moddotplot.color_palettes import palette_category, palette_colors
+from moddotplot.native_render import (
+    DEFAULT_FONT_FAMILY,
+    MIN_TEXT_SIZE,
+    MIN_TITLE_SIZE,
+    clamped_font_size,
+    configure_dotplot_axis,
+    configure_triangle_axis,
+    create_triangle_layout,
+    draw_rectangular_tiles,
+    draw_triangle_tiles,
+    genomic_scale,
+    genomic_tick_formatter,
+    save_figure_pair,
+    save_with_font_fallback,
+    set_figure_font_family,
+)
 from moddotplot.const import (
+    DIRECTION_COLORS,
     DIVERGING_PALETTES,
     QUALITATIVE_PALETTES,
     SEQUENTIAL_PALETTES,
 )
-from typing import List
-from palettable.colorbrewer import qualitative, sequential, diverging
-import logging
+from moddotplot.annotations import (
+    DEFAULT_ANNOTATION_COLOR,
+    annotation_color as _annotation_color,
+    read_annotation_bed,
+    visible_annotation_intervals as _visible_annotation_intervals,
+)
 
-# Set log level BEFORE importing pygenometracks
-for name in logging.root.manager.loggerDict:
-    if name.startswith("pygenometracks"):
-        logging.getLogger(name).setLevel(logging.CRITICAL)
-        logging.getLogger(name).propagate = False  # Don't pass to root logger
-
-# Also make sure the root logger isn’t outputting debug messages
-logging.basicConfig(level=logging.CRITICAL)
-
-from pygenometracks.tracksClass import PlotTracks
+REGION_SUFFIX_PATTERN = re.compile(r"(?::\d+-\d+)+$")
 
 
-def is_plot_empty(p):
-    # Check if the plot has data or any layers
-    return len(p.layers) == 0 and p.data.empty
-
-
-def check_pascal(single_val, double_val):
-    try:
-        if len(single_val) == 2:
-            assert len(double_val) == 1
-        elif len(single_val) == 3:
-            assert len(double_val) == 3
-        elif len(single_val) == 4:
-            assert len(double_val) == 6
-        elif len(single_val) == 5:
-            assert len(double_val) == 10
-        elif len(single_val) == 6:
-            assert len(double_val) == 15
-        elif len(single_val) == 0:
-            assert len(double_val) == (1 or 3 or 6 or 10 or 15)
-    except AssertionError as e:
-        print(
-            f"Missing bed files required to create grid. Please verify all bed files are included."
-        )
-        sys.exit(8)
-
-
-def generate_ini_file(
-    bedfile, ininame, chrom, color_value="bed_rgb", x_axis=True, display="collapsed"
+def _draw_and_save_plot_pair(
+    plot,
+    output_prefix,
+    *,
+    width,
+    height,
+    dpi,
+    vector_format,
 ):
+    """Save one Matplotlib figure to raster and vector outputs."""
+
+    figure = plot if isinstance(plot, Figure) else plot.draw(show=False)
+    figure.set_size_inches(float(width), float(height), forward=True)
+    figure.set_dpi(int(dpi))
     try:
-        thing = chrom.split(":")[0]
-        sections = [
-            "[spacer]",
-            "# height of space in cm (optional)",
-            "height = 0.5",
-            "",
-            f"[{thing}]",
-            f"file = {bedfile}",
-            f"Title=",
-            "height = 1",
-            f"display = {display}",
-            f"color = {color_value}",
-            "labels = false",
-            "fontsize = 10",
-            "file_type = bed",
-        ]
-
-        if x_axis:
-            sections.insert(0, "[x-axis]")
-
-        ini_content = "\n".join(sections)
-        with open(f"{ininame}.ini", "w") as file:
-            file.write(ini_content)
-        print(f"Successfully generated {ininame}.ini\n")
-        return f"{ininame}.ini"
-    except Exception as err:
-        print(f"Error producing ini file: {err}\n")
-        return None
-
-
-def read_annotation_bed(filepath):
-    """Reads a BED file into a Pandas DataFrame and ensures correct formatting."""
-    col_names = [
-        "chrom",
-        "start",
-        "end",
-        "name",
-        "score",
-        "strand",
-        "thickStart",
-        "thickEnd",
-        "itemRgb",
-    ]  # Include additional fields
-
-    df = pd.read_csv(filepath, sep="\t", comment="#", header=None)
-
-    # Ensure at least three required columns exist
-    if df.shape[1] < 3:
-        raise ValueError(
-            "Invalid BED file: must have at least 3 columns (chrom, start, end)."
+        return save_figure_pair(
+            figure,
+            output_prefix,
+            vector_format,
+            dpi,
+            bbox_inches=figure.bbox_inches,
         )
-
-    # Rename only the expected columns
-    df.columns = col_names[: df.shape[1]]
-
-    # Ensure start and end columns contain valid integers
-    if df["start"].isna().any() or df["end"].isna().any():
-        raise ValueError(
-            "Invalid BED file: 'start' and 'end' columns must be integers and contain no missing values."
-        )
-
-    return df
+    finally:
+        plt.close(figure)
 
 
-def make_svg_background_transparent(svg_path, output_path=None):
-    """
-    Makes the background of an SVG file transparent by removing/modifying background fills.
+def display_sequence_name(name):
+    """Return a sequence name without appended region coordinates."""
 
-    Args:
-        svg_path: Path to input SVG file
-        output_path: Path to output SVG file (if None, overwrites input)
-    """
-    import xml.etree.ElementTree as ET
-    import re
-
-    if output_path is None:
-        output_path = svg_path
-
-    # Parse the SVG
-    tree = ET.parse(svg_path)
-    root = tree.getroot()
-
-    # Define SVG namespace
-    ns = {"svg": "http://www.w3.org/2000/svg"}
-
-    # Remove background rectangles/paths that cover the entire canvas
-    # Get SVG dimensions for comparison
-    width = root.get("width", "0")
-    height = root.get("height", "0")
-
-    # Extract numeric values
-    width_num = float(re.sub(r"[a-zA-Z%]+", "", width)) if width != "0" else 0
-    height_num = float(re.sub(r"[a-zA-Z%]+", "", height)) if height != "0" else 0
-
-    # Find and modify background elements
-    elements_to_modify = []
-
-    # Check all paths, rectangles, and other elements
-    for elem in root.iter():
-        if (
-            elem.tag.endswith("path")
-            or elem.tag.endswith("rect")
-            or elem.tag.endswith("polygon")
-        ):
-            # Check if this element has a background-like fill
-            style = elem.get("style", "")
-            fill = elem.get("fill", "")
-
-            # Look for background colors (light colors, white, etc.)
-            background_colors = [
-                "#ffffff",
-                "#f0ffff",
-                "white",
-                "lightblue",
-                "lightgray",
-                "lightgrey",
-            ]
-
-            is_background = False
-            current_fill = None
-
-            if "fill:" in style:
-                # Extract fill from style
-                fill_match = re.search(r"fill:\s*([^;]+)", style)
-                if fill_match:
-                    current_fill = fill_match.group(1).strip()
-            elif fill:
-                current_fill = fill
-
-            if current_fill and any(
-                bg_color in current_fill.lower() for bg_color in background_colors
-            ):
-                is_background = True
-
-            # For paths, check if it covers a large area (likely background)
-            if elem.tag.endswith("path"):
-                d = elem.get("d", "")
-                # Simple heuristic: if path starts at 0,0 and covers large area, it's likely background
-                if "M 0" in d and current_fill:
-                    is_background = True
-
-            # For rectangles, check if it covers the full canvas
-            if elem.tag.endswith("rect"):
-                x = float(elem.get("x", 0))
-                y = float(elem.get("y", 0))
-                w = float(elem.get("width", 0))
-                h = float(elem.get("height", 0))
-
-                # If rectangle covers most/all of the canvas, it's likely background
-                if x <= 1 and y <= 1 and w >= width_num * 0.9 and h >= height_num * 0.9:
-                    is_background = True
-
-            if is_background:
-                elements_to_modify.append(elem)
-
-    # Modify the background elements
-    for elem in elements_to_modify:
-        style = elem.get("style", "")
-
-        if "fill:" in style:
-            # Replace fill in style
-            new_style = re.sub(r"fill:\s*[^;]+", "fill: transparent", style)
-            elem.set("style", new_style)
-        elif elem.get("fill"):
-            # Replace fill attribute
-            elem.set("fill", "transparent")
-
-    # Save the modified SVG
-    tree.write(output_path, encoding="unicode", xml_declaration=True)
+    return REGION_SUFFIX_PATTERN.sub("", str(name))
 
 
-def make_all_svg_backgrounds_transparent(directory):
-    """
-    Makes all SVG files in a directory have transparent backgrounds.
-    """
+def _fit_grid_sequence_labels(figure, axes):
+    """Fit grid headings inside the existing figure canvas."""
 
-    svg_files = glob.glob(os.path.join(directory, "*.svg"))
+    figure.canvas.draw()
+    renderer = figure.canvas.get_renderer()
+    ratios = []
 
-    for svg_file in svg_files:
-        make_svg_background_transparent(svg_file)
+    for axis in axes[0, :]:
+        title = axis.title
+        if title.get_text():
+            title_box = title.get_window_extent(renderer=renderer)
+            axis_box = axis.get_window_extent(renderer=renderer)
+            if title_box.width:
+                # Font fallback and hinting can change the final extent by a
+                # fraction of a pixel on another backend. Leave enough
+                # headroom that fitted labels remain inside their panels
+                # after the renderer rounds the scaled font size.
+                ratios.append(axis_box.width * 0.88 / title_box.width)
 
-    print(f"Processed {len(svg_files)} SVG files")
+    for axis in axes[:, 0]:
+        label = axis.yaxis.label
+        if label.get_text():
+            label_box = label.get_window_extent(renderer=renderer)
+            axis_box = axis.get_window_extent(renderer=renderer)
+            if label_box.height:
+                ratios.append(axis_box.height * 0.88 / label_box.height)
 
+    artists = [axis.title for axis in axes[0, :]] + [
+        axis.yaxis.label for axis in axes[:, 0]
+    ]
+    artists = [artist for artist in artists if artist.get_text()]
+    if not ratios or not artists:
+        return
+    scale = min(1.0, min(ratios))
+    if scale >= 1.0:
+        return
 
-def run_pygenometracks(inifile, region, output_file, width):
-    output_dir = os.path.dirname(output_file)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)  # Create directory if it doesn't exist
-
-    try:
-        trp = PlotTracks(
-            inifile,
-            width,
-            fig_height=None,
-            fontsize=10,
-            dpi=300,
-            track_label_width=0.05,
-            plot_regions=region,
-            plot_width=width,
-        )
-
-        # Extract the chromosome, start, and end from the region
-        chrom, start, end = region[0]
-
-        # Call the plot method directly to generate the image
-        fig = trp.plot(output_file, chrom, start, end)
-
-        return trp
-
-    except Exception as e:
-        if "No valid intervals were found" in str(e):
-            print(f"No valid intervals found in BED file for region {region[0]}")
-            print(
-                "This is expected when the BED file doesn't overlap with the query region."
-            )
-            return None
-        else:
-            print(f"Error in run_pygenometracks: {e}")
-            raise e
+    for artist in artists:
+        artist.set_fontsize(artist.get_fontsize() * scale)
 
 
-def test_pygenometracks_direct(inifile, chrom, start, end, output_file, width=40):
-    """
-    Direct test function to call PlotTracks.plot() without any coordinate validation.
-    This bypasses the region checking that happens during PlotTracks initialization.
+def _resolve_native_colors(palette, palette_orientation, custom_colors=None):
+    """Resolve plot colors while preserving historical orientation rules."""
 
-    Args:
-        inifile: Path to the tracks configuration file
-        chrom: Chromosome name
-        start: Start coordinate
-        end: End coordinate
-        output_file: Output image file path
-        width: Figure width in cm
-    """
-
-    output_dir = os.path.dirname(output_file)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-
-    # Create a dummy region for initialization (this gets overridden in plot())
-    dummy_region = [(chrom, 1, 1000)]
-
-    trp = PlotTracks(
-        inifile,
-        width,
-        fig_height=None,
-        fontsize=10,
-        dpi=300,
-        track_label_width=0.05,
-        plot_regions=dummy_region,
-        plot_width=width,
+    colors = palette_colors(palette)
+    supported = (
+        palette in DIVERGING_PALETTES
+        or palette in QUALITATIVE_PALETTES
+        or palette in SEQUENTIAL_PALETTES
     )
+    if palette_category(palette) == "diverging":
+        palette_orientation = "-" if palette_orientation == "+" else "+"
+    if not supported:
+        palette_orientation = "-"
 
-    # Call plot() directly with your desired coordinates
-    fig = trp.plot(output_file, chrom, start, end)
-
-    return fig
-
-
-def reverse_pascal(double_vals):
-    if len(double_vals) == 1:
-        return 2
-    elif len(double_vals) == 3:
-        return 3
-    elif len(double_vals) == 6:
-        return 4
-    elif len(double_vals) == 10:
-        return 5
-    elif len(double_vals) == 15:
-        return 6
-    else:
-        sys.exit(9)
+    oriented = colors[::-1] if palette_orientation == "-" else colors
+    return list(custom_colors) if custom_colors else oriented
 
 
-# Hardcoding for now, I have the formula.... I'm just lazy
-def transpose_order(double_vals):
-    if len(double_vals) == 1:
-        return [0]
-    elif len(double_vals) == 3:
-        return [0, 1, 2]
-    elif len(double_vals) == 6:
-        return [0, 1, 3, 2, 4, 5]
-    elif len(double_vals) == 10:
-        return [0, 1, 4, 2, 5, 7, 3, 6, 8, 9]
-    elif len(double_vals) == 15:
-        return [0, 1, 5, 2, 6, 9, 3, 7, 10, 12, 4, 8, 11, 13, 14]
+DIRECTION_ANI_COLUMN = "direction_ani"
+
+
+def _direction_ani_style(dataframe):
+    """Return data and colors for direction hue plus ANI intensity.
+
+    Direction selects the blue or pink hue. The existing ordered ANI bins
+    control saturation: weak matches are pale and the strongest bin reaches
+    the base direction color. Data without ANI bins retains the solid legacy
+    direction colors, which keeps the low-level rendering API usable.
+    """
+
+    if "direction" not in dataframe.columns:
+        return dataframe, None, None
+    if "discrete" not in dataframe.columns:
+        return dataframe, DIRECTION_COLORS, "direction"
+
+    categories = (
+        list(dataframe["discrete"].cat.categories)
+        if isinstance(dataframe["discrete"].dtype, pd.CategoricalDtype)
+        else list(pd.unique(dataframe["discrete"].dropna()))
+    )
+    if not categories:
+        return dataframe, DIRECTION_COLORS, "direction"
+
+    colors = {}
+    category_count = len(categories)
+    for direction, base_color in DIRECTION_COLORS.items():
+        base_rgb = np.asarray(to_rgb(base_color))
+        for index, category in enumerate(categories):
+            fraction = 1.0 if category_count == 1 else index / (category_count - 1)
+            strength = 0.25 + (0.75 * fraction)
+            rgb = np.ones(3) + ((base_rgb - np.ones(3)) * strength)
+            colors[f"{direction}:{category}"] = to_hex(rgb)
+
+    styled = dataframe.copy()
+    styled[DIRECTION_ANI_COLUMN] = [
+        f"{direction}:{category}"
+        for direction, category in zip(styled["direction"], styled["discrete"])
+    ]
+    return styled, colors, DIRECTION_ANI_COLUMN
+
+
+def draw_annotation_track(
+    axis,
+    bed_df,
+    chrom,
+    region_start,
+    region_end,
+    fallback=DEFAULT_ANNOTATION_COLOR,
+):
+    """Draw a label-free, collapsed BED track and return its interval count."""
+    intervals = _visible_annotation_intervals(
+        bed_df, chrom, region_start, region_end, fallback
+    )
+    for interval_start, interval_end, color in intervals:
+        axis.add_patch(
+            Rectangle(
+                (interval_start, 0.2),
+                interval_end - interval_start,
+                0.6,
+                facecolor=color,
+                edgecolor=color,
+                linewidth=0.25,
+            )
+        )
+
+    axis.set_xlim(region_start, region_end)
+    axis.set_ylim(0, 1)
+    axis.set_yticks([])
+    formatter = ScalarFormatter(useOffset=False)
+    formatter.set_scientific(False)
+    axis.xaxis.set_major_formatter(formatter)
+    axis.tick_params(axis="x", labelsize=8, length=3)
+    axis.spines["left"].set_visible(False)
+    axis.spines["right"].set_visible(False)
+    axis.spines["top"].set_visible(False)
+    axis.set_facecolor("none")
+    return len(intervals)
+
+
+def render_annotation_track(
+    bed_df,
+    chrom,
+    region_start,
+    region_end,
+    output_prefix,
+    width_cm,
+    dpi,
+    vector_format="svg",
+):
+    """Render a collapsed BED track as PNG and the selected vector format."""
+    if vector_format not in {"svg", "pdf", "ps"}:
+        raise ValueError(f"Unsupported vector format: {vector_format}")
+
+    figure, axis = plt.subplots(figsize=(max(float(width_cm), 2.54) / 2.54, 2.0 / 2.54))
+    try:
+        interval_count = draw_annotation_track(
+            axis, bed_df, chrom, region_start, region_end
+        )
+        if interval_count == 0:
+            return False
+
+        figure.subplots_adjust(left=0.02, right=0.995, bottom=0.34, top=0.96)
+
+        def save_outputs():
+            figure.savefig(
+                f"{output_prefix}.{vector_format}",
+                format=vector_format,
+                dpi=dpi,
+                transparent=vector_format != "ps",
+                facecolor="white" if vector_format == "ps" else "none",
+            )
+            figure.savefig(
+                f"{output_prefix}.png", format="png", dpi=dpi, facecolor="white"
+            )
+
+        save_with_font_fallback(figure, save_outputs)
+        return True
+    finally:
+        plt.close(figure)
 
 
 def check_st_en_equality(df):
-    unequal_rows = df[(df["q_st"] != df["r_st"]) | (df["q_en"] != df["r_en"])]
-    unequal_rows.loc[:, ["q_en", "r_en", "q_st", "r_st"]] = unequal_rows[
-        ["r_en", "q_en", "r_st", "q_st"]
-    ].values
+    """Complete a self-comparison across its diagonal without duplicate tiles."""
 
-    df = pd.concat([df, unequal_rows], ignore_index=True)
+    if df.empty:
+        return df.copy()
 
-    return df
+    coordinate_columns = ["q_st", "q_en", "r_st", "r_en"]
+    unequal_rows = df[(df["q_st"] != df["r_st"]) | (df["q_en"] != df["r_en"])].copy()
+    if unequal_rows.empty:
+        return df.copy()
+
+    mirrored_rows = unequal_rows.copy()
+    mirrored_rows.loc[:, coordinate_columns] = unequal_rows[
+        ["r_st", "r_en", "q_st", "q_en"]
+    ].to_numpy()
+
+    existing_coordinates = pd.MultiIndex.from_frame(df[coordinate_columns])
+    mirrored_coordinates = pd.MultiIndex.from_frame(mirrored_rows[coordinate_columns])
+    mirrored_rows = mirrored_rows.loc[~mirrored_coordinates.isin(existing_coordinates)]
+    return pd.concat([df, mirrored_rows], ignore_index=True)
 
 
 def make_k(vals):
@@ -416,7 +300,8 @@ def make_scale(vals: list) -> list:
 
 
 def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
-    assert ncolors > 2 and ncolors < 12
+    if ncolors < 1:
+        raise ValueError("At least one color is required")
     try:
         bot = math.floor(min(sdf["perID_by_events"]))
     except ValueError:
@@ -431,11 +316,33 @@ def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
     else:
         breaks = [bot + i * interval for i in range(ncolors + 1)]
     if custom_breakpoints:
-        np.asarray(custom_breakpoints, dtype=np.float64)
+        breaks = np.asarray(custom_breakpoints, dtype=np.float64)
+        if len(breaks) != ncolors + 1:
+            raise ValueError(
+                "The number of breakpoints must equal the number of colors plus one"
+            )
+        if not np.all(np.isfinite(breaks)):
+            raise ValueError("Breakpoints must contain only finite numbers")
+        if np.any(np.diff(breaks) <= 0):
+            raise ValueError("Breakpoints must be strictly increasing")
+        values = np.asarray(sdf["perID_by_events"], dtype=np.float64)
+        if values.size and (
+            not np.all(np.isfinite(values))
+            or values.min() < breaks[0]
+            or values.max() > breaks[-1]
+        ):
+            raise ValueError(
+                "Breakpoints must cover all finite identity values in the plot"
+            )
     labels = np.arange(len(breaks) - 1)
-    # corner case of only one %id value
-    if len(breaks) == 1:
-        return pd.factorize([1] * len(sdf["perID_by_events"]))[0]
+    # A dataset containing only 100% identity creates repeated default bin
+    # edges; frequency bins likewise collapse to one edge when every value is
+    # equal.  Both cases represent a single category and must not reach
+    # ``pandas.cut``, which requires unique edges.
+    if len(np.unique(breaks)) < 2:
+        return pd.Categorical(
+            np.zeros(len(sdf["perID_by_events"]), dtype=int), categories=[0]
+        )
     else:
         tmp = pd.cut(
             sdf["perID_by_events"], bins=breaks, labels=labels, include_lowest=True
@@ -445,6 +352,46 @@ def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
 
 # TODO: Remove pandas dependency
 def read_df_from_file(file_path):
+    browser_columns = None
+    with open(file_path, "r", encoding="utf-8") as bedpe:
+        for line in bedpe:
+            if line.startswith("#chrom1\t"):
+                browser_columns = line[1:].rstrip("\r\n").split("\t")
+                break
+            if not line.startswith("#"):
+                break
+
+    if browser_columns is not None:
+        data = pd.read_csv(
+            file_path,
+            delimiter="\t",
+            comment="#",
+            names=browser_columns,
+            usecols=(
+                "chrom1",
+                "start1",
+                "end1",
+                "chrom2",
+                "start2",
+                "end2",
+                "ani_c",
+            ),
+        )
+        data.rename(
+            columns={
+                "chrom1": "#query_name",
+                "start1": "query_start",
+                "end1": "query_end",
+                "chrom2": "reference_name",
+                "start2": "reference_start",
+                "end2": "reference_end",
+                "ani_c": "perID_by_events",
+            },
+            inplace=True,
+        )
+        data["perID_by_events"] *= 100
+        return data
+
     data = pd.read_csv(file_path, delimiter="\t")
     return data
 
@@ -464,36 +411,15 @@ def read_df(
     else:
         data = pj[0]
         df = pd.DataFrame(data[1:], columns=data[0])
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
+    supported = (
+        palette in DIVERGING_PALETTES
+        or palette in QUALITATIVE_PALETTES
+        or palette in SEQUENTIAL_PALETTES
+    )
+    if not supported:
         print(f"Palette {palette} not found. Defaulting to Spectral_11.\n")
-        function_name = getattr(diverging, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
-
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
-    else:
-        new_hexcodes = hexcodes
-
-    if custom_colors:
-        new_hexcodes = custom_colors
-
-    ncolors = len(new_hexcodes)
+    colors = _resolve_native_colors(palette, palette_orientation, custom_colors)
+    ncolors = len(colors)
     # Get colors for each row based on the values in the dataframe
     df["discrete"] = get_colors(df, ncolors, is_freq, custom_breakpoints)
     # Rename columns if they have different names in the dataframe
@@ -541,11 +467,44 @@ def generate_breaks(min_number, max_number, min_breaks=5, max_breaks=9):
     # Round down min_number to the nearest multiple of magnitude
     min_aligned = int(min_number // magnitude * magnitude)
 
-    # Generate breakpoints
+    # Generate only breakpoints that fall inside the requested interval.
+    # Matplotlib expands an axis when ``set_ticks`` includes an out-of-range
+    # value, which previously turned a ~103 Mb grid into a 125 Mb grid.
     upper_bound = int(min_aligned + (threshold + 1) * magnitude)
-    breaks = list(range(min_aligned, upper_bound, int(magnitude)))
+    breaks = [
+        value
+        for value in range(min_aligned, upper_bound, int(magnitude))
+        if min_number <= value <= max_number
+    ]
 
     return breaks
+
+
+def _requested_axis_bounds(requested_limit):
+    """Return an exact ``(start, end)`` pair when one was supplied."""
+
+    if isinstance(requested_limit, (tuple, list)):
+        if len(requested_limit) != 2:
+            raise ValueError("Axis bounds must contain exactly two values")
+        start, end = map(float, requested_limit)
+        if end <= start:
+            raise ValueError("Axis end must be greater than axis start")
+        return start, end
+    return None
+
+
+def _data_axis_limits(sdf, requested_limit=None):
+    """Resolve plot limits, preserving exact region bounds when provided."""
+
+    requested_bounds = _requested_axis_bounds(requested_limit)
+    if requested_bounds is not None:
+        return requested_bounds
+
+    minimum = float(min(sdf["q_st"].min(), sdf["r_st"].min()))
+    maximum = float(max(sdf["q_en"].max(), sdf["r_en"].max()))
+    if requested_limit:
+        maximum = max(maximum, float(requested_limit))
+    return minimum, maximum
 
 
 def make_dot(
@@ -562,106 +521,22 @@ def make_dot(
     width,
     is_pairwise,
 ):
-    if is_pairwise:
-        title_name = f"Comparative Plot: {name_x} vs {name_y}"
-    else:
-        title_name = f"Self-Identity Plot: {name_x}"
-    title_length = 2 * width
-    if len(title_name) > 50:
-        title_length = 1.5 * width
-    elif len(title_name) > 80:
-        title_length = width
-    # Select the color palette
-    if hasattr(diverging, palette):
-        function_name = getattr(diverging, palette)
-    elif hasattr(qualitative, palette):
-        function_name = getattr(qualitative, palette)
-    elif hasattr(sequential, palette):
-        function_name = getattr(sequential, palette)
-    else:
-        function_name = diverging.Spectral_11  # Default palette
-        palette_orientation = "-"
+    """Build a full dotplot with the native Matplotlib renderer."""
 
-    hexcodes = function_name.hex_colors
-
-    # Adjust palette orientation
-    if palette in diverging.__dict__:
-        palette_orientation = "-" if palette_orientation == "+" else "+"
-
-    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
-    if colors:
-        new_hexcodes = colors  # Override colors if provided
-    if not xlim:
-        xlim = 0
-    # Determine maximum genomic position for scaling
-    min_val = min(sdf["q_st"].min(), sdf["r_st"].min())
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-
-    # If user provides breaks, convert to ints
-    if not breaks:
-        breaks = generate_breaks(int(min_val), int(max_val))
-    else:
-        [int(x) for x in breaks]
-    xlim = xlim or 0
-    # Compute window size (handling exceptions)
-    try:
-        window = max(sdf["q_en"] - sdf["q_st"])
-    except ValueError:  # Empty dataframe case
-        return ggplot(aes(x=[], y=[])) + theme_minimal()
-
-    # Determine axis label scale based on genomic position size
-    if max_val < 200_000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 200_000_000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-
-    # Create the plot
-    common_theme = theme(
-        legend_position="none",
-        panel_grid_major=element_blank(),
-        panel_grid_minor=element_blank(),
-        plot_background=element_blank(),
-        panel_background=element_blank(),
-        axis_line=element_line(color="black"),
-        axis_text=element_text(family=["DejaVu Sans"], size=width),
-        axis_ticks_major=element_line(
-            size=(width), color="black"
-        ),  # Increased tick length
-        title=element_text(
-            family=["DejaVu Sans"], size=title_length, hjust=0.5
-        ),  # Center title
-        axis_title_x=element_text(size=(width * 1.4), family=["DejaVu Sans"]),
-        strip_background=element_blank(),  # Remove facet strip background
-        strip_text=element_text(
-            size=(width * 1.2), family=["DejaVu Sans"]
-        ),  # Customize facet label text size (optional)
+    del num_ticks
+    return _build_full_figure(
+        sdf=sdf,
+        name_x=name_x,
+        name_y=name_y,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        custom_colors=colors,
+        axes_labels=breaks,
+        xlim=xlim,
+        deraster=deraster,
+        width=width,
+        is_pairwise=is_pairwise,
     )
-
-    # Construct the plot arguments
-    ggplot_args = (
-        ggplot(sdf)
-        + scale_color_discrete(guide=False)
-        + scale_fill_manual(values=new_hexcodes, guide=False)
-        + common_theme
-        + scale_x_continuous(
-            labels=make_scale, limits=[min_val, max_val], breaks=breaks
-        )
-        + scale_y_continuous(
-            labels=make_scale, limits=[min_val, max_val], breaks=breaks
-        )
-        + coord_fixed(ratio=1)
-        + facet_grid("r ~ q")
-        + labs(x=x_label, y="", title=title_name)
-    )
-
-    # Select either geom_raster or geom_tile depending on deraster flag
-    p = ggplot_args + (geom_tile if deraster else geom_raster)(
-        aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
-    )
-
-    return p
 
 
 def make_dot_grid(
@@ -676,90 +551,177 @@ def make_dot_grid(
     deraster,
     width,
 ):
-    # Select the color palette
-    if hasattr(diverging, palette):
-        function_name = getattr(diverging, palette)
-    elif hasattr(qualitative, palette):
-        function_name = getattr(qualitative, palette)
-    elif hasattr(sequential, palette):
-        function_name = getattr(sequential, palette)
+    """Build a standalone grid cell with the native Matplotlib renderer."""
+
+    return _build_full_figure(
+        sdf=sdf,
+        name_x=title_name,
+        name_y=title_name,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        custom_colors=colors,
+        axes_labels=breaks,
+        xlim=xlim,
+        deraster=deraster,
+        width=width,
+        is_pairwise=not on_diagonal,
+    )
+
+
+def direction_dataframe(
+    canonical_matrix,
+    forward_matrix,
+    window_size,
+    name_x,
+    name_y,
+    self_identity,
+    x_offset=0,
+    y_offset=0,
+):
+    """Build plotting records that distinguish forward and reverse matches."""
+
+    canonical_matrix = np.asarray(canonical_matrix, dtype=float)
+    forward_matrix = np.asarray(forward_matrix, dtype=float)
+    if canonical_matrix.shape != forward_matrix.shape:
+        raise ValueError("Canonical and forward matrices must have matching shapes")
+
+    records = []
+    for x_index, y_index in np.argwhere(canonical_matrix > 0):
+        if self_identity and x_index > y_index:
+            continue
+        query_start = x_index * window_size + x_offset
+        reference_start = y_index * window_size + y_offset
+        records.append(
+            {
+                "q": name_x,
+                "q_st": query_start,
+                "q_en": query_start + window_size - 1,
+                "r": name_y,
+                "r_st": reference_start,
+                "r_en": reference_start + window_size - 1,
+                "direction": (
+                    "Forward" if forward_matrix[x_index, y_index] > 0 else "Reverse"
+                ),
+            }
+        )
+
+    dataframe = pd.DataFrame.from_records(
+        records,
+        columns=["q", "q_st", "q_en", "r", "r_st", "r_en", "direction"],
+    )
+    dataframe["direction"] = pd.Categorical(
+        dataframe["direction"], categories=["Forward", "Reverse"], ordered=True
+    )
+    return dataframe
+
+
+def create_direction_plot(
+    canonical_matrix,
+    forward_matrix,
+    window_size,
+    directory,
+    name_x,
+    name_y,
+    self_identity,
+    width,
+    dpi,
+    vector_format,
+    deraster=False,
+    xlim=None,
+    axes_labels=None,
+    x_offset=0,
+    y_offset=0,
+):
+    """Save a blue/pink plot showing match orientation."""
+
+    dataframe = direction_dataframe(
+        canonical_matrix,
+        forward_matrix,
+        window_size,
+        name_x,
+        name_y,
+        self_identity,
+        x_offset,
+        y_offset,
+    )
+    if dataframe.empty:
+        print(f"No directional matches found for {name_x} and {name_y}. Skipping.\n")
+        return None
+
+    requested_bounds = _requested_axis_bounds(xlim)
+    if requested_bounds is not None:
+        min_val, max_val = requested_bounds
     else:
-        function_name = diverging.Spectral_11  # Default palette
-        palette_orientation = "-"
+        min_val = min(dataframe["q_st"].min(), dataframe["r_st"].min())
+        max_val = max(
+            dataframe["q_en"].max() + 1,
+            dataframe["r_en"].max() + 1,
+            xlim or 0,
+        )
+    breaks = (
+        [int(value) for value in axes_labels]
+        if axes_labels
+        else generate_breaks(int(min_val), int(max_val))
+    )
+    title = (
+        f"Direction Plot: {display_sequence_name(name_x)}"
+        if self_identity
+        else f"Direction Plot: {display_sequence_name(name_x)} vs "
+        f"{display_sequence_name(name_y)}"
+    )
 
-    hexcodes = function_name.hex_colors
-
-    # Adjust palette orientation
-    if palette in diverging.__dict__:
-        palette_orientation = "-" if palette_orientation == "+" else "+"
-
-    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
-    if colors:
-        new_hexcodes = colors  # Override colors if provided
-    if not xlim:
-        xlim = 0
-    # Determine maximum genomic position for scaling
-    min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-
-    # If user provides breaks, convert to ints
-    if not breaks:
-        breaks = generate_breaks(int(min_val), int(max_val))
-    else:
-        [int(x) for x in breaks]
-    xlim = xlim or 0
-    # Compute window size (handling exceptions)
+    render_data = dataframe.copy()
+    render_data["q_en"] = render_data["q_st"] + window_size
+    render_data["r_en"] = render_data["r_st"] + window_size
+    figure, axis = plt.subplots(figsize=(float(width), float(width)))
     try:
-        window = max(sdf["q_en"] - sdf["q_st"])
-    except ValueError:  # Empty dataframe case
-        return ggplot(aes(x=[], y=[])) + theme_minimal()
+        draw_rectangular_tiles(
+            axis,
+            render_data,
+            DIRECTION_COLORS,
+            color_column="direction",
+            rasterized=not deraster,
+        )
+        configure_dotplot_axis(axis, min_val, max_val, breaks=breaks)
+        axis.set_xlabel(
+            "Genomic Position",
+            fontsize=clamped_font_size(width, 1.2),
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
+        axis.set_title(
+            title,
+            fontsize=clamped_font_size(width, 1.4, MIN_TITLE_SIZE),
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
+        axis.grid(False)
+        figure.text(
+            0.5,
+            0.02,
+            "Blue: forward   Pink: reverse",
+            ha="center",
+            fontfamily=DEFAULT_FONT_FAMILY,
+            fontsize=clamped_font_size(width, 0.9),
+        )
+        figure.subplots_adjust(left=0.16, right=0.96, bottom=0.18, top=0.88)
+        set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
 
-    # Determine axis label scale based on genomic position size
-    if max_val < 200_000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 200_000_000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
+        os.makedirs(directory, exist_ok=True)
+        filename = (
+            f"{name_x}_DIRECTION" if self_identity else f"{name_x}_{name_y}_DIRECTION"
+        )
+        prefix = os.path.join(directory, filename)
+        save_figure_pair(
+            figure,
+            prefix,
+            vector_format,
+            dpi,
+            bbox_inches=figure.bbox_inches,
+        )
+    finally:
+        plt.close(figure)
 
-    # Create the plot
-    common_theme = theme(
-        legend_position="none",
-        panel_grid_major=element_blank(),
-        panel_grid_minor=element_blank(),
-        plot_background=element_blank(),
-        panel_background=element_blank(),
-        axis_line=element_line(color="black"),
-        axis_text=element_text(family=["DejaVu Sans"], size=width),
-        axis_ticks_major=element_line(
-            size=(width), color="black"
-        ),  # Increased tick length
-        title=element_text(size=(width * 1.2), alpha=0),
-        axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
-        strip_background=element_blank(),  # Remove facet strip background
-        strip_text=element_text(
-            size=(width * 1.2), family=["DejaVu Sans"]
-        ),  # Customize facet label text size (optional)
-    )
-
-    # Construct the plot arguments
-    ggplot_args = (
-        ggplot(sdf)
-        + scale_color_discrete(guide=False)
-        + scale_fill_manual(values=new_hexcodes, guide=False)
-        + common_theme
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + coord_fixed(ratio=1)
-        + labs(x="", y="", title="")
-    )
-
-    # Select either geom_raster or geom_tile depending on deraster flag
-    p = ggplot_args + (geom_tile if deraster else geom_raster)(
-        aes(x="q_st", y="r_st", fill="discrete", height=window, width=window)
-    )
-
-    return p
+    print(f"Direction plots saved to {prefix}.png and {prefix}.{vector_format}.\n")
+    return figure
 
 
 def make_dot_final(
@@ -773,106 +735,49 @@ def make_dot_final(
     transpose=False,
     deraster=False,
 ):
-    if hasattr(diverging, palette):
-        function_name = getattr(diverging, palette)
-    elif hasattr(qualitative, palette):
-        function_name = getattr(qualitative, palette)
-    elif hasattr(sequential, palette):
-        function_name = getattr(sequential, palette)
-    else:
-        function_name = diverging.Spectral_11  # Default palette
-        palette_orientation = "-"
+    """Build a single grid-style dotplot panel."""
 
-    hexcodes = function_name.hex_colors
-
-    # Adjust palette orientation
-    if palette in diverging.__dict__:
-        palette_orientation = "-" if palette_orientation == "+" else "+"
-
-    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
-    if colors:
-        new_hexcodes = colors  # Override colors if provided
-    if not xlim:
-        xlim = 0
-    # Determine maximum genomic position for scaling
-    min_val = min(sdf["q_st"].min(), sdf["r_st"].min())
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-
-    # If user provides breaks, convert to ints
-    if not breaks:
-        breaks = generate_breaks(int(min_val), int(max_val))
-    else:
-        [int(x) for x in breaks]
-    xlim = xlim or 0
-
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-    try:
-        window = max(sdf["q_en"] - sdf["q_st"])
-    except:
-        p = (
-            ggplot(aes(x=[], y=[]))
-            + theme_minimal()
-            + theme(
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-            )
+    dataframe = sdf.copy()
+    if transpose:
+        dataframe = dataframe.rename(
+            columns={
+                "q": "_r",
+                "q_st": "_r_st",
+                "q_en": "_r_en",
+                "r": "q",
+                "r_st": "q_st",
+                "r_en": "q_en",
+            }
+        ).rename(
+            columns={
+                "_r": "r",
+                "_r_st": "r_st",
+                "_r_en": "r_en",
+            }
         )
-        return p
-
-    x_col, y_col = ("r_st", "q_st") if transpose else ("q_st", "r_st")
-
-    if deraster:
-        p = (
-            ggplot(sdf)
-            + geom_tile(
-                aes(x=x_col, y=y_col, fill="discrete", height=window, width=window)
-            )
-            + scale_color_discrete(guide=False)
-            + scale_fill_manual(values=new_hexcodes, guide=False)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
-                axis_ticks_major=element_line(),
-                title=element_text(family=["Dejavu Sans"]),
-            )
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + coord_fixed(ratio=1)
-            + labs(x=None, y=None, title=None)
-        )
-    else:
-        p = (
-            ggplot(sdf)
-            + geom_raster(
-                aes(x=x_col, y=y_col, fill="discrete", height=window, width=window)
-            )
-            + scale_color_discrete(guide=False)
-            + scale_fill_manual(values=new_hexcodes, guide=False)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
-                axis_ticks_major=element_line(),
-                title=element_text(family=["Dejavu Sans"]),
-            )
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + coord_fixed(ratio=1)
-            + labs(x=None, y=None, title=None)
-        )
-
-    p += theme(axis_title_x=element_blank(), axis_title_y=element_blank())
-
-    return p
+    name_x = (
+        display_sequence_name(dataframe["q"].iloc[0])
+        if not dataframe.empty and "q" in dataframe
+        else ""
+    )
+    name_y = (
+        display_sequence_name(dataframe["r"].iloc[0])
+        if not dataframe.empty and "r" in dataframe
+        else name_x
+    )
+    return _build_full_figure(
+        sdf=dataframe,
+        name_x=name_x,
+        name_y=name_y,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        custom_colors=colors,
+        axes_labels=breaks,
+        xlim=xlim,
+        deraster=deraster,
+        width=width,
+        is_pairwise=True,
+    )
 
 
 def make_tri(
@@ -887,511 +792,665 @@ def make_tri(
     deraster,
     width,
 ):
-    # Select the color palette
-    if hasattr(diverging, palette):
-        function_name = getattr(diverging, palette)
-    elif hasattr(qualitative, palette):
-        function_name = getattr(qualitative, palette)
-    elif hasattr(sequential, palette):
-        function_name = getattr(sequential, palette)
-    else:
-        function_name = diverging.Spectral_11  # Default palette
-        palette_orientation = "-"
+    """Build a native Matplotlib triangle plot and return its main axis."""
 
-    hexcodes = function_name.hex_colors
-
-    # Adjust palette orientation
-    if palette in diverging.__dict__:
-        palette_orientation = "-" if palette_orientation == "+" else "+"
-
-    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
-    if colors:
-        new_hexcodes = colors  # Override colors if provided
-    if not xlim:
-        xlim = 0
-    # Determine maximum genomic position for scaling
-    min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-
-    # If user provides breaks, convert to ints
-    if not breaks:
-        breaks = generate_breaks(int(min_val), int(max_val))
-    else:
-        [int(x) for x in breaks]
-    xlim = xlim or 0
-    # Compute window size (handling exceptions)
-    try:
-        window = max(sdf["q_en"] - sdf["q_st"])
-    except ValueError:  # Empty dataframe case
-        return ggplot(aes(x=[], y=[])) + theme_minimal()
-
-    # Determine axis label scale based on genomic position size
-    if max_val < 200_000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 200_000_000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-
-    if not deraster:
-        tri = (
-            ggplot(sdf)
-            + geom_raster(
-                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-                alpha=1.0,
-            )  # Ensure full opacity
-            + scale_fill_manual(values=new_hexcodes, guide=False)
-            + scale_color_discrete(guide=False)
-            + scale_x_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + scale_y_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + coord_fixed(ratio=1)
-            + labs(x=x_label, y="", title=title_name)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
-                axis_line_x=element_line(),
-                axis_line_y=element_blank(),
-                axis_ticks_major_x=element_line(),
-                axis_ticks_major_y=element_blank(),
-                axis_ticks_major=element_line(size=(width)),
-                title=element_text(size=(width * 1.4), hjust=0.5),
-                axis_title_x=element_text(size=(width * 1.4), family=["DejaVu Sans"]),
-                axis_text_y=element_blank(),
-            )
-        )
-        axis = (
-            ggplot(sdf)
-            + geom_tile(
-                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-                alpha=0,
-            )
-            + scale_color_discrete(guide=False)
-            + scale_fill_manual(values=new_hexcodes, guide=False)
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + coord_fixed(ratio=1)
-            + labs(x="", y="", title=title_name)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
-                axis_ticks_major=element_line(),
-                axis_line_x=element_line(),
-                axis_line_y=element_blank(),
-                axis_ticks_major_x=element_line(),
-                axis_ticks_major_y=element_blank(),
-                axis_text_x=element_line(),
-                axis_text_y=element_blank(),
-                plot_title=element_blank(),
-                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
-            )
-        )
-    else:
-        tri = (
-            ggplot(sdf)
-            + geom_tile(
-                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-                alpha=1.0,
-            )  # Ensure full opacity
-            + scale_fill_manual(values=new_hexcodes, guide=False)
-            + scale_color_discrete(guide=False)
-            + scale_x_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + scale_y_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + coord_fixed(ratio=1)
-            + labs(x=x_label, y="", title=title_name)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_text=element_text(family=["DejaVu Sans"], size=width),
-                axis_line_x=element_line(),
-                axis_line_y=element_blank(),
-                axis_ticks_major_x=element_line(),
-                axis_ticks_major_y=element_blank(),
-                axis_ticks_major=element_line(),
-                axis_text_y=element_blank(),
-                title=element_blank(),
-                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
-            )
-        )
-        axis = (
-            ggplot(sdf)
-            + geom_tile(
-                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-                alpha=0,
-            )
-            + scale_color_discrete(guide=False)
-            + scale_fill_manual(values=new_hexcodes, guide=False)
-            + scale_x_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + scale_y_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + coord_fixed(ratio=1)
-            + labs(x="", y="", title="")
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(family=["DejaVu Sans"]),
-                axis_ticks_major=element_line(),
-                axis_line_x=element_line(),
-                axis_line_y=element_blank(),
-                axis_ticks_major_x=element_line(),
-                axis_ticks_major_y=element_blank(),
-                axis_text_x=element_line(),
-                axis_text_y=element_blank(),
-                plot_title=element_blank(),
-                axis_title_x=element_text(size=(width * 1.2), family=["DejaVu Sans"]),
-            )
-        )
-
-    return tri, axis
-
-
-def rotate_vectorized_tri(svg_path, scale_x, scale_y):
-    # Define SVG namespace
-    ns = {"svg": "http://www.w3.org/2000/svg"}
-
-    # Parse the SVG file
-    tree = ET.parse(svg_path)
-    root = tree.getroot()
-
-    # Find all <g> elements with id="PolyCollection_1"
-    g_elements = root.find(".//svg:g[@id='PolyCollection_1']", namespaces=ns)
-
-    if g_elements is not None:
-        # Apply the rotation transform to the group
-        scale_factor = 1 / math.sqrt(2)
-        transform = f"rotate(45 0 0) translate({scale_x}, {scale_y}) scale({scale_factor}, {scale_factor})"
-        g_elements.set("transform", transform)
-
-        # Save the modified SVG
-
-    viewBox = root.get("viewBox")
-
-    if viewBox:
-        min_x, min_y, width, height = map(float, viewBox.split())
-        new_min_y = min_y + height / 2  # Move down by half the height
-        new_height = height / 2  # Reduce height by half
-        root.set("viewBox", f"{min_x} {new_min_y} {width} {new_height}")
-    else:
-        print("No viewBox found. Consider adding one manually.")
-
-    # Hacky, but it works to halve the height
-    height_svg = root.get("height")
-    if height_svg:
-        current_height = re.match(r"(\d*\.?\d+)([a-zA-Z%]*)", height_svg)
-        if current_height:
-            numeric_height, unit = current_height.groups()
-            numeric_height = float(numeric_height)
-
-            root.set("height", f"{numeric_height / 1.8}pt")
-    tree.write(svg_path)
-
-
-def rotate_rasterized_tri(svg_path, shift_x, shift_y):
-    # Load the SVG file
-    tree = ET.parse(svg_path)
-    root = tree.getroot()
-
-    # Namespace handling
-    ns = {"svg": "http://www.w3.org/2000/svg"}
-    # Find all image elements with base64 embedded data
-    for image in root.findall(".//svg:image", ns):
-        href = image.get("{http://www.w3.org/1999/xlink}href", "")
-        if href.startswith("data:image/png;base64,"):
-            # Get the current width and height of the image
-            width = float(image.get("width", 0)) / math.sqrt(2)
-            height = float(image.get("height", 0)) / math.sqrt(2)
-            # Set the new width and height
-            image.set("width", str(width))
-            image.set("height", str(height))
-            # Apply a 270-degree rotation (about the top-left corner of the image)
-            transform = image.get("transform", "")
-            new_transform = (
-                f"rotate(45, 0, 0) translate({shift_x}, {shift_y}) {transform}"
-                if transform
-                else f"rotate(45, 0, {height}) translate({shift_x}, {shift_y})"
-            )
-            image.set("transform", new_transform)
-    # Update viewbox
-    viewBox = root.get("viewBox")
-
-    if viewBox:
-        min_x, min_y, width, height = map(float, viewBox.split())
-        new_min_y = min_y + height / 2  # Move down by half the height
-        new_height = height / 2  # Reduce height by half
-        root.set("viewBox", f"{min_x} {new_min_y} {width} {new_height}")
-    else:
-        print("No viewBox found. Consider adding one manually.")
-
-    # Hacky, but it works to halve the height
-    height_svg = root.get("height")
-    if height_svg:
-        current_height = re.match(r"(\d*\.?\d+)([a-zA-Z%]*)", height_svg)
-        if current_height:
-            numeric_height, unit = current_height.groups()
-            numeric_height = float(numeric_height)
-
-            root.set("height", f"{numeric_height / 1.8}pt")
-    else:
-        print("Warning: Could not parse height attribute.")
-
-    # Save the modified SVG back to the same file
-    tree.write(svg_path)
-
-
-from lxml import etree
-
-
-def append_svg(svg1_path, svg2_path, output_path):
-    """Appends SVG2 to the bottom of SVG1 without modifying its width."""
-    # Load SVG1 and SVG2
-    tree1 = etree.parse(svg1_path)
-    root1 = tree1.getroot()
-
-    tree2 = etree.parse(svg2_path)
-    root2 = tree2.getroot()
-
-    # Extract width and height of SVG1
-    width1 = float(root1.get("width", "0").replace("pt", ""))
-    height1 = float(root1.get("height", "0").replace("pt", ""))
-
-    # Extract width and height of SVG2
-    width2 = float(root2.get("width", "0").replace("pt", ""))
-    height2 = float(root2.get("height", "0").replace("pt", ""))
-
-    # Update SVG1 height to accommodate SVG2
-    new_height = height1 + height2
-    root1.set("height", f"{new_height}pt")
-
-    # Create a translation group for SVG2 and shift it down
-    group = etree.Element("g", attrib={"transform": f"translate(0,{height1 + 400})"})
-    for child in root2:
-        group.append(child)
-
-    # Append translated SVG2 to SVG1
-    root1.append(group)
-
-    # Save the new merged SVG
-    tree1.write(output_path, pretty_print=True, xml_declaration=True, encoding="utf-8")
-
-
-def get_svg_size(svg_path):
-    """Helper to extract width and height of an SVG in pt units."""
-    import xml.etree.ElementTree as ET
-
-    tree = ET.parse(svg_path)
-    root = tree.getroot()
-    width = root.get("width")
-    height = root.get("height")
-    return width, height
-
-
-def parse_size(size_str):
-    """Convert '648pt' or '800px' -> float(648)."""
-    return float(re.sub(r"[a-zA-Z]+", "", size_str))
-
-
-def merge_annotation_tri(svg1_path, svg2_path, output_path, deraster, width):
-    """Merges two SVG files into a single SVG file with proper size."""
-
-    w1, h1 = get_svg_size(svg1_path)
-    w2, h2 = get_svg_size(svg2_path)
-
-    # Ensure they are floats
-    w1, h1 = parse_size(w1), parse_size(h1)
-    w2, h2 = parse_size(w2), parse_size(h2)
-    # Determine total size
-    total_width = max(w1, w2)
-    total_height = h1 + h2
-    # Create figure
-    fig = sg.SVGFigure(f"{total_width}px", f"{total_height}px")
-
-    # Load SVGs
-    svg1 = sg.fromfile(svg1_path).getroot()
-    svg2 = sg.fromfile(svg2_path).getroot()
-    make_svg_background_transparent(svg2_path)
-
-    # Position
-    if deraster:
-        # Its not perfect for width > 18, but good enough
-        adjust_svg1 = (0, -5 * (h1 / 6))
-        adjust_svg2 = ((9 - (width / 2)), 5 * (h1 / 6))
-        svg1.moveto(adjust_svg1[0], adjust_svg1[1])
-        svg2.scale(1.077 + (width / 1000))
-        svg2.moveto(adjust_svg2[0], adjust_svg2[1])
-    else:
-        adjust_svg1 = (0, -5 * (h1 / 6))
-        adjust_svg2 = (10 + (width / 4.5), 5 * (h1 / 6))
-        svg1.moveto(adjust_svg1[0], adjust_svg1[1])
-        svg2.moveto(adjust_svg2[0], adjust_svg2[1])
-        scaling_factor = width / 2
-        svg2.scale(1.034 + (scaling_factor / 1000))
-
-    # Append and save
-    fig.append([svg1, svg2])
-    fig.set_size((f"{total_width}px", f"{total_height}px"))
-    fig.save(output_path)
-
-
-def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
-    if not breaks:
-        breaks = True
-    else:
-        breaks = [float(number) for number in breaks]
-    if not xlim:
-        xlim = 0
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
-        function_name = getattr(sequential, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
-
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
-    else:
-        new_hexcodes = hexcodes
-    if colors:
-        new_hexcodes = colors
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-    window = max(sdf["q_en"] - sdf["q_st"])
-    if max_val < 100000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 100000000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-    p = (
-        ggplot(sdf)
-        + geom_tile(
-            aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-            alpha=0,
-        )
-        + scale_color_discrete(guide=False)
-        + scale_fill_manual(
-            values=new_hexcodes,
-            guide=False,
-        )
-        + theme(
-            legend_position="none",
-            panel_grid_major=element_blank(),
-            panel_grid_minor=element_blank(),
-            plot_background=element_blank(),
-            panel_background=element_blank(),
-            axis_line=element_line(color="black"),  # Adjust axis line size
-            axis_text=element_text(
-                family=["DejaVu Sans"]
-            ),  # Change axis text font and size
-            axis_ticks_major=element_line(),
-            axis_line_x=element_line(),  # Keep the x-axis line
-            axis_line_y=element_blank(),  # Remove the y-axis line
-            axis_ticks_major_x=element_line(),  # Keep x-axis ticks
-            axis_ticks_major_y=element_blank(),  # Remove y-axis ticks
-            axis_text_x=element_line(),  # Keep x-axis text
-            axis_text_y=element_blank(),
-            plot_title=element_blank(),
-        )
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + coord_fixed(ratio=1)
-        + labs(x="", y="", title=title_name)
+    del num_ticks
+    figure = _build_triangle_figure(
+        sdf=sdf,
+        title=title_name,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        custom_colors=colors,
+        axes_labels=breaks,
+        xlim=xlim,
+        deraster=deraster,
+        width=width,
     )
-
-    # Adjust x-axis label size
-    p += theme(axis_title_x=element_text())
-
-    return p
+    return figure, figure.axes[0]
 
 
 def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints):
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
-        function_name = getattr(diverging, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
+    """Build the identity histogram with native Matplotlib."""
 
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
-    else:
-        new_hexcodes = hexcodes
-
-    if custom_colors:
-        new_hexcodes = custom_colors
+    del custom_breakpoints
+    colors = _resolve_native_colors(palette, palette_orientation, custom_colors)
     try:
-        bot = np.quantile(sdf["perID_by_events"], q=0.001)
-    except IndexError:
-        bot = 0
-    count = sdf.shape[0]
-    extra = ""
+        lower_bound = float(np.quantile(sdf["perID_by_events"], q=0.001))
+    except (IndexError, ValueError):
+        lower_bound = 0.0
 
-    if count > 1e6:
-        extra = "\n(thousands)"
-
-    p = (
-        ggplot(data=sdf, mapping=aes(x="perID_by_events", fill="discrete"))
-        + geom_histogram(bins=300)
-        + scale_color_cmap(cmap_name="plasma")
-        + scale_fill_manual(new_hexcodes)
-        + theme_light()
-        + theme(text=element_text(family=["DejaVu Sans"]))
-        + theme(legend_position="none")
-        + coord_cartesian(xlim=(bot, 100))
-        + xlab("% Identity Estimate")
-        + ylab("# of Estimates{}".format(extra))
+    dataframe, direction_colors, direction_column = _direction_ani_style(sdf)
+    fill_column = direction_column or "discrete"
+    fill_colors = direction_colors or colors
+    categories = (
+        list(dataframe[fill_column].cat.categories)
+        if isinstance(dataframe[fill_column].dtype, pd.CategoricalDtype)
+        else list(pd.unique(dataframe[fill_column].dropna()))
     )
-    return p
+
+    samples = []
+    sample_colors = []
+    for index, category in enumerate(categories):
+        values = dataframe.loc[
+            dataframe[fill_column] == category, "perID_by_events"
+        ].dropna()
+        if values.empty:
+            continue
+        samples.append(values.to_numpy())
+        if isinstance(fill_colors, dict):
+            sample_colors.append(fill_colors[category])
+        else:
+            sample_colors.append(fill_colors[index % len(fill_colors)])
+
+    figure, axis = plt.subplots(figsize=(3.0, 3.0))
+    try:
+        if samples:
+            axis.hist(
+                samples,
+                bins=300,
+                range=(lower_bound, 100.0),
+                stacked=True,
+                color=sample_colors,
+            )
+        axis.set_xlim(lower_bound, 100.0)
+        axis.set_xlabel("% Identity Estimate")
+        suffix = "\n(thousands)" if dataframe.shape[0] > 1e6 else ""
+        axis.set_ylabel(f"# of Estimates{suffix}")
+        axis.grid(False)
+        for spine in axis.spines.values():
+            spine.set_color("#BDBDBD")
+        set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
+        figure.tight_layout()
+    except Exception:
+        plt.close(figure)
+        raise
+    return figure
+
+
+def _missing_symmetric_rows(dataframe):
+    """Return rows whose coordinate-transposed counterpart is absent.
+
+    FASTA self matrices normally contain only one triangle. Drawing those
+    rows a second time with transposed coordinates completes the full plot
+    without allocating a second, mirrored dataframe. Loaded BEDPE files may
+    already contain both triangles, so the general path checks coordinate
+    membership before selecting rows to mirror.
+    """
+
+    if dataframe.empty:
+        return dataframe.iloc[0:0]
+
+    q_start = dataframe["q_st"]
+    q_end = dataframe["q_en"]
+    r_start = dataframe["r_st"]
+    r_end = dataframe["r_en"]
+    off_diagonal = (q_start != r_start) | (q_end != r_end)
+    if not off_diagonal.any():
+        return dataframe.iloc[0:0]
+
+    # The mirror collection needs coordinates and its resolved color only; do
+    # not copy names, identity estimates, or plotting-helper columns from a
+    # potentially large dataframe.
+    render_columns = ["q_st", "q_en", "r_st", "r_en"]
+    render_columns.extend(
+        column
+        for column in ("discrete", "direction", DIRECTION_ANI_COLUMN)
+        if column in dataframe.columns
+    )
+
+    # The production FASTA path is strictly triangular. Avoid building two
+    # MultiIndexes for that common case; a strict start-coordinate ordering
+    # proves that no transposed off-diagonal row can already be present.
+    start_difference = (
+        q_start.loc[off_diagonal].to_numpy() - r_start.loc[off_diagonal].to_numpy()
+    )
+    if np.all(start_difference < 0) or np.all(start_difference > 0):
+        return dataframe.loc[off_diagonal, render_columns]
+
+    existing = pd.MultiIndex.from_arrays([q_start, q_end, r_start, r_end])
+    mirrored = pd.MultiIndex.from_arrays([r_start, r_end, q_start, q_end])
+    return dataframe.loc[off_diagonal & ~mirrored.isin(existing), render_columns]
+
+
+def _full_plot_limits(dataframe, requested_limit):
+    """Resolve exact full-plot bounds, including an empty sparse matrix."""
+
+    requested_bounds = _requested_axis_bounds(requested_limit)
+    if requested_bounds is not None:
+        return requested_bounds
+    if not dataframe.empty:
+        return _data_axis_limits(dataframe, requested_limit)
+    if requested_limit:
+        return 0.0, float(requested_limit)
+    raise ValueError(
+        "Cannot infer full-plot bounds from an empty identity table; "
+        "provide explicit axis bounds"
+    )
+
+
+def _build_full_figure(
+    sdf,
+    name_x,
+    name_y,
+    palette,
+    palette_orientation,
+    custom_colors,
+    axes_labels,
+    xlim,
+    deraster,
+    width,
+    is_pairwise,
+):
+    """Build a sparse full or comparative dotplot with native Matplotlib.
+
+    The tile geometry intentionally retains the historical Plotnine contract:
+    BEDPE start coordinates are tile centers and ``q_en - q_st`` is the tile
+    width. The default rasterizes only the sparse tile collections in vector
+    output; ``--deraster`` leaves each tile as vector geometry.
+    """
+
+    display_x = display_sequence_name(name_x)
+    display_y = display_sequence_name(name_y)
+    title = (
+        f"Comparative Plot: {display_x} vs {display_y}"
+        if is_pairwise
+        else f"Self-Identity Plot: {display_x}"
+    )
+    region_start, region_end = _full_plot_limits(sdf, xlim)
+    breaks = (
+        [float(value) for value in axes_labels]
+        if axes_labels
+        else generate_breaks(int(region_start), int(region_end))
+    )
+
+    styled, direction_colors, direction_column = _direction_ani_style(sdf)
+    colors = direction_colors or _resolve_native_colors(
+        palette, palette_orientation, custom_colors
+    )
+    color_column = direction_column or "discrete"
+
+    figure, axis = plt.subplots(figsize=(float(width), float(width)))
+    try:
+        draw_rectangular_tiles(
+            axis,
+            styled,
+            colors,
+            color_column=color_column,
+            rasterized=not deraster,
+        )
+        if not is_pairwise:
+            missing_rows = _missing_symmetric_rows(styled)
+            if not missing_rows.empty:
+                draw_rectangular_tiles(
+                    axis,
+                    missing_rows,
+                    colors,
+                    color_column=color_column,
+                    transpose=True,
+                    rasterized=not deraster,
+                )
+
+        configure_dotplot_axis(
+            axis,
+            region_start,
+            region_end,
+            breaks=breaks,
+        )
+        _divisor, unit = genomic_scale(region_end)
+        genomic_axis_title_size = clamped_font_size(width, 1.575)
+        sequence_axis_title_size = clamped_font_size(width, 3.0)
+        axis.set_xlabel(
+            f"Genomic Position ({unit})",
+            fontsize=genomic_axis_title_size,
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
+        axis.tick_params(
+            axis="both",
+            labelsize=clamped_font_size(width, 2.0),
+            length=max(3.5, float(width)),
+            colors="black",
+        )
+        axis.grid(False)
+        axis.set_facecolor("none")
+        for spine in axis.spines.values():
+            spine.set_color("black")
+
+        # Plotnine's one-cell facet supplies a query label above the panel and
+        # a reference label at its right edge. Retain those identifiers while
+        # placing the descriptive title independently above them.
+        axis.set_title(
+            display_x,
+            fontsize=sequence_axis_title_size,
+            fontfamily=DEFAULT_FONT_FAMILY,
+            pad=9,
+        )
+        axis.set_ylabel(
+            display_y,
+            fontsize=sequence_axis_title_size,
+            fontfamily=DEFAULT_FONT_FAMILY,
+            rotation=-90,
+            labelpad=28,
+        )
+        axis.yaxis.set_label_position("right")
+
+        title_size = 2.0 * float(width)
+        if len(title) > 80:
+            title_size = float(width)
+        elif len(title) > 50:
+            title_size = 1.5 * float(width)
+        figure.suptitle(
+            title,
+            fontsize=max(MIN_TITLE_SIZE, title_size),
+            fontfamily=DEFAULT_FONT_FAMILY,
+            y=0.92,
+        )
+        figure.subplots_adjust(
+            left=0.14,
+            right=0.87,
+            bottom=0.14,
+            top=0.84,
+        )
+        set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
+    except Exception:
+        plt.close(figure)
+        raise
+    return figure
+
+
+def _triangle_limits(sdf, xlim):
+    requested_bounds = _requested_axis_bounds(xlim)
+    if requested_bounds is not None:
+        region_start, region_end = requested_bounds
+    elif not sdf.empty:
+        region_start = max(float(sdf["q_st"].min()), float(sdf["r_st"].min()))
+        region_end = max(
+            float(sdf["q_en"].max()),
+            float(sdf["r_en"].max()),
+            float(xlim or 0),
+        )
+    else:
+        raise ValueError(
+            "Cannot infer triangle bounds from an empty identity table; "
+            "provide explicit axis bounds"
+        )
+    if region_end <= region_start:
+        raise ValueError("Triangle plot end must be greater than its start")
+    return region_start, region_end
+
+
+def _build_triangle_figure(
+    sdf,
+    title,
+    palette,
+    palette_orientation,
+    custom_colors,
+    axes_labels,
+    xlim,
+    deraster,
+    width,
+    annotation_df=None,
+    annotation_chrom=None,
+):
+    """Build a triangle, optionally aligned with a BED annotation track."""
+    region_start, region_end = _triangle_limits(sdf, xlim)
+    breaks = (
+        [float(value) for value in axes_labels]
+        if axes_labels
+        else generate_breaks(int(region_start), int(region_end))
+    )
+    sdf, direction_colors, direction_column = _direction_ani_style(sdf)
+    colors = direction_colors or _resolve_native_colors(
+        palette, palette_orientation, custom_colors
+    )
+    color_column = direction_column or "discrete"
+    with_annotation = annotation_df is not None
+    layout = create_triangle_layout(width, with_annotation=with_annotation)
+    try:
+        draw_triangle_tiles(
+            layout.triangle_axis,
+            sdf,
+            colors,
+            color_column=color_column,
+            rasterized=not deraster,
+        )
+        configure_triangle_axis(
+            layout.triangle_axis,
+            region_start,
+            region_end,
+            breaks=breaks,
+            label=not with_annotation,
+        )
+        if with_annotation:
+            # The annotation axis is the sole genomic axis in the combined
+            # figure. Remove the triangle baseline and its tick marks.
+            layout.triangle_axis.spines["bottom"].set_visible(False)
+            layout.triangle_axis.tick_params(axis="x", bottom=False, labelbottom=False)
+        layout.triangle_axis.set_title(
+            display_sequence_name(title),
+            fontsize=clamped_font_size(width, 1.4, MIN_TITLE_SIZE),
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
+
+        if with_annotation:
+            if not annotation_chrom:
+                raise ValueError("An annotation chromosome is required")
+            draw_annotation_track(
+                layout.annotation_axis,
+                annotation_df,
+                annotation_chrom,
+                region_start,
+                region_end,
+            )
+            layout.annotation_axis.set_xticks(breaks)
+            layout.annotation_axis.xaxis.set_major_formatter(
+                genomic_tick_formatter(region_end)
+            )
+            _, unit = genomic_scale(region_end)
+            layout.annotation_axis.set_xlabel(f"Genomic Position ({unit})")
+
+        layout.figure.subplots_adjust(
+            left=0.08,
+            right=0.98,
+            bottom=0.14 if not with_annotation else 0.10,
+            top=0.90,
+            hspace=0.05,
+        )
+        if with_annotation:
+            # ``set_aspect('equal', adjustable='box')`` narrows the triangle
+            # axis inside its GridSpec cell to retain 45-degree diagonals. A
+            # normal annotation axis keeps the full cell width, so shared data
+            # limits alone do not produce physical pixel alignment. Match the
+            # BED axis to the triangle's final horizontal bounds.
+            triangle_position = layout.triangle_axis.get_position()
+            annotation_position = layout.annotation_axis.get_position()
+            layout.annotation_axis.set_position(
+                [
+                    triangle_position.x0,
+                    annotation_position.y0,
+                    triangle_position.width,
+                    annotation_position.height,
+                ]
+            )
+        set_figure_font_family(layout.figure, DEFAULT_FONT_FAMILY)
+    except Exception:
+        plt.close(layout.figure)
+        raise
+    return layout.figure
+
+
+def _ordered_grid_names(single_names, double_names):
+    names = []
+    for name in single_names:
+        if name in names:
+            raise ValueError(f"Duplicate self comparison for sequence {name!r}")
+        names.append(name)
+    for pair in double_names:
+        if len(pair) != 2:
+            raise ValueError("Each grid comparison must name exactly two sequences")
+        for name in pair:
+            if name not in names:
+                names.append(name)
+    if not names:
+        raise ValueError("No sequence names were provided for the grid")
+    return names
+
+
+def _read_grid_dataframe(
+    matrix,
+    is_bed,
+    palette,
+    palette_orientation,
+    is_freq,
+    custom_colors,
+    custom_breakpoints,
+):
+    return read_df(
+        None if is_bed else [matrix],
+        palette,
+        palette_orientation,
+        is_freq,
+        custom_colors,
+        custom_breakpoints,
+        matrix if is_bed else None,
+    )
+
+
+def _grid_axis_limits(dataframes, requested_limit):
+    requested_bounds = _requested_axis_bounds(requested_limit)
+    if requested_bounds is not None:
+        return requested_bounds
+    if requested_limit:
+        return 0.0, float(requested_limit)
+    minima = [
+        float(min(dataframe["q_st"].min(), dataframe["r_st"].min()))
+        for dataframe in dataframes
+        if not dataframe.empty
+    ]
+    maxima = [
+        float(max(dataframe["q_en"].max(), dataframe["r_en"].max()))
+        for dataframe in dataframes
+        if not dataframe.empty
+    ]
+    if not maxima:
+        return 0.0, 1.0
+    return min(minima), max(maxima)
+
+
+def _build_grid_figure(
+    singles,
+    doubles,
+    palette,
+    palette_orientation,
+    single_names,
+    double_names,
+    is_freq,
+    xlim,
+    custom_colors,
+    custom_breakpoints,
+    axes_label,
+    is_bed,
+    width,
+    breaks,
+    deraster,
+):
+    """Build a native Matplotlib comparison grid and return its axes.
+
+    ``width`` controls the complete square figure, not each panel, so memory
+    use does not grow quadratically in pixels as sequences are added.
+    """
+    if len(singles) != len(single_names):
+        raise ValueError("Self-comparison matrices and names must have equal lengths")
+    if len(doubles) != len(double_names):
+        raise ValueError("Pairwise matrices and names must have equal lengths")
+
+    names = _ordered_grid_names(single_names, double_names)
+    # Keep columns in input order and reverse rows so self-comparisons occupy
+    # the anti-diagonal: bottom-left to top-right.
+    row_names = list(reversed(names))
+    single_frames = {}
+    for name, matrix in zip(single_names, singles):
+        single_frames[name] = _read_grid_dataframe(
+            matrix,
+            is_bed,
+            palette,
+            palette_orientation,
+            is_freq,
+            custom_colors,
+            custom_breakpoints,
+        )
+
+    pair_frames = {}
+    pair_orientations = {}
+    for pair, matrix in zip(double_names, doubles):
+        query_name, reference_name = pair
+        if query_name == reference_name:
+            raise ValueError("Pairwise grid comparisons must use two distinct names")
+        key = frozenset((query_name, reference_name))
+        if key in pair_frames:
+            raise ValueError(
+                f"Duplicate pairwise comparison for {query_name!r} and {reference_name!r}"
+            )
+        pair_frames[key] = _read_grid_dataframe(
+            matrix,
+            is_bed,
+            palette,
+            palette_orientation,
+            is_freq,
+            custom_colors,
+            custom_breakpoints,
+        )
+        pair_orientations[key] = (query_name, reference_name)
+
+    missing_pairs = [
+        (names[row], names[column])
+        for row in range(len(names))
+        for column in range(row + 1, len(names))
+        if frozenset((names[row], names[column])) not in pair_frames
+    ]
+    if missing_pairs:
+        formatted = ", ".join(f"{left}/{right}" for left, right in missing_pairs)
+        raise ValueError(f"Missing pairwise grid comparisons: {formatted}")
+
+    all_frames = list(single_frames.values()) + list(pair_frames.values())
+    axis_start, axis_end = _grid_axis_limits(all_frames, xlim)
+    _, axis_unit = genomic_scale(axis_end)
+    axis_breaks = axes_label or breaks
+    if not axis_breaks:
+        axis_breaks = generate_breaks(int(axis_start), int(axis_end))
+    axis_breaks = [float(value) for value in axis_breaks]
+    colors = _resolve_native_colors(palette, palette_orientation, custom_colors)
+
+    grid_size = len(names)
+    figure_width = max(float(width), 2.0)
+    heading_size = clamped_font_size(figure_width, 1.2, 8.0, 12.0)
+    # Numeric genomic labels are intentionally twice the previous size. The
+    # inverse grid-size factor keeps larger grids proportionate.
+    tick_size = clamped_font_size(
+        figure_width,
+        3.0 / grid_size,
+        MIN_TEXT_SIZE,
+        18.0,
+    )
+    axis_title_size = clamped_font_size(
+        figure_width,
+        1.6 / grid_size,
+        MIN_TEXT_SIZE,
+        14.0,
+    )
+    figure, axes = plt.subplots(
+        grid_size,
+        grid_size,
+        figsize=(figure_width, figure_width),
+        sharex=True,
+        sharey=True,
+        squeeze=False,
+    )
+    try:
+        for row, row_name in enumerate(row_names):
+            for column, column_name in enumerate(names):
+                axis = axes[row, column]
+                dataframe = None
+                transpose = False
+                if row_name == column_name:
+                    dataframe = single_frames.get(row_name)
+                else:
+                    key = frozenset((row_name, column_name))
+                    dataframe = pair_frames[key]
+                    query_name, reference_name = pair_orientations[key]
+                    if (query_name, reference_name) == (column_name, row_name):
+                        transpose = False
+                    elif (query_name, reference_name) == (row_name, column_name):
+                        transpose = True
+                    else:
+                        raise ValueError(
+                            f"Grid comparison names do not match {row_name!r}/{column_name!r}"
+                        )
+
+                if dataframe is not None and not dataframe.empty:
+                    if row_name == column_name:
+                        dataframe = check_st_en_equality(dataframe)
+                    (
+                        dataframe,
+                        direction_colors,
+                        direction_column,
+                    ) = _direction_ani_style(dataframe)
+                    draw_rectangular_tiles(
+                        axis,
+                        dataframe,
+                        direction_colors or colors,
+                        color_column=direction_column or "discrete",
+                        transpose=transpose,
+                        rasterized=not deraster,
+                    )
+                configure_dotplot_axis(
+                    axis,
+                    axis_start,
+                    axis_end,
+                    breaks=axis_breaks,
+                    show_x=row == grid_size - 1,
+                    show_y=column == 0,
+                )
+                axis.tick_params(axis="both", labelsize=tick_size)
+                axis.grid(False)
+                if row == 0:
+                    axis.set_title(
+                        display_sequence_name(column_name),
+                        fontsize=heading_size,
+                        fontfamily=DEFAULT_FONT_FAMILY,
+                    )
+                if column == 0:
+                    axis.set_ylabel(
+                        display_sequence_name(row_name),
+                        fontsize=heading_size,
+                        fontfamily=DEFAULT_FONT_FAMILY,
+                        labelpad=2,
+                    )
+
+        # Keep both shared genomic-axis titles with the bottom-left cell, where
+        # both sets of numeric tick labels are visible. Figure-wide titles sit
+        # far from that cell and enlarge tightly cropped output canvases.
+        bottom_left_axis = axes[-1, 0]
+        axis_title = f"Genomic Position ({axis_unit})"
+        bottom_left_axis.set_xlabel(
+            axis_title,
+            fontsize=axis_title_size,
+            fontfamily=DEFAULT_FONT_FAMILY,
+            labelpad=2,
+        )
+        bottom_margin = max(0.12, 0.35 / figure_width)
+        left_margin_inches = 0.72 + max(0.0, tick_size - MIN_TEXT_SIZE) / 72.0
+        left_margin = max(0.14, left_margin_inches / figure_width)
+        figure.subplots_adjust(
+            left=left_margin,
+            right=0.98,
+            bottom=bottom_margin,
+            top=0.92,
+            wspace=0.08,
+            hspace=0.08,
+        )
+        _fit_grid_sequence_labels(figure, axes)
+        vertical_title = bottom_left_axis.annotate(
+            axis_title,
+            xy=(0, 0.5),
+            xycoords=bottom_left_axis.yaxis.label,
+            # Keep the shared title visibly separate from the adjacent row
+            # label under both Helvetica and Matplotlib's fallback fonts.
+            xytext=(-6, 0),
+            textcoords="offset points",
+            ha="center",
+            va="center",
+            rotation=90,
+            rotation_mode="anchor",
+            fontsize=axis_title_size,
+            fontfamily=DEFAULT_FONT_FAMILY,
+            annotation_clip=False,
+        )
+        vertical_title.set_gid("grid-y-axis-title")
+        set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
+    except Exception:
+        plt.close(figure)
+        raise
+    return figure, axes
 
 
 def create_grid(
@@ -1412,282 +1471,49 @@ def create_grid(
     breaks,
     deraster,
     vector_format,
+    dpi=300,
 ):
-    new_index = []
-    transpose_index = []
-    check_pascal(singles, doubles)
-    # Singles can be empty if not selected
-    for i in range(len(single_names)):
-        for j in range(i + 1, len(single_names)):
-            try:
-                index = double_names.index([single_names[i], single_names[j]])
-                transpose_index.append(0)
-            except:
-                index = double_names.index([single_names[j], single_names[i]])
-                transpose_index.append(1)
-
-            new_index.append(index)
-
-    single_list = []
-    double_list = []
-    single_heatmap_list = []
-    normal_heatmap_list = []
-    transpose_heatmap_list = []
-    for matrix in singles:
-        if is_bed:
-            df = read_df(
-                None,
-                palette,
-                palette_orientation,
-                is_freq,
-                custom_colors,
-                custom_breakpoints,
-                matrix,
-            )
-        else:
-            df = read_df(
-                [matrix],
-                palette,
-                palette_orientation,
-                is_freq,
-                custom_colors,
-                custom_breakpoints,
-                None,
-            )
-        single_list.append(df)
-    for matrix in doubles:
-        if is_bed:
-            df = read_df(
-                None,
-                palette,
-                palette_orientation,
-                is_freq,
-                custom_colors,
-                custom_breakpoints,
-                matrix,
-            )
-        else:
-            df = read_df(
-                [matrix],
-                palette,
-                palette_orientation,
-                is_freq,
-                custom_colors,
-                custom_breakpoints,
-                None,
-            )
-        double_list.append(df)
-    # This is the diagonals
-    for plot in single_list:
-        heatmap = make_dot_final(
-            sdf=plot,
-            width=width,
-            palette=palette,
-            palette_orientation=palette_orientation,
-            colors=custom_colors,
-            breaks=axes_label,
-            xlim=xlim,
-            transpose=False,
-            deraster=deraster,
-        )
-        single_heatmap_list.append(heatmap)
-    for indie in new_index:
-        xd = new_index.index(indie)
-        # These are the non-diagonal transposes and normals!
-        if transpose_index[xd] == 0:
-            heatmap = make_dot_final(
-                sdf=double_list[indie],
-                width=width,
-                palette=palette,
-                palette_orientation=palette_orientation,
-                colors=custom_colors,
-                breaks=axes_label,
-                xlim=xlim,
-                transpose=True,
-                deraster=deraster,
-            )
-            normal_heatmap_list.append(heatmap)
-            heatmap_t = make_dot_final(
-                double_list[indie],
-                width,
-                palette,
-                palette_orientation,
-                custom_colors,
-                axes_label,
-                xlim,
-                transpose=False,
-                deraster=deraster,
-            )
-            transpose_heatmap_list.append(heatmap_t)
-        else:
-            heatmap = make_dot_final(
-                double_list[indie],
-                width,
-                palette,
-                palette_orientation,
-                custom_colors,
-                axes_label,
-                xlim,
-                transpose=True,
-                deraster=deraster,
-            )
-            normal_heatmap_list.append(heatmap)
-            heatmap_t = make_dot_final(
-                double_list[indie],
-                width,
-                palette,
-                palette_orientation,
-                custom_colors,
-                axes_label,
-                xlim,
-                transpose=False,
-                deraster=deraster,
-            )
-            transpose_heatmap_list.append(heatmap_t)
-
-    assert len(transpose_heatmap_list) == len(normal_heatmap_list)
-    single_length = len(single_heatmap_list)
-    if single_length == 0:
-        single_length = reverse_pascal(len(normal_heatmap_list))
-
-    normal_counter = 0
-    trans_counter = 0
-    trans_to_use = transpose_order(normal_heatmap_list)
-    start_grid = pw.Brick(figsize=(9, 9))
-    n = single_length * single_length
-
-    if n > 9:
-        print(f"This might take a while\n...\n")
-
-    printProgressBar(0, n, prefix="Progress:", suffix="Complete", length=40)
-    tots = 0
-    col_names = pw.Brick(figsize=(width / 4.5, width))
-    row_names = pw.Brick(figsize=(width, width / 4.5))
-    for i in range(single_length):
-        row_grid = pw.Brick(figsize=(width, width))
-        for j in range(single_length):
-            if i == j:
-                if len(single_heatmap_list) == 0:
-                    g1 = pw.Brick(figsize=(width, width))
-                else:
-                    g1 = pw.load_ggplot(single_heatmap_list[i], figsize=(width, width))
-
-            elif i < j:
-                g1 = pw.load_ggplot(
-                    normal_heatmap_list[normal_counter], figsize=(width, width)
-                )
-                normal_counter += 1
-            elif i > j:
-                g1 = pw.load_ggplot(
-                    transpose_heatmap_list[trans_to_use[trans_counter]],
-                    figsize=(width, width),
-                )
-                trans_counter += 1
-            if j == 0:
-                row_grid = g1
-            else:
-                row_grid = row_grid | g1
-            tots += 1
-            printProgressBar(tots, n, prefix="Progress:", suffix="Complete", length=40)
-        if i == 0:
-            start_grid = row_grid
-        else:
-            start_grid = row_grid / start_grid
-    for w in range(single_length):
-        p1 = (
-            ggplot()
-            + geom_blank()
-            + annotate(  # Use geom_blank to create a plot with no data
-                "text",
-                x=0,
-                y=0,
-                label=single_names[w],
-                size=width * 3,
-                angle=90,
-                ha="center",
-                va="center",
-            )
-            + theme(
-                # Center the plot area and make backgrounds transparent
-                axis_title_x=element_blank(),
-                axis_title_y=element_blank(),
-                axis_ticks=element_blank(),
-                axis_text=element_blank(),
-                plot_background=element_rect(
-                    fill="none"
-                ),  # Transparent plot background
-                panel_background=element_rect(
-                    fill="none"
-                ),  # Transparent panel background
-                panel_grid=element_blank(),
-                aspect_ratio=0.5,  # Adjust the aspect ratio for the desired width/height
-            )
-            + coord_flip()  # Rotate the plot 90 degrees counterclockwise
-        )
-        p2 = (
-            ggplot()
-            + geom_blank()
-            + annotate(  # Use geom_blank to create a plot with no data
-                "text",
-                x=0,
-                y=0,
-                label=single_names[w],
-                size=width * 3,
-                ha="center",
-                va="center",
-            )
-            + theme(
-                # Center the plot area and make backgrounds transparent
-                axis_title_x=element_blank(),
-                axis_title_y=element_blank(),
-                axis_ticks=element_blank(),
-                axis_text=element_blank(),
-                plot_background=element_rect(
-                    fill="none"
-                ),  # Transparent plot background
-                panel_background=element_rect(
-                    fill="none"
-                ),  # Transparent panel background
-                panel_grid=element_blank(),
-                aspect_ratio=0.5,  # Adjust the aspect ratio for the desired width/height
-            )
-        )
-        g1 = pw.load_ggplot(p1, figsize=(width / 4.5, width))
-        g2 = pw.load_ggplot(p2, figsize=(width, width / 4.5))
-
-        if w == 0:
-            col_names = g1
-            row_names = g2
-        else:
-            col_names = g1 / col_names
-            row_names = row_names | g2
-    # Create a ghost 2x2
-    pghost = (
-        ggplot()
-        + geom_blank()
-        + annotate(  # Use geom_blank to create a plot with no data
-            "text", x=0, y=0, label="", size=32, ha="center", va="center"
-        )
-        + theme(
-            # Center the plot area and make backgrounds transparent
-            axis_title_x=element_blank(),
-            axis_title_y=element_blank(),
-            axis_ticks=element_blank(),
-            axis_text=element_blank(),
-            plot_background=element_rect(fill="none"),  # Transparent plot background
-            panel_background=element_rect(fill="none"),  # Transparent panel background
-            panel_grid=element_blank(),
-            aspect_ratio=0.5,  # Adjust the aspect ratio for the desired width/height
-        )
+    figure, axes = _build_grid_figure(
+        singles=singles,
+        doubles=doubles,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        single_names=single_names,
+        double_names=double_names,
+        is_freq=is_freq,
+        xlim=xlim,
+        custom_colors=custom_colors,
+        custom_breakpoints=custom_breakpoints,
+        axes_label=axes_label,
+        is_bed=is_bed,
+        width=width,
+        breaks=breaks,
+        deraster=deraster,
     )
-    ghosty = pw.load_ggplot(pghost, figsize=(2, 2))
-    col_names = ghosty / col_names
-    start_grid = col_names | (row_names / start_grid)
-    gridname = f"{single_length}x{single_length}_GRID"
-    print(f"\nGrid complete! Saving to {directory}/{gridname}...\n")
-    start_grid.savefig(f"{directory}/{gridname}.png")
-    start_grid.savefig(f"{directory}/{gridname}.{vector_format}", format=vector_format)
-    print(f"Grid saved successfully!\n")
+    grid_size = axes.shape[0]
+    directional = any(
+        (
+            "direction" in matrix.columns
+            if isinstance(matrix, pd.DataFrame)
+            else bool(matrix) and "direction" in matrix[0]
+        )
+        for matrix in [*singles, *doubles]
+    )
+    grid_label = "DIRECTION_GRID" if directional else "GRID"
+    grid_prefix = os.path.join(directory, f"{grid_size}x{grid_size}_{grid_label}")
+    print(f"\nGrid complete! Saving to {grid_prefix}...\n")
+    try:
+        save_figure_pair(
+            figure,
+            grid_prefix,
+            vector_format,
+            dpi,
+            bbox_inches=figure.bbox_inches,
+        )
+    finally:
+        plt.close(figure)
+    print("Grid saved successfully!\n")
+    return [f"{grid_prefix}.{vector_format}", f"{grid_prefix}.png"]
 
 
 def create_plots(
@@ -1712,6 +1538,8 @@ def create_plots(
     deraster,
     annotation,
 ):
+    os.makedirs(directory, exist_ok=True)
+    created_files = []
     df = read_df(
         sdf,
         palette,
@@ -1722,140 +1550,122 @@ def create_plots(
         from_file,
     )
     sdf = df
+    directional = "direction" in sdf.columns
 
     plot_filename = os.path.join(directory, name_x)
 
     if is_pairwise:
         plot_filename = os.path.join(directory, f"{name_x}_{name_y}")
 
-    histy = make_hist(
-        sdf, palette, palette_orientation, custom_colors, custom_breakpoints
-    )
+    histy = None
+    if not no_hist:
+        histy = make_hist(
+            sdf, palette, palette_orientation, custom_colors, custom_breakpoints
+        )
 
+    annotation_track_created = False
+    annotation_bed_df = None
+    annotation_chrom = None
     # Just doing triangle plots for now.
     if annotation:
-        print(f"Generating ini file for annotation track:\n")
+        print("Generating annotation track:\n")
         iniprefix = plot_filename
-        inifile = generate_ini_file(
-            bedfile=annotation,
-            ininame=iniprefix,
-            chrom=name_x,
-        )
-        min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
-        max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
-        if not xlim:
-            xlim = max_val
-        region = [(name_x.split(":")[0], min_val, xlim)]
-        if inifile:
-            try:
-                # Check if the BED file has valid intervals for this region first
-                bed_df = read_annotation_bed(annotation)
-                chrom_name = name_x.split(":")[0]
-
-                # Filter for the chromosome and region of interest
-                valid_intervals = bed_df[
-                    (bed_df["chrom"] == chrom_name)
-                    & (bed_df["end"] >= min_val)
-                    & (bed_df["start"] <= xlim)
-                ]
-
-                if valid_intervals.empty:
-                    print(
-                        f"No valid intervals found in {annotation} for region {chrom_name}:{min_val}-{xlim}.\n"
-                    )
-                    print("Skipping annotation track generation.\n")
-                else:
-                    bed_track = run_pygenometracks(
-                        inifile=inifile,
-                        region=region,
-                        output_file=f"{iniprefix}_ANNOTATION_TRACK.svg",
-                        width=width * 2.05,
-                    )
-                    bed_track.plot(
-                        f"{iniprefix}_ANNOTATION_TRACK.svg",
-                        name_x.split(":")[0],
-                        min_val,
-                        xlim,
-                    )
-                    bed_track.plot(
+        requested_bounds = _requested_axis_bounds(xlim)
+        if requested_bounds is not None:
+            min_val, annotation_end = requested_bounds
+        else:
+            min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
+            max_val = max(sdf["q_en"].max(), sdf["r_en"].max())
+            annotation_end = xlim or max_val
+        chrom_name = name_x.split(":")[0]
+        try:
+            bed_df = read_annotation_bed(annotation)
+            annotation_track_created = render_annotation_track(
+                bed_df=bed_df,
+                chrom=chrom_name,
+                region_start=min_val,
+                region_end=annotation_end,
+                output_prefix=f"{iniprefix}_ANNOTATION_TRACK",
+                width_cm=width * 2.05,
+                dpi=dpi,
+                vector_format=vector_format,
+            )
+            if annotation_track_created:
+                created_files.extend(
+                    [
+                        f"{iniprefix}_ANNOTATION_TRACK.{vector_format}",
                         f"{iniprefix}_ANNOTATION_TRACK.png",
-                        name_x.split(":")[0],
-                        min_val,
-                        xlim,
-                    )
-                    print(f"\nAnnotation track saved to {iniprefix}_ANNOTATION_TRACK\n")
-
-            except Exception as e:
-                print(f"Error processing annotation file {annotation}: {e}\n")
+                    ]
+                )
+                annotation_bed_df = bed_df
+                annotation_chrom = chrom_name
+                print(f"\nAnnotation track saved to {iniprefix}_ANNOTATION_TRACK\n")
+            else:
+                print(
+                    f"No valid intervals found in {annotation} for region "
+                    f"{chrom_name}:{min_val}-{annotation_end}.\n"
+                )
                 print("Skipping annotation track generation.\n")
+        except Exception as e:
+            print(f"Error processing annotation file {annotation}: {e}\n")
+            print("Skipping annotation track generation.\n")
 
     if is_pairwise:
-        heatmap = make_dot(
-            sdf,
-            name_x,
-            name_y,
-            palette,
-            palette_orientation,
-            custom_colors,
-            axes_labels,
-            axes_tick_number,
-            xlim,
-            deraster,
-            width,
-            True,
-        )
         print(f"Creating plots and saving to {plot_filename}...\n")
-        ggsave(
-            heatmap,
+        full_suffix = "_DIRECTION_FULL" if directional else "_COMPARE"
+        hist_suffix = "_DIRECTION_HIST" if directional else "_COMPARE_HIST"
+        full_figure = _build_full_figure(
+            sdf=sdf,
+            name_x=name_x,
+            name_y=name_y,
+            palette=palette,
+            palette_orientation=palette_orientation,
+            custom_colors=custom_colors,
+            axes_labels=axes_labels,
+            xlim=xlim,
+            deraster=deraster,
             width=width,
-            height=width,
-            dpi=dpi,
-            format=vector_format,
-            filename=f"{plot_filename}_COMPARE.{vector_format}",
-            verbose=False,
+            is_pairwise=True,
         )
-        ggsave(
-            heatmap,
-            width=width,
-            height=width,
-            dpi=dpi,
-            format="png",
-            filename=f"{plot_filename}_COMPARE.png",
-            verbose=False,
+        try:
+            save_figure_pair(
+                full_figure,
+                f"{plot_filename}{full_suffix}",
+                vector_format,
+                dpi,
+                bbox_inches=full_figure.bbox_inches,
+            )
+        finally:
+            plt.close(full_figure)
+        created_files.extend(
+            [
+                f"{plot_filename}{full_suffix}.{vector_format}",
+                f"{plot_filename}{full_suffix}.png",
+            ]
         )
         if not no_hist:
-            ggsave(
+            _draw_and_save_plot_pair(
                 histy,
+                f"{plot_filename}{hist_suffix}",
                 width=3,
                 height=3,
                 dpi=dpi,
-                format=vector_format,
-                filename=f"{plot_filename}_COMPARE_HIST.{vector_format}",
-                verbose=False,
+                vector_format=vector_format,
             )
-            ggsave(
-                histy,
-                width=3,
-                height=3,
-                dpi=dpi,
-                format="png",
-                filename=f"{plot_filename}_COMPARE_HIST.png",
-                verbose=False,
+            created_files.extend(
+                [
+                    f"{plot_filename}{hist_suffix}.{vector_format}",
+                    f"{plot_filename}{hist_suffix}.png",
+                ]
             )
-        try:
-            if not heatmap.data:
-                print(
-                    f"{plot_filename} comparative plots and histogram saved sucessfully. \n"
-                )
-                return 0
-        except ValueError:
+        if not no_hist:
             print(
                 f"{plot_filename} comparative plots and histogram saved sucessfully. \n"
             )
-            return 0
-        if no_hist:
+        else:
             print(
-                f"{plot_filename}_COMPARE.{vector_format} and {plot_filename}_COMPARE.png saved sucessfully. \n"
+                f"{plot_filename}{full_suffix}.{vector_format} and "
+                f"{plot_filename}{full_suffix}.png saved sucessfully. \n"
             )
     # Self-identity plots: Output _TRI, _FULL, and _HIST
     else:
@@ -1863,197 +1673,113 @@ def create_plots(
             print(
                 f"Producing dotplots with derasterization turned off. This may take a while...\n"
             )
-        tri_plot = make_tri(
-            sdf,
-            plot_filename,
-            palette,
-            palette_orientation,
-            custom_colors,
-            axes_labels,
-            xlim,
-            axes_tick_number,
-            deraster,
-            width,
-        )
-        full_plot = make_dot(
-            check_st_en_equality(sdf),
-            name_x,
-            name_y,
-            palette,
-            palette_orientation,
-            custom_colors,
-            axes_labels,
-            axes_tick_number,
-            xlim,
-            deraster,
-            width,
-            False,
-        )
-        ggsave(
-            full_plot,
+        full_suffix = "_DIRECTION_FULL" if directional else "_FULL"
+        tri_suffix = "_DIRECTION_TRI" if directional else "_TRI"
+        hist_suffix = "_DIRECTION_HIST" if directional else "_HIST"
+        full_figure = _build_full_figure(
+            sdf=sdf,
+            name_x=name_x,
+            name_y=name_y,
+            palette=palette,
+            palette_orientation=palette_orientation,
+            custom_colors=custom_colors,
+            axes_labels=axes_labels,
+            xlim=xlim,
+            deraster=deraster,
             width=width,
-            height=width,
-            dpi=dpi,
-            format=vector_format,
-            filename=f"{plot_filename}_FULL.{vector_format}",
-            verbose=False,
+            is_pairwise=False,
         )
-        ggsave(
-            full_plot,
-            width=width,
-            height=width,
-            dpi=dpi,
-            format="png",
-            filename=f"{plot_filename}_FULL.png",
-            verbose=False,
-        )
-        tri_prefix = f"{plot_filename}_TRI"
-        ggsave(
-            tri_plot[0],
-            width=width,
-            height=width,
-            dpi=dpi,
-            format="svg",
-            filename=f"{tri_prefix}.svg",
-            verbose=False,
-        )
-        if annotation:
-            anno_prefix = f"{plot_filename}_PRE_ANNOTATED"
-            annotated_tri = tri_plot[0] + theme(
-                axis_title_x=element_blank(),
-                axis_line_x=element_blank(),
-                axis_text_x=element_blank(),
-                axis_ticks_minor_x=element_blank(),
-                axis_ticks=element_blank(),
-            )
-            ggsave(
-                annotated_tri,
-                width=width,
-                height=width,
-                dpi=dpi,
-                format="svg",
-                filename=f"{anno_prefix}.svg",
-                verbose=False,
-            )
-        # These scaling values were determined thorugh much trial and error. Please don't delete :)
-        if deraster:
-            scaling_values = (46.62 * width, -3.75 * width)
-            rotate_vectorized_tri(
-                f"{tri_prefix}.svg", scaling_values[0], scaling_values[1]
-            )
-            if annotation:
-                rotate_vectorized_tri(
-                    f"{anno_prefix}.svg", scaling_values[0], scaling_values[1]
-                )
-            try:
-                cairosvg.svg2png(
-                    url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.png", dpi=dpi
-                )
-            except:
-                print(f"Error installing cairosvg. Unable to convert svg file. \n")
-        else:
-            scaling_values = (44.6 * width, -23 * width)
-            rotate_rasterized_tri(
-                f"{tri_prefix}.svg", scaling_values[0], scaling_values[1]
-            )
-            if annotation:
-                if annotation:
-                    rotate_rasterized_tri(
-                        f"{anno_prefix}.svg", scaling_values[0], scaling_values[1]
-                    )
-            try:
-                cairosvg.svg2png(
-                    url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.png", dpi=dpi
-                )
-            except:
-                print(f"Error installing cairosvg. Unable to convert svg file. \n")
-        if annotation:
-            # Only merge if annotation was successfully created
-            if os.path.exists(f"{iniprefix}_ANNOTATION_TRACK.svg"):
-                make_svg_background_transparent(f"{iniprefix}_ANNOTATION_TRACK.svg")
-                merge_annotation_tri(
-                    f"{anno_prefix}.svg",
-                    f"{iniprefix}_ANNOTATION_TRACK.svg",
-                    f"{tri_prefix}_ANNOTATED.svg",
-                    deraster,
-                    width,
-                )
-                if os.path.exists(f"{anno_prefix}.svg"):
-                    os.remove(f"{anno_prefix}.svg")
-                cairosvg.svg2png(
-                    url=f"{tri_prefix}_ANNOTATED.svg",
-                    write_to=f"{tri_prefix}_ANNOTATED.png",
-                    dpi=dpi,
-                )
-                try:
-                    if vector_format != "svg":
-                        if vector_format == "pdf":
-                            cairosvg.svg2pdf(
-                                url=f"{tri_prefix}_ANNOTATED.svg",
-                                write_to=f"{tri_prefix}_ANNOTATED.pdf",
-                            )
-                            cairosvg.svg2pdf(
-                                url=f"{iniprefix}_ANNOTATION_TRACK.svg",
-                                write_to=f"{iniprefix}_ANNOTATION_TRACK.pdf",
-                            )
-                        elif vector_format == "ps":
-                            cairosvg.svg2ps(
-                                url=f"{tri_prefix}_ANNOTATED.svg",
-                                write_to=f"{tri_prefix}_ANNOTATED.ps",
-                            )
-                            cairosvg.svg2ps(
-                                url=f"{tri_prefix}_ANNOTATION_TRACK.svg",
-                                write_to=f"{tri_prefix}_ANNOTATION_TRACK.ps",
-                            )
-                        if os.path.exists(f"{iniprefix}_ANNOTATION_TRACK.svg"):
-                            os.remove(f"{iniprefix}_ANNOTATION_TRACK.svg")
-                        if os.path.exists(f"{tri_prefix}_ANNOTATED.svg"):
-                            os.remove(f"{tri_prefix}_ANNOTATED.svg")
-                except Exception as e:
-                    print(f"Error converting annotated SVG: {e}")
-            else:
-                print("Annotation file not created, skipping merge step.")
-        # Convert from svg to selected vector format. Ignore error if user has issues with cairosvg.
         try:
-            if vector_format != "svg":
-                if vector_format == "pdf":
-                    cairosvg.svg2pdf(
-                        url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.pdf"
-                    )
-                    if os.path.exists(f"{tri_prefix}.svg"):
-                        os.remove(f"{tri_prefix}.svg")
-                elif vector_format == "ps":
-                    cairosvg.svg2pdf(
-                        url=f"{tri_prefix}.svg", write_to=f"{tri_prefix}.ps"
-                    )
-                    if os.path.exists(f"{tri_prefix}.svg"):
-                        os.remove(f"{tri_prefix}.svg")
-        except:
-            pass
+            save_figure_pair(
+                full_figure,
+                f"{plot_filename}{full_suffix}",
+                vector_format,
+                dpi,
+                bbox_inches=full_figure.bbox_inches,
+            )
+        finally:
+            plt.close(full_figure)
+        created_files.extend(
+            [
+                f"{plot_filename}{full_suffix}.{vector_format}",
+                f"{plot_filename}{full_suffix}.png",
+            ]
+        )
+        tri_prefix = f"{plot_filename}{tri_suffix}"
+        triangle_figure = _build_triangle_figure(
+            sdf=sdf,
+            title=name_x,
+            palette=palette,
+            palette_orientation=palette_orientation,
+            custom_colors=custom_colors,
+            axes_labels=axes_labels,
+            xlim=xlim,
+            deraster=deraster,
+            width=width,
+        )
+        try:
+            save_figure_pair(
+                triangle_figure,
+                tri_prefix,
+                vector_format,
+                dpi,
+                bbox_inches="tight",
+            )
+        finally:
+            plt.close(triangle_figure)
+        created_files.extend([f"{tri_prefix}.{vector_format}", f"{tri_prefix}.png"])
+
+        if annotation_track_created:
+            annotated_figure = _build_triangle_figure(
+                sdf=sdf,
+                title=name_x,
+                palette=palette,
+                palette_orientation=palette_orientation,
+                custom_colors=custom_colors,
+                axes_labels=axes_labels,
+                xlim=xlim,
+                deraster=deraster,
+                width=width,
+                annotation_df=annotation_bed_df,
+                annotation_chrom=annotation_chrom,
+            )
+            try:
+                save_figure_pair(
+                    annotated_figure,
+                    f"{tri_prefix}_ANNOTATED",
+                    vector_format,
+                    dpi,
+                    bbox_inches="tight",
+                )
+            finally:
+                plt.close(annotated_figure)
+            created_files.extend(
+                [
+                    f"{tri_prefix}_ANNOTATED.{vector_format}",
+                    f"{tri_prefix}_ANNOTATED.png",
+                ]
+            )
 
         if no_hist:
             print(
                 f"Triangle plots and full plots for {plot_filename} saved sucessfully. \n"
             )
         else:
-            ggsave(
+            _draw_and_save_plot_pair(
                 histy,
+                f"{plot_filename}{hist_suffix}",
                 width=3,
                 height=3,
                 dpi=dpi,
-                format=vector_format,
-                filename=plot_filename + f"_HIST.{vector_format}",
-                verbose=False,
+                vector_format=vector_format,
             )
-            ggsave(
-                histy,
-                width=3,
-                height=3,
-                dpi=dpi,
-                format="png",
-                filename=plot_filename + "_HIST.png",
-                verbose=False,
+            created_files.extend(
+                [
+                    plot_filename + f"{hist_suffix}.{vector_format}",
+                    plot_filename + f"{hist_suffix}.png",
+                ]
             )
             print(
                 f"Triangle plots, full plots, and histogram for {plot_filename} saved sucessfully. \n"
             )
+    return created_files

@@ -4,24 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ModDotPlot"
-version = "0.9.9"
-requires-python = ">= 3.7"
+version = "1.0.0"
+requires-python = ">=3.10,<3.15"
 dependencies = [
-  "pysam",
   "pandas",
-  "plotly",
-  "dash",
-  "plotnine==0.12.4",
-  "palettable",
-  "mmh3",
-  "setproctitle",
+  "matplotlib>=3.10.9; python_version < '3.11'",
+  "matplotlib>=3.11.2; python_version >= '3.11'",
   "numpy",
-  "pillow",
-  "patchworklib==0.6.3",
-  "cairosvg",
-  "pygenometracks",
-  "svgutils",
-  "cooler",
+  "scipy",
 ]
 authors = [
   {name = "Alex Sweeten", email = "alex.sweeten@nih.gov"},
@@ -34,13 +24,29 @@ maintainers = [
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {file = "LICENSE"}
 keywords = ["dotplot", "sketching", "modimizer", "heatmap"]
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
 
 [project.scripts]
 moddotplot = "moddotplot.__main__:main"
 
 [project.optional-dependencies]
+interactive = [
+    "dash>=2.9",
+    "plotly",
+]
+cooler = [
+    "cooler",
+]
 # development dependency groups
 test = [
     "pytest",
-    "pytest-cov"
+    "pytest-cov",
+    "tomli>=1.1; python_version < '3.11'",
 ]
