@@ -298,7 +298,7 @@ Saved self-identity matrix as a paired-end bed file to Arabidopsis/Chr1:14000001
 
 Triangle plots, full plots, and histogram for Arabidopsis/Chr1:14000001-18000000/Chr1:14000001-18000000 saved successfully.
 ```
-![](images/Chr1:14000001-18000000_FULL.png)
+![](images/Chr1_14000001-18000000_FULL.png)
 
 Using `samtools faidx` will result in a genomic range being added to a FASTA file's header (e.g., in the above sequence, the header is Chr1:14000001-18000000). _ModDotPlot_ will parse this syntax to add the appropriate axis.
 
@@ -310,7 +310,7 @@ If providing a custom BED3-BED9 annotation file using `--bed/-b`, _ModDotPlot_ w
 - The annotation track overlaid with a self-identity dotplot `_ANNOTATED` for each sequence present in the annotation track.
 
 ```
-$ moddotplot static -f sequences/HG002_chr13_MATERNAL_4M_.fa -b config/hg002v1.1.cenSatv2.0.bed
+$ moddotplot static -f sequences/hg002_chr13_MATERNAL_4M.fa -b config/hg002v1.1.cenSatv2.0.bed
   __  __           _   _____        _     _____  _       _   
  |  \/  |         | | |  __ \      | |   |  __ \| |     | |  
  | \  / | ___   __| | | |  | | ___ | |_  | |__) | | ___ | |_ 
@@ -327,7 +327,7 @@ Annotation track saved to chr13_MATERNAL_4M/chr13_MATERNAL_4M_ANNOTATION_TRACK
 Triangle plots, full plots, and histogram for chr13_MATERNAL_4M/chr13_MATERNAL_4M saved successfully.
 
 ```
-![](images/chr13_MATERNAL:1-4000000_TRI_ANNOTATED.png)
+![](images/chr13_MATERNAL_1-4000000_TRI_ANNOTATED.png)
 
 
 #### Comparing two sequences
@@ -360,7 +360,7 @@ input. Indexed comparative mode fetches one record at a time, sketches it
 directly, and releases pair-local data before continuing; it does not retain a
 `uint64` positional hash for every base in the genome.
 
-![](images/chr13_MATERNAL:1-4000000_chr14_MATERNAL:1-4000000_COMPARE.png)
+![](images/chr13_MATERNAL_1-4000000_chr14_MATERNAL_1-4000000_COMPARE.png)
 
 --- 
 
