@@ -310,7 +310,7 @@ If providing a custom BED3-BED9 annotation file using `--bed/-b`, _ModDotPlot_ w
 - The annotation track overlaid with a self-identity dotplot `_ANNOTATED` for each sequence present in the annotation track.
 
 ```
-$ moddotplot static -f sequences/HG002_chr13_MATERNAL:1-4000000.fa -b config/hg002v1.1.cenSatv2.0.bed
+$ moddotplot static -f sequences/HG002_chr13_MATERNAL_4M_.fa -b config/hg002v1.1.cenSatv2.0.bed
   __  __           _   _____        _     _____  _       _   
  |  \/  |         | | |  __ \      | |   |  __ \| |     | |  
  | \  / | ___   __| | | |  | | ___ | |_  | |__) | | ___ | |_ 
@@ -322,9 +322,9 @@ Running ModDotPlot in static mode
 
 ...
 
-Annotation track saved to chr13_MATERNAL:1-4000000/chr13_MATERNAL:1-4000000_ANNOTATION_TRACK
+Annotation track saved to chr13_MATERNAL_4M/chr13_MATERNAL_4M_ANNOTATION_TRACK
 
-Triangle plots, full plots, and histogram for chr13_MATERNAL:1-4000000/chr13_MATERNAL:1-4000000 saved successfully.
+Triangle plots, full plots, and histogram for chr13_MATERNAL_4M/chr13_MATERNAL_4M saved successfully.
 
 ```
 ![](images/chr13_MATERNAL:1-4000000_TRI_ANNOTATED.png)
