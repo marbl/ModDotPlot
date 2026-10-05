@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 try:
@@ -7,6 +8,7 @@ except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib
 
 from moddotplot.const import VERSION
+from moddotplot.moddotplot import get_parser
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -14,6 +16,45 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 def project_metadata():
     with (PROJECT_ROOT / "pyproject.toml").open("rb") as pyproject:
         return tomllib.load(pyproject)["project"]
+
+
+def parser_option_strings(parser):
+    """Return every explicit option from a parser and its subcommands."""
+
+    options = set()
+    for action in parser._actions:
+        options.update(action.option_strings)
+        if isinstance(action, argparse._SubParsersAction):
+            for subparser in action.choices.values():
+                options.update(parser_option_strings(subparser))
+    return options
+
+
+def test_readme_usage_represents_every_cli_argument():
+    readme = (PROJECT_ROOT / "README.md").read_text()
+    usage = readme.split("## Usage", 1)[1].split("## Questions", 1)[0]
+
+    missing = sorted(
+        option for option in parser_option_strings(get_parser()) if option not in usage
+    )
+    assert missing == []
+
+
+def test_readme_usage_toc_has_the_current_command_structure():
+    readme = (PROJECT_ROOT / "README.md").read_text()
+    toc = readme.split("## Cite", 1)[0]
+
+    assert "  - [Command Line Arguments](#command-line-arguments)" in toc
+    assert "    - [General Options](#general-options)" in toc
+    assert "    - [Input Options](#input-options)" in toc
+    assert "    - [Analysis Options](#analysis-options)" in toc
+    assert "    - [Output Options](#output-options)" in toc
+    assert "    - [Plot Formatting Options](#plot-formatting-options)" in toc
+    assert "    - [Plot Customization Options](#plot-customization-options)" in toc
+    assert "  - [Interactive Mode Commands](#interactive-mode-commands)" in toc
+    assert "[| `--plot-direction` |" not in toc
+    assert "[Static Mode](#static-mode)" not in toc
+    assert "[Static Mode Commands](#static-mode-commands)" not in toc
 
 
 def test_runtime_and_distribution_versions_match():

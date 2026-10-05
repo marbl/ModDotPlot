@@ -8,12 +8,13 @@
 - [About](#about)
 - [Installation](#installation)
 - [Usage](#usage)
-  - [Static Mode](#static-mode)
-  - [Interactive Mode](#interactive-mode)
-  - [Standard arguments](#standard-arguments)
-  - [Static Mode Commands](#static-mode-commands)
-    - [Input/Output \& Formatting Commands](#inputoutput--formatting-commands)
-    - [Plot Customization Commands](#plot-customization-commands)
+  - [Command Line Arguments](#command-line-arguments)
+    - [General Options](#general-options)
+    - [Input Options](#input-options)
+    - [Analysis Options](#analysis-options)
+    - [Output Options](#output-options)
+    - [Plot Formatting Options](#plot-formatting-options)
+    - [Plot Customization Options](#plot-customization-options)
   - [Sample run - Static Plots](#sample-run---static-plots)
     - [Using a config file](#using-a-config-file)
     - [Adding custom bed file annotations](#adding-custom-bed-file-annotations)
@@ -45,14 +46,14 @@ If you're interested in learning more about _ModDotPlot_ and how to visualize ta
 
 ## Installation
 
-_ModDotPlot_ can be installed for static plotting by running `pip install moddotplot`. Alternatively, you can download the current release from GitHub by using:
+_ModDotPlot_ can be installed by running `pip install moddotplot`. Alternatively, you can download the current release from GitHub by using:
 
 ```
 git clone https://github.com/marbl/ModDotPlot.git
 cd ModDotPlot
 ```
 
-Although optional, it's recommended to setup a virtual environment before using _ModDotPlot_:
+Although optional, it's recommended to set up a virtual environment before using _ModDotPlot_:
 
 ```
 python -m venv venv
@@ -65,13 +66,15 @@ Once activated, install either the base package for static plotting:
 python -m pip install .
 ```
 
-or include the optional interactive plotting and Cooler dependencies:
+If desired, add the deprecated interactive plotting dependencies, Cooler export support, or both only when needed:
 
 ```
 python -m pip install ".[interactive]"
+python -m pip install ".[cooler]"
+python -m pip install ".[interactive,cooler]"
 ```
 
-Finally, confirm that the installation was installed correctly and that your version is up to date by running `moddotplot -h`:
+Finally, confirm that the installation completed correctly and that your version is up to date by running `moddotplot -h`:
 ```       
   __  __           _   _____        _     _____  _       _   
  |  \/  |         | | |  __ \      | |   |  __ \| |     | |  
@@ -82,7 +85,7 @@ Finally, confirm that the installation was installed correctly and that your ver
 
  v1.0.0
 
-usage: moddotplot [-h] [{static,interactive}] ...
+usage: moddotplot [-h] [--quiet] [{static,interactive}] ...
 
 ModDotPlot: Visualization of Tandem Repeats
 
@@ -93,6 +96,7 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  --quiet               suppress all console output, including warnings and errors
   ```
 
 Note that running `moddotplot -h` might take a while at first! This is because the Python interpreter is compiling source code into the __pycache__ directory. Subsequent runs will use the pre-compiled code and load much faster!
@@ -101,269 +105,114 @@ Note that running `moddotplot -h` might take a while at first! This is because t
 
 ## Usage
 
-_ModDotPlot_ runs in `static` mode by default. The `static` subcommand remains
-available for compatibility and clarity, so these forms are equivalent:
+_ModDotPlot_ runs in static mode by default. The explicit `static` subcommand
+is retained for clarity and compatibility, so these commands are equivalent:
 
-```
+```bash
 moddotplot -f sequence.fa <ARGS>
 moddotplot static -f sequence.fa <ARGS>
 ```
 
-### Static Mode
-
-```
-moddotplot static <ARGS>
-```
-
-Running _ModDotPlot_ quickly create plots under the specified output directory `-o`. By default, running _ModDotPlot_ will produce the following files:
-
-- A paired-end bed file `.bedpe`, containing intervals alongside their corresponding identity estimates.
-- A self-identity dotplot for each sequence, as both an upper triangle matrix `_TRI` and full matrix `_FULL` representation.
-- A histogram of identity values for each sequence.
+A standard run writes a BEDPE identity table, full and triangle dotplots,
+and an identity histogram beneath the selected output directory. Plots and
+histograms are rendered with Matplotlib as both PNG and the selected vector
+format (SVG by default). Every plot directory also receives a
+`plot_summary.txt` reproducibility record containing input paths, plotting
+parameters, and the command used for the run.
 
 ![](images/moddotplot_output.png)
 
-Plots and histograms are rendered with Matplotlib and output as both rasterized
-`.png` images and vector graphics (default: `.svg`). Grid axes state their
-genomic unit (Kbp, Mbp, or Gbp).
-
-Every directory containing generated static plots also receives a `plot_summary.txt` reproducibility record. It lists the creation time, absolute plot and input paths, window size, any selected region or annotation BED file, and the exact command used for the run.
-
-_ModDotPlot_ supports highly customizable plotting features in static mode. See [plot customization](#static-mode-commands) for a complete list of features.
-
-
-### Interactive Mode
-
-**As of ModDotPlot v1.0.0, interactive mode has been deprecated!**
-
-```
-moddotplot interactive <ARGS>
-```
-
-Interactive mode is deprecated and maintenance-only. It remains available, but
-will not receive new features. It runs only when the `interactive` subcommand is
-explicitly provided. Install its optional dependencies with
-`pip install "ModDotPlot[interactive]"`, or `pip install ".[interactive]"` from
-a source checkout.
-
-Running _ModDotPlot_ in interactive mode will launch a [Dash application](https://plotly.com/dash/) on your machine's localhost. Open any web browser and go to `http://127.0.0.1:<PORT_NUMBER>` to view the interactive plot (this should happen automatically, but depending on your environment you might need to copy and paste this URL into your web browser). Running `Ctrl+C` on the command line will exit the Dash application. The default port number used by Dash is `8050`, but this can be customized using the `--port` command (see [interactive mode commands](#interactive-mode-commands) for further info, and [Sample run - Port Forwarding](#sample-run---port-forwarding) for tips on running interactive mode on an HPC environment).
-
---- 
-
-### Standard arguments
-
-The following arguments are the same in both interactive and static mode:
-
-`-f / --fasta <file>`
-
-FASTA files to input. Multi-FASTA files are accepted. By default, every record
-is analyzed; static mode can limit a run to named records with
-`-s/--sequence`. Interactive mode will only support a maximum of two sequences
-at a time.
-
-`-b / --bed <.bed file(s)>`
-
-Input BED3-BED9 annotation file used for dotplot annotation (this is not the paired-end BEDPE file produced by ModDotPlot). The BED chromosome field must match a FASTA header, excluding any trailing `:start-end` region suffix. Static mode accepts one BED file and produces an annotation track plus annotated triangle output. Interactive mode accepts one or more BED files, combines their matching intervals, and displays a collapsed track beneath the x axis. Comparative interactive plots also display a track beside the y axis when that sequence has matching annotations. BED `itemRgb` colors are used when present.
-
-`-k / --kmer <int>`
-
-K-mer size to use. This should be large enough to distinguish unique k-mers with enough specificity, but not too large that sensitivity is removed. Default: 21.
-
-`-o / --output-dir <string>`
-
-Name of output directory for bed file & plots. Default is current working directory.
-
-`--quiet`
-
-Suppress all console output, including warnings and errors. The process exit
-status still indicates whether the run succeeded.
-
-`-id / --identity <int>`
-
-Minimum sequence identity cutoff threshold. Default is 86. While it is possible to go as low as 50% sequence identity, anything below 80% is not recommended. 
-
-`--delta <float>`
-
-Each partition includes a fraction of the adjacent windows' k-mers when estimating identity. This recovers repetitive matches that straddle different window boundaries. The default is 0.5, and the accepted range is between 0 and 1; values greater than 0.5 are not recommended. Set this to 0 only when strictly core-local comparisons are desired.
-
-`-m / --modimizer <int>`
-
-Modimizer sketch size. Must be lower than window size `w`. A lower sketch size means less k-mers to compare (and faster runtime), at the expense of lower accuracy. Recommended to be kept >= 1000.
-
-`--forward <bool>`
-
-Use forward k-mers only, instead of the default of canonical k-mers. Warning: this will give strand specific output.
-
-`-r / --resolution <int>`
-
-Dotplot resolution. This corresponds to the number of windows each input sequence is partitioned into. Default is 1000. Overrides the `--window` parameter.
-
-`--compare <bool>`
-
-If set when 2 or more sequences are input into ModDotPlot, this will show an A vs. B style plot, in addition to a self-identity plot. Note that interactive mode currently only supports a maximum of two sequences. If more than two sequences are input, only the first two will be shown.
-
-`--compare-only <bool>`
-
-If set when 2 or more sequences are input into ModDotPlot, this will show an A vs. B style plot, without showing self-identity plots.
-
-`--ambiguous <bool>`
-
-By default, every k-mer window containing a non-ACGTU character is excluded from identity estimation without changing its genomic position. This produces gaps through regions containing ambiguous IUPAC bases. To include deterministic hashes for those windows, set the `--ambiguous` flag in either interactive or static mode.
-
---- 
-
-### Static Mode Commands
-
-#### Input/Output & Formatting Commands
-
-`-l / --load <.bedpe file>`
-
-Create a plot from a previously computed pairwise bed file. Skips Average Nucleotide Identity computation. Used instead of `-f/--fasta`. Will only accept paired-end bed files produced by ModDotPlot. 
-
-`-c / --config <.json file>`
-
-Run moddotplot static with a config file instead of command line args. Example syntax in `config/config.json`. Recommended when creating a really customized plot. Used instead of -f/--fasta.
-
-`-s / --sequence <FASTA_ID> [<FASTA_ID> ...]`
-
-In static mode, analyze only the requested records from the input FASTA
-file(s). Each ID is matched to the first whitespace-delimited token in a FASTA
-header. Exact matches are preferred, with an unambiguous case-insensitive
-fallback (so `chr1` selects `Chr1`). Unknown, ambiguous, and duplicate requested
-IDs are errors. When using a config file, provide the same list under the
-`sequence` key, for example `"sequence": ["chr1", "chr2"]`.
-
-`--pairs <FILE>`
-
-Limit `--compare` or `--compare-only` to explicitly requested sequence pairs.
-The file contains two whitespace-delimited FASTA identifiers per line, in
-x-axis then y-axis order. Blank lines and lines beginning with `#` are ignored.
-Duplicate, self, unknown, and ambiguous pairs are errors. Indexed FASTA input
-is required so each requested record can be fetched without scanning the full
-genome.
-
-`--cooler <bool>`
-
-If set, will output a matrix as a Cooler file for each input sequence, in addition to a BEDPE file. Install Cooler support with `pip install "ModDotPlot[cooler]"` (or `pip install ".[cooler]"` from a source checkout).
-
-`--no-bedpe <bool>`
-
-Skip output of bed file.
-
-`--no-hist <bool>`
-
-Skip output of histogram legend.
-
-`--no-plot <bool>`
-
-Save .bedpe to file, but skip rendering of plots.
-
-`--processes <1-4>`
-
-Set the number of independent chromosome or comparison-group workers. When
-omitted, ModDotPlot uses two workers while rendering or up to four for a
-`--no-plot` run on multi-record FASTA files that have random-access indexes
-(`.fai`, plus `.gzi` for BGZF). Comparative workers group pairs by their y-axis
-record and reuse that record's exact sketch. This keeps default aggregate
-memory bounded; `--processes 4` opts into maximum throughput. Ordinary gzip and
-unindexed inputs remain single-pass and sequential so they are not scanned once
-per worker. Use `--processes 1` for explicitly serial execution.
-
-`--memory-limit <GiB>`
-
-Set an aggregate memory budget for comparative workers. ModDotPlot estimates
-the largest pair-local sequence, sketch, matrix, and rendering footprint and
-reduces the worker count when necessary. When omitted, available memory is used
-when the operating system exposes it.
-
-`--sketch-cache <DIRECTORY>`
-
-Persist compact, prepared comparison sketches for reuse by later indexed runs.
-Cache entries are keyed by the FASTA path, size, modification time, record and
-region, strand mode, and every sketch parameter. Positional chromosome-wide
-k-mer arrays are never stored in this cache.
-
-`--width <float>`
-
-Adjust the output figure width. For a grid this is the width of the complete grid, not each cell. Default is 9 inches.
-
-`--dpi <int>`
-
-Image resolution in dots per inch (not to be confused with dotplot resolution). Default is `300`.
-
-`--vector <str>` 
-
-Vectorized image format to output to. Must be one of ["svg", "pdf", "ps"]. Default: `svg`
-
-`--deraster <bool>`
-
-By default, vectorized outputs rasterize the actual dotplot (not the axis). This is done to save space, as a high-resolution dotplot can be extremely space inefficient and prevent use of image manipulation software. This plot rasterization can be removed using this flag. 
-
-#### Plot Customization Commands
-
-`-w / --window <int>`
-
-Window size. Unlike interactive mode, only one matrix will be created, so this represents the *only* window size. Default is set to `n/1000` (eg. 3000bp for a 3Mbp sequence). 
-
-`--region <list of strs>`
-
-Plot only the requested 1-based, inclusive range for each named sequence. Syntax is `FASTA_ID:start-end`; the identifier must exactly match the FASTA header's first whitespace-delimited token. Supply one value per sequence when every grid row and column should be cropped, for example `--region sample.hap1:1-4000000 sample.hap2:1-4000000`. Region limits apply to self plots, pairwise plots, BEDPE coordinates, and grid axes.
-
-`--palette <str>`
-
-The accepted palettes use [ColorBrewer](https://colorbrewer2.org/) color
-specifications and are segregated into 3 types: _Diverging_, _Qualitative_,
-and _Sequential_. Syntax is the name of the palette, followed by an underscore
-and the number of colors, for example `OrRd_8`. The default is `Spectral_11`.
-
-`--breakpoints <list of ints>`
-
-Add custom identity threshold breakpoints. Note that the number of breakpoints must be equal to the number of colors + 1, otherwise an error will occur. 
-
-`--palette-orientation <bool>`
-
-Flip sequential order of color palette. Set to `-` by default for divergent palettes. 
-
-`--colors <list of hexcodes>` (legacy alias: `--color`)
-
-List of custom colors in hexcode format can be entered sequentially, mapped from low to high identity. 
-
-`--plot-direction <bool>`
-
-With FASTA input, retain the standard ANI-colored plots and additionally create a `directionality` subfolder. Direction plots use blue for same-orientation matches and pink for reverse-orientation matches, with darker shades representing stronger ANI. Self-comparisons are named `_DIRECTION_FULL`, `_DIRECTION_TRI`, and `_DIRECTION_HIST`; a requested grid is named `_DIRECTION_GRID`. This option reads each input in both canonical and forward-only modes and cannot be reconstructed from a loaded BEDPE file.
-
-`--grid <bool>`
-
-Create a square grid containing every self comparison on the bottom-left-to-top-right diagonal and every pairwise comparison off the diagonal. Self-comparison cells are rendered as full symmetric dotplots. The shared genomic-axis titles appear only around the bottom-left cell without enlarging the output canvas. The grid is rendered as one Matplotlib figure and supports three or more input sequences, although large grids become visually dense.
-
-For example, select only `chr1` and `chr2` from a multi-FASTA input and create
-their grid:
-
-```
-moddotplot -f ../../moddotplot-interactive/Col-CEN_v1.2.fasta -s chr1 chr2 --grid
-```
-
-`--grid-only <bool>`
-
-Create the comparison grid without writing the individual dotplots.
-
-`-t / --axes-ticks <list of ints>`
-
-Custom tickmarks for x and y axis. Values outside of the `--axes-limits` will not be shown. 
-
-`-a / --axes-limits <int>`
-
-Change axis limits for x and y axis. Useful when comparing multiple plots, allowing them to stay in scale. 
-
-`--bin-freq <bool>`
-
-By default, histograms are evenly spaced based on the number of colors and the identity threshold. Select this argument to bin based on the frequency of observed identity values.
+The deprecated interactive application remains available only through the
+explicit `interactive` subcommand. Its commands are documented under
+[Interactive Mode Commands](#interactive-mode-commands).
+
+### Command Line Arguments
+
+The default/static command accepts every option in the following two sections.
+Options marked **shared** are also accepted by the deprecated interactive
+command; interactive-specific behavior is summarized separately below.
+Flags such as `--grid` and `--no-plot` are switches and do not take a
+`true` or `false` value.
+
+#### General Options
+
+| Argument | Description |
+| --- | --- |
+| `-h, --help` | Show help for the root command or selected subcommand and exit. |
+| `--quiet` | Suppress console output, including warnings and errors. The exit status still reports success or failure. May appear before or after the subcommand. |
+
+#### Input Options
+
+| Argument | Description |
+| --- | --- |
+| `-f, --fasta FILE [FILE ...]` | Read one or more FASTA, gzip-compressed FASTA, or BGZF FASTA files. Static mode analyzes every record unless `--sequence` limits the selection. Mutually exclusive with static `--load`. |
+| `-l, --load BEDPE [BEDPE ...]` | Plot one or more ModDotPlot BEDPE files without recomputing identity. Mutually exclusive with `--fasta`, but may be combined with `--config`; explicit input paths override input paths in the config. Interactive `--load` has different behavior described below. |
+| `-c, --config JSON` | Load command settings from a JSON config. Explicit FASTA, BEDPE, config, and output paths are resolved independently; explicit input/output paths take precedence, while config values supply other settings. |
+| `-s, --sequence ID [ID ...]` | Analyze only named records from FASTA input. IDs match the first whitespace-delimited FASTA token, preferring exact matches and then unambiguous case-insensitive matches. |
+| `--region ID:START-END [ID:START-END ...]` | Analyze 1-based inclusive regions. Region limits propagate to identity computation, BEDPE coordinates, plots, and grid axes. |
+| `--pairs FILE` | Restrict `--compare` or `--compare-only` to pairs in a two-column text file. Blank lines and `#` comments are ignored. Requires indexed FASTA input; duplicate, self, unknown, and ambiguous pairs are errors. |
+| `-b, --bed BED` | Add one BED3–BED9 annotation file. BED chromosome names must match FASTA identifiers after any `:start-end` suffix is removed. Valid `itemRgb` values are retained. Interactive mode accepts multiple BED files. |
+
+#### Analysis Options
+
+| Argument | Description |
+| --- | --- |
+| `--compare` | Add pairwise comparisons while retaining self-comparisons. Static mode considers all selected pairs unless `--pairs` restricts them. |
+| `--compare-only` | Produce pairwise comparisons without self-comparisons. Mutually exclusive with `--compare`. |
+| `-k, --kmer INT` | Set k-mer length. Default: `21`. |
+| `-m, --modimizer INT` | Set the modimizer sketch target. Must be smaller than the window length. Smaller values are faster but reduce accuracy. Default: `1000`. |
+| `-r, --resolution INT` | Set the approximate number of sequence windows. Mutually exclusive with `--window` in static mode. Default: `1000`. |
+| `-w, --window INT` | Set window length in base pairs. When omitted, it is inferred from sequence length and resolution. Mutually exclusive with `--resolution` in static mode. |
+| `-id, --identity FLOAT` | Set the minimum estimated identity percentage. Default: `86.0`. Values below 80 are generally not recommended. |
+| `-d, --delta FLOAT` | Include this fraction of each neighboring window when estimating identity. Accepted range: 0–1. Default: `0.5`. |
+| `--forward` | Hash forward k-mers only instead of canonical k-mers, producing strand-specific output. |
+| `--ambiguous` | Include deterministic hashes for windows containing non-ACGTU IUPAC bases instead of masking those windows. |
+| `--processes N` | Use 1–4 independent chromosome or comparison-group workers. When omitted, indexed multi-record input uses a bounded automatic worker count; unindexed and ordinary gzip input remain sequential. |
+| `--memory-limit GIB` | Set an aggregate GiB memory budget for comparison workers. When omitted, available memory is used when the platform exposes it. |
+| `--sketch-cache DIRECTORY` | Persist compact prepared sketches for reuse in later indexed comparative runs. Entries are keyed by input identity, record/region, strand mode, and sketch parameters. |
+
+#### Output Options
+
+| Argument | Description |
+| --- | --- |
+| `-o, --output-dir DIRECTORY` | Set the output directory. Static mode writes BEDPE, plots, and summaries; interactive mode writes saved matrices and coordinate logs. Default: the current directory. |
+| `--cooler` | Write Cooler matrices in addition to BEDPE. Install with `pip install "ModDotPlot[cooler]"` or `pip install ".[cooler]"`. |
+| `--no-bedpe` | Skip BEDPE output. |
+| `--no-plot` | Skip all plot rendering in static mode. In interactive mode, prevent Dash from launching; must be combined with `--save`. |
+| `--no-hist` | Skip identity histograms. |
+
+#### Plot Formatting Options
+
+| Argument | Description |
+| --- | --- |
+| `--grid` | Render selected self- and pairwise comparisons in a single square grid, in addition to individual plots. |
+| `--grid-only` | Render only the comparison grid and skip individual plots. |
+| `--compare-order {sequential,size}` | Choose comparative axis order. `sequential` preserves input order; `size` places the larger sequence on the x-axis. Default: `sequential`. |
+| `-a, --axes-limits FLOAT` | Set common x/y axis limits for self-identity plots. The value cannot be shorter than the sequence. |
+| `-t, --axes-ticks INT [INT ...]` | Set explicit x/y tick positions. Ticks outside the visible limits are omitted. |
+| `--axes-number VALUE` | Retained for configuration compatibility as the requested number of axis ticks; currently unused by the Matplotlib renderer. Default: `7`. |
+| `--width FLOAT` | Set plot width in inches. For grids, this is the total grid width, not the width of each cell. Default: `9`. |
+| `--dpi INT` | Set raster resolution in dots per inch. Default: `300`. |
+| `--vector {svg,pdf,ps}` | Select the vector output format. Default: `svg`. |
+| `--deraster` | Keep dotplot tiles as vector geometry instead of rasterizing them inside vector output. This can produce very large files. |
+
+#### Plot Customization Options
+
+| Argument | Description |
+| --- | --- |
+| `--palette NAME_COUNT` | Select an exact discrete [ColorBrewer](https://colorbrewer2.org/) palette, such as `OrRd_8`. Default: `Spectral_11`. |
+| `--palette-orientation {+,-}` | Select forward or reversed palette order. Diverging palettes retain ModDotPlot's historical orientation convention. Default: `+`. |
+| `--colors COLOR [COLOR ...]`, `--color ...` | Supply a custom low-to-high color sequence in hexadecimal or RGB form. `--color` is a legacy alias. |
+| `--breakpoints VALUE [VALUE ...]` | Supply custom identity thresholds between the identity cutoff and 100. The number of breakpoints must equal the number of colors plus one. |
+| `--bin-freq` | Derive identity color bins from the observed value distribution instead of evenly spacing them between the identity cutoff and 100. |
+| `--plot-direction` | Compute strand direction and color matches blue for the same orientation and pink for reverse orientation, with ANI represented by shade intensity. Available only with FASTA input. |
+---
 
 ### Sample run - Static Plots
 
 #### Using a config file
 
-When running _ModDotPlot_ to produce static plots, it is recommended to use a config file. The config file is provided in JSON, and accepts the same syntax as the command line arguments shown above. Here is an sample run using a centromeric sequence of _Arabadopsis thaliana_:
+When running _ModDotPlot_ to produce static plots, it is recommended to use a config file. The config file is provided in JSON, and accepts the same syntax as the command line arguments shown above. Here is a sample run using a centromeric sequence of _Arabidopsis thaliana_:
 
 ```
 $ cat config/config.json
@@ -381,9 +230,9 @@ $ cat config/config.json
         99,
         100
     ],
-    "output_dir": "Arabadopsis",
+    "output_dir": "Arabidopsis",
     "fasta": [
-        "sequences/Arabadopsis_chr1_centromere.fa"
+        "sequences/Arabidopsis_chr1_centromere.fa"
     ]
 }
 ```
@@ -413,20 +262,20 @@ Computing self identity matrix for Chr1:14000001-18000000...
 
         Plot Resolution r: 1000
 
-Saved self-identity matrix as a paired-end bed file to Arabadopsis/Chr1:14000001-18000000/Chr1:14000001-18000000.bedpe
+Saved self-identity matrix as a paired-end bed file to Arabidopsis/Chr1:14000001-18000000/Chr1:14000001-18000000.bedpe
 
-Triangle plots, full plots, and histogram for Arabadopsis/Chr1:14000001-18000000/Chr1:14000001-18000000 saved sucessfully.
+Triangle plots, full plots, and histogram for Arabidopsis/Chr1:14000001-18000000/Chr1:14000001-18000000 saved successfully.
 ```
 ![](images/Chr1:14000001-18000000_FULL.png)
 
-Using `samtools faidx` will result in a genomic range being added to a fasta file's header (eg. in the above sequence, the header is Chr1:14000001-18000000). _ModDotPlot_ will parse this syntax to add the appropriate axis.
+Using `samtools faidx` will result in a genomic range being added to a FASTA file's header (e.g., in the above sequence, the header is Chr1:14000001-18000000). _ModDotPlot_ will parse this syntax to add the appropriate axis.
 
 #### Adding custom bed file annotations
 
 If providing a custom BED3-BED9 annotation file using `--bed/-b`, _ModDotPlot_ will output additional files:
 
 - A collapsed annotation track `_ANNOTATION_TRACK` in PNG and the selected SVG, PDF, or PostScript vector format. Interval colors use the BED `itemRgb` value in column 9 when present, with a default color for BED3-BED8 records or invalid RGB values.
-- The annotation track overlayed with a self-identity dotplot `_ANNOTATED` for each sequence present in the annotation track.
+- The annotation track overlaid with a self-identity dotplot `_ANNOTATED` for each sequence present in the annotation track.
 
 ```
 $ moddotplot static -f sequences/HG002_chr13_MATERNAL:1-4000000.fa -b config/hg002v1.1.cenSatv2.0.bed
@@ -443,7 +292,7 @@ Running ModDotPlot in static mode
 
 Annotation track saved to chr13_MATERNAL:1-4000000/chr13_MATERNAL:1-4000000_ANNOTATION_TRACK
 
-Triangle plots, full plots, and histogram for chr13_MATERNAL:1-4000000/chr13_MATERNAL:1-4000000 saved sucessfully. 
+Triangle plots, full plots, and histogram for chr13_MATERNAL:1-4000000/chr13_MATERNAL:1-4000000 saved successfully.
 
 ```
 ![](images/chr13_MATERNAL:1-4000000_TRI_ANNOTATED.png)
@@ -485,46 +334,47 @@ directly, and releases pair-local data before continuing; it does not retain a
 
 ### Interactive Mode Commands
 
-`-b / --bed <.bed file> [<.bed file> ...]`
+**Deprecated:** interactive mode is maintenance-only and will not receive new
+features. New browser-based work should use
+[ModDotPlot Browser](https://marbl.github.io/ModDotPlot-Browser/). The legacy
+Dash application remains available through the explicit subcommand:
 
-Add one or more BED3-BED9 annotation files. A self-identity plot shows the
-matching track beneath its x axis. A comparative plot shows independent x- and
-y-axis tracks when BED chromosome names match both FASTA headers. A FASTA
-header such as `chr14_MATERNAL:1-4000000` matches BED chromosome
-`chr14_MATERNAL`, and the interactive axes retain those genomic coordinates.
-For example:
-
-```
-moddotplot interactive -f sample1.fa sample2.fa --compare \
-    --bed sample1.bed sample2.bed
+```bash
+moddotplot interactive <ARGS>
 ```
 
-`--port <int>`
+Install its optional dependencies with
+`pip install "ModDotPlot[interactive]"`, or
+`pip install ".[interactive]"` from a source checkout. The application
+listens on `http://127.0.0.1:8050` by default and exits when the process is
+stopped with `Ctrl+C`.
 
-Port to display ModDotPlot on. Default is 8050, this can be changed to any accepted port. 
+Interactive mode accepts the following arguments. Some share names with the
+default/static command but have interactive-specific behavior.
 
-`-w / --window <int>`
+| Argument | Description |
+| --- | --- |
+| `--quiet` | Suppress all console output, including warnings and errors. It may appear before or after `interactive`. |
+| `-f, --fasta FILE [FILE ...]` | Read FASTA input and compute an interactive matrix hierarchy. Mutually exclusive with `--load`; interactive displays support at most two sequences. |
+| `-l, --load DIRECTORY` | Load a previously saved `interactive_matrices` directory containing compressed matrices and `metadata.pkl`. Mutually exclusive with `--fasta`. This is not the static BEDPE loader. |
+| `-b, --bed BED [BED ...]` | Add one or more BED3-BED9 annotation files. Tracks are aligned to matching FASTA identifiers on each matrix axis. |
+| `-o, --output-dir DIRECTORY` | Set the directory used for saved matrices and coordinate logs. Default: current directory. |
+| `-k, --kmer INT` | Set k-mer length. Default: `21`. |
+| `-m, --modimizer INT` | Set the modimizer sketch target. Default: `1000`. |
+| `-r, --resolution INT` | Set interactive dotplot resolution. Default: `1000`. |
+| `-w, --window INT` | Set the minimum interactive window length. When omitted it is inferred from sequence length and resolution. |
+| `-id, --identity FLOAT` | Set the minimum estimated identity percentage. Default: `86.0`. |
+| `-d, --delta FLOAT` | Include this fraction of neighboring windows during identity estimation. Default: `0.5`. |
+| `--compare` | Add a pairwise comparison while retaining self-comparisons. |
+| `--compare-only` | Produce the pairwise comparison without self-comparisons. Mutually exclusive with `--compare`. |
+| `--ambiguous` | Include deterministic hashes for windows containing non-ACGTU IUPAC bases. |
+| `--forward` | Hash forward k-mers only instead of canonical k-mers. |
+| `-s, --save` | Save the matrix hierarchy under `OUTPUT_DIR/interactive_matrices` as compressed NumPy arrays plus `metadata.pkl`. |
+| `--port INT` | Set the localhost port used by Dash. Default: `8050`. |
+| `-q, --quick` | Build a single matrix layer instead of the normal hierarchy for a faster launch without progressively finer zoom resolution. |
+| `--no-plot` | Save matrices without launching Dash. Must be combined with `--save`. |
 
-Minimum window size. By default, interactive mode sets a minimum window size based on the sequence length `n/2000` (eg. a 3Mbp sequence will have a 1500bp window). The maximum window size will always be set to `n/1000` (3000bp under the same example). This means that 2 matrices will be created.
-
-`-q / --quick <bool>`
-
-This will automatically run interactive mode with a minimum window size equal to the maximum window size (`n/1000`). This will result in a quick launch, however the resolution of the plot will not improve upon zooming in.
-
-`-s / --save <bool>`
-
-Save the matrices produced in interactive mode. By default, a folder called `interactive_matrices` will be saved in `--output_dir`, containing each matrix in compressed NumPy format, as well as metadata for each matrix in a pickle. Modifying the files in `interactive_matrices` will cause errors when attempting to load them in the future.
-
-`--no-plot <bool>`
-
-Save .bedpe to file, but skip rendering of plots. Must be used with `--save`.
-
-`-l / --load <directory>`
-
-Load previously saved matrices. Used instead of `-f/--fasta`.
-
-
---- 
+---
 
 ### Sample run - Interactive Mode
 
@@ -557,7 +407,7 @@ Dash is running on http://127.0.0.1:8050/
 
 ![](images/chr1_screenshot.png)
 
-The plotly plot can be navigated using the zoom (magnifying glass) and pan (hand) icons. The plot can be reset by double-clicking or selecting the home button. The identity threshold can be modified by seelcting the slider. Colors can be readjusted according to the same gradient based on the new identity levels. 
+The Plotly plot can be navigated using the zoom (magnifying glass) and pan (hand) icons. The plot can be reset by double-clicking or selecting the home button. The identity threshold can be modified by selecting the slider. Colors can be readjusted according to the same gradient based on the new identity levels.
 
 ### Sample run - Port Forwarding
 
@@ -575,7 +425,7 @@ ssh -N -f -L <LOCAL_PORT_NUMBER>:127.0.0.1:<HPC_PORT_NUMBER> HPC@LOGIN.CREDENTIA
 
 You should now be able to view interactive mode using `http://127.0.0.1:<LOCAL_PORT_NUMBER>`. Note that your own HPC environment may have specific instructions and/or restrictions for setting up port forwarding.
 
-VSCode now has automatic port forwarding built into the terminal menu. See [VSCode documentation](https://code.visualstudio.com/docs/editor/port-forwarding) for further details 
+VS Code now has automatic port forwarding built into the terminal menu. See [VS Code documentation](https://code.visualstudio.com/docs/editor/port-forwarding) for further details.
 
 ![](images/portforwarding.png)
 
