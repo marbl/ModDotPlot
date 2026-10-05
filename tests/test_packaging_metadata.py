@@ -210,6 +210,12 @@ def test_release_workflow_is_tag_gated_and_uses_trusted_publishing():
     assert "pypa/gh-action-pypi-publish@release/v1" in workflow
     assert "pypa/cibuildwheel@v4.2.0" in workflow
     assert 'CIBW_BUILD: "cp310-*"' in workflow
+    assert "CIBW_ARCHS_WINDOWS: AMD64" in workflow
+    assert (
+        "CIBW_BEFORE_TEST: python -m pip install --upgrade pip setuptools wheel"
+        in workflow
+    )
+    assert 'CIBW_ENVIRONMENT: "PIP_ONLY_BINARY=:all:"' in workflow
     assert "py_limited_api = cp38" in setup_config
     for runner in ("ubuntu-latest", "macos-15-intel", "windows-latest"):
         assert f"          - {runner}" in workflow
