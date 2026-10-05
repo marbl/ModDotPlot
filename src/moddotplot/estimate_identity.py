@@ -13,6 +13,7 @@ import pandas as pd
 from scipy.sparse import csr_matrix
 
 from moddotplot import _nthash
+from moddotplot.color_palettes import palette_colors
 from moddotplot.optional_dependencies import OptionalDependencyError
 
 
@@ -1143,32 +1144,26 @@ def findElementsWithPrefix(lst, prefix):
 
 
 def getInteractiveColor(palette_name, palette_orientation):
-    from palettable import colorbrewer
-
-    palettes = colorbrewer.COLOR_MAPS
-    tmp_color = []
-    new_palette = palette_name.split("_")
+    colors = palette_colors(palette_name)
     if palette_name in DIVERGING_PALETTES:
-        tmp_color = palettes["Diverging"][new_palette[0]][new_palette[1]]["Colors"]
         if palette_orientation == "+":
             palette_orientation = "-"
         else:
             palette_orientation = "+"
-    elif palette_name in SEQUENTIAL_PALETTES:
-        tmp_color = palettes["Sequential"][new_palette[0]][new_palette[1]]["Colors"]
-    elif palette_name in QUALITATIVE_PALETTES:
-        tmp_color = palettes["Qualitative"][new_palette[0]][new_palette[1]]["Colors"]
-    else:
+    elif palette_name not in SEQUENTIAL_PALETTES + QUALITATIVE_PALETTES:
         print("Unable to determine color palette. Selecting default \n")
-        tmp_color = palettes["Diverging"]["Spectral"]["11"]["Colors"]
         palette_orientation = "-"
     if palette_orientation == "-":
-        tmp_color = tmp_color[::-1]
-    tmp_color = [[255, 255, 255]] + tmp_color
-    total_values = len(tmp_color)
+        colors = colors[::-1]
+    colors = ["#FFFFFF", *colors]
+    total_values = len(colors)
     formatted_values = [
-        [i / (total_values - 1), f"rgb({r}, {g}, {b})"]
-        for i, (r, g, b) in enumerate(tmp_color)
+        [
+            i / (total_values - 1),
+            f"rgb({int(color[1:3], 16)}, {int(color[3:5], 16)}, "
+            f"{int(color[5:7], 16)})",
+        ]
+        for i, color in enumerate(colors)
     ]
     return formatted_values
 

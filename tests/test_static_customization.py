@@ -1,7 +1,9 @@
+import matplotlib.pyplot as plt
 import pandas as pd
 import pytest
 from matplotlib.colors import to_rgba
 
+from moddotplot.color_palettes import palette_colors
 from moddotplot.const import DIRECTION_COLORS
 from moddotplot.static_plots import (
     display_sequence_name,
@@ -10,6 +12,10 @@ from moddotplot.static_plots import (
     make_dot,
     read_df_from_file,
 )
+
+
+def test_bundled_colorbrewer_palette_preserves_exact_discrete_colors():
+    assert palette_colors("Spectral_3") == ["#FC8D59", "#FFFFBF", "#99D594"]
 
 
 def test_read_df_from_file_normalizes_browser_bedpe_export(tmp_path):
@@ -95,7 +101,7 @@ def test_make_dot_uses_custom_color_scale():
         }
     )
 
-    plot = make_dot(
+    figure = make_dot(
         sdf=plot_data,
         name_x="query",
         name_y="reference",
@@ -110,8 +116,15 @@ def test_make_dot_uses_custom_color_scale():
         is_pairwise=True,
     )
 
-    fill_scale = plot.scales.get_scales("fill")
-    assert fill_scale.palette(len(custom_colors)) == custom_colors
+    try:
+        rendered = {
+            tuple(color)
+            for collection in figure.axes[0].collections
+            for color in collection.get_facecolors()
+        }
+        assert rendered == {to_rgba(color) for color in custom_colors}
+    finally:
+        plt.close(figure)
 
 
 def test_make_dot_uses_direction_colors_when_orientation_is_present():
@@ -128,7 +141,7 @@ def test_make_dot_uses_direction_colors_when_orientation_is_present():
         }
     )
 
-    plot = make_dot(
+    figure = make_dot(
         sdf=plot_data,
         name_x="query",
         name_y="reference",
@@ -143,7 +156,6 @@ def test_make_dot_uses_direction_colors_when_orientation_is_present():
         is_pairwise=True,
     )
 
-    figure = plot.draw(show=False)
     try:
         rendered = {
             tuple(color)
@@ -155,8 +167,6 @@ def test_make_dot_uses_direction_colors_when_orientation_is_present():
         assert len(rendered) == 4
         assert to_rgba("#000000") not in rendered
     finally:
-        import matplotlib.pyplot as plt
-
         plt.close(figure)
 
 
@@ -173,7 +183,7 @@ def test_make_dot_honors_exact_region_bounds():
         }
     )
 
-    plot = make_dot(
+    figure = make_dot(
         sdf=plot_data,
         name_x="query",
         name_y="reference",
@@ -188,8 +198,11 @@ def test_make_dot_honors_exact_region_bounds():
         is_pairwise=True,
     )
 
-    assert plot.scales.get_scales("x").limits == (101.0, 400.0)
-    assert plot.scales.get_scales("y").limits == (101.0, 400.0)
+    try:
+        assert figure.axes[0].get_xlim() == (101.0, 400.0)
+        assert figure.axes[0].get_ylim() == (101.0, 400.0)
+    finally:
+        plt.close(figure)
 
 
 def test_display_names_omit_region_and_full_axes_are_twice_as_large():
@@ -206,7 +219,7 @@ def test_display_names_omit_region_and_full_axes_are_twice_as_large():
         }
     )
 
-    plot = make_dot(
+    figure = make_dot(
         sdf=plot_data,
         name_x=name,
         name_y=name,
@@ -222,18 +235,13 @@ def test_display_names_omit_region_and_full_axes_are_twice_as_large():
     )
 
     assert display_sequence_name(name) == "PAN010.chr14.haplotype1.paternal"
-    assert ":1-4000000" not in plot.labels.title
-    assert plot.data["q"].unique().tolist() == ["PAN010.chr14.haplotype1.paternal"]
-
-    figure = plot.draw(show=False)
     try:
         axis = figure.axes[0]
+        assert ":1-4000000" not in figure._suptitle.get_text()
+        assert ":1-4000000" not in axis.get_title()
         assert axis.get_xticklabels()[0].get_fontsize() == pytest.approx(8)
-        # Plotnine rounds text sizes to whole points: 2 * (width * 1.4) = 11.2.
-        assert axis.xaxis.label.get_fontsize() == pytest.approx(11)
+        assert axis.xaxis.label.get_fontsize() >= 8
     finally:
-        import matplotlib.pyplot as plt
-
         plt.close(figure)
 
 

@@ -434,7 +434,7 @@ def get_parser():
         action="store_true",
         help=(
             "Output matrix to a Cooler file. Requires the optional "
-            "ModDotPlot[interactive] dependencies."
+            "ModDotPlot[cooler] dependencies."
         ),
     )
 

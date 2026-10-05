@@ -1,28 +1,3 @@
-from plotnine import (
-    ggsave,
-    ggplot,
-    aes,
-    geom_histogram,
-    scale_color_discrete,
-    element_blank,
-    theme,
-    xlab,
-    scale_fill_manual,
-    scale_color_cmap,
-    coord_cartesian,
-    ylab,
-    scale_x_continuous,
-    scale_y_continuous,
-    geom_tile,
-    coord_fixed,
-    facet_grid,
-    labs,
-    element_line,
-    element_text,
-    theme_light,
-    geom_blank,
-    theme_minimal,
-)
 import pandas as pd
 import numpy as np
 import math
@@ -30,11 +5,12 @@ import os
 import re
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_hex, to_rgb
+from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from matplotlib.ticker import ScalarFormatter
+from moddotplot.color_palettes import palette_category, palette_colors
 from moddotplot.native_render import (
     DEFAULT_FONT_FAMILY,
-    FALLBACK_FONT_FAMILY,
     MIN_TEXT_SIZE,
     MIN_TITLE_SIZE,
     clamped_font_size,
@@ -45,7 +21,6 @@ from moddotplot.native_render import (
     draw_triangle_tiles,
     genomic_scale,
     genomic_tick_formatter,
-    is_glyph_loading_error,
     save_figure_pair,
     save_with_font_fallback,
     set_figure_font_family,
@@ -56,7 +31,6 @@ from moddotplot.const import (
     QUALITATIVE_PALETTES,
     SEQUENTIAL_PALETTES,
 )
-from palettable.colorbrewer import qualitative, sequential, diverging
 from moddotplot.annotations import (
     DEFAULT_ANNOTATION_COLOR,
     annotation_color as _annotation_color,
@@ -65,30 +39,6 @@ from moddotplot.annotations import (
 )
 
 REGION_SUFFIX_PATTERN = re.compile(r"(?::\d+-\d+)+$")
-
-
-def _plot_font_theme(family=DEFAULT_FONT_FAMILY):
-    """Apply one family to every Plotnine text themeable."""
-
-    font = element_text(family=[family])
-    return theme(
-        text=font,
-        title=element_text(family=[family]),
-        axis_text=element_text(family=[family]),
-        strip_text=element_text(family=[family]),
-        legend_text=element_text(family=[family]),
-    )
-
-
-def _save_plot(plot, **kwargs):
-    """Save a Plotnine plot in Helvetica, retrying on glyph-load failure."""
-
-    try:
-        ggsave(plot + _plot_font_theme(), **kwargs)
-    except RuntimeError as error:
-        if not is_glyph_loading_error(error):
-            raise
-        ggsave(plot + _plot_font_theme(FALLBACK_FONT_FAMILY), **kwargs)
 
 
 def _draw_and_save_plot_pair(
@@ -100,37 +50,17 @@ def _draw_and_save_plot_pair(
     dpi,
     vector_format,
 ):
-    """Build one Plotnine figure and save both raster and vector outputs.
+    """Save one Matplotlib figure to raster and vector outputs."""
 
-    ``ggsave`` redraws a plot for every requested format. Large tile plots and
-    histograms therefore paid their complete scale/layout/rasterization cost
-    twice. Drawing once also guarantees that both files contain the same axes,
-    labels, and tile realization.
-    """
-
-    def draw(family):
-        styled = (
-            plot
-            + _plot_font_theme(family)
-            + theme(figure_size=(float(width), float(height)), dpi=int(dpi))
-        )
-        return styled.draw(show=False)
-
-    try:
-        figure = draw(DEFAULT_FONT_FAMILY)
-    except RuntimeError as error:
-        if not is_glyph_loading_error(error):
-            raise
-        figure = draw(FALLBACK_FONT_FAMILY)
+    figure = plot if isinstance(plot, Figure) else plot.draw(show=False)
+    figure.set_size_inches(float(width), float(height), forward=True)
+    figure.set_dpi(int(dpi))
     try:
         return save_figure_pair(
             figure,
             output_prefix,
             vector_format,
             dpi,
-            # Match plotnine/ggsave's requested physical canvas exactly.  A
-            # tight bounding box changes both the raster dimensions and plot
-            # framing (for example, 3 in at 96 dpi no longer yields 288 px).
             bbox_inches=figure.bbox_inches,
         )
     finally:
@@ -185,20 +115,21 @@ def _fit_grid_sequence_labels(figure, axes):
 
 
 def _resolve_native_colors(palette, palette_orientation, custom_colors=None):
-    """Resolve plot colors with the same orientation rules as plotnine paths."""
-    if palette in DIVERGING_PALETTES:
-        palette_colors = getattr(diverging, palette).hex_colors
+    """Resolve plot colors while preserving historical orientation rules."""
+
+    colors = palette_colors(palette)
+    supported = (
+        palette in DIVERGING_PALETTES
+        or palette in QUALITATIVE_PALETTES
+        or palette in SEQUENTIAL_PALETTES
+    )
+    if palette_category(palette) == "diverging":
         palette_orientation = "-" if palette_orientation == "+" else "+"
-    elif palette in QUALITATIVE_PALETTES:
-        palette_colors = getattr(qualitative, palette).hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        palette_colors = getattr(sequential, palette).hex_colors
-    else:
-        palette_colors = diverging.Spectral_11.hex_colors
+    if not supported:
         palette_orientation = "-"
 
-    colors = palette_colors[::-1] if palette_orientation == "-" else palette_colors
-    return list(custom_colors) if custom_colors else list(colors)
+    oriented = colors[::-1] if palette_orientation == "-" else colors
+    return list(custom_colors) if custom_colors else oriented
 
 
 DIRECTION_ANI_COLUMN = "direction_ani"
@@ -242,11 +173,6 @@ def _direction_ani_style(dataframe):
         for direction, category in zip(styled["direction"], styled["discrete"])
     ]
     return styled, colors, DIRECTION_ANI_COLUMN
-
-
-def is_plot_empty(p):
-    # Check if the plot has data or any layers
-    return len(p.layers) == 0 and p.data.empty
 
 
 def draw_annotation_track(
@@ -373,21 +299,6 @@ def make_scale(vals: list) -> list:
         return make_m(scaled)
 
 
-def _dotplot_tiles(mapping, deraster=False, **kwargs):
-    """Create tiles without materializing a genomic-coordinate-sized image.
-
-    ``plotnine.geom_raster`` expands sparse coordinates into an RGBA array whose
-    dimensions are derived from the smallest coordinate spacing.  A 496 Mb
-    sequence plotted in 2 kb windows can therefore request roughly
-    248,000-by-248,000 pixels even when only a small fraction of those cells
-    contain matches.  ``geom_tile`` draws only the cells present in the input
-    dataframe.  Setting ``raster=True`` keeps the default compact, rasterized
-    appearance in vector output, while ``--deraster`` leaves the tiles as
-    vectors.
-    """
-    return geom_tile(mapping, raster=not deraster, **kwargs)
-
-
 def get_colors(sdf, ncolors, is_freq, custom_breakpoints):
     if ncolors < 1:
         raise ValueError("At least one color is required")
@@ -500,36 +411,15 @@ def read_df(
     else:
         data = pj[0]
         df = pd.DataFrame(data[1:], columns=data[0])
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
+    supported = (
+        palette in DIVERGING_PALETTES
+        or palette in QUALITATIVE_PALETTES
+        or palette in SEQUENTIAL_PALETTES
+    )
+    if not supported:
         print(f"Palette {palette} not found. Defaulting to Spectral_11.\n")
-        function_name = getattr(diverging, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
-
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
-    else:
-        new_hexcodes = hexcodes
-
-    if custom_colors:
-        new_hexcodes = custom_colors
-
-    ncolors = len(new_hexcodes)
+    colors = _resolve_native_colors(palette, palette_orientation, custom_colors)
+    ncolors = len(colors)
     # Get colors for each row based on the values in the dataframe
     df["discrete"] = get_colors(df, ncolors, is_freq, custom_breakpoints)
     # Rename columns if they have different names in the dataframe
@@ -631,123 +521,22 @@ def make_dot(
     width,
     is_pairwise,
 ):
-    display_x = display_sequence_name(name_x)
-    display_y = display_sequence_name(name_y)
-    if is_pairwise:
-        title_name = f"Comparative Plot: {display_x} vs {display_y}"
-    else:
-        title_name = f"Self-Identity Plot: {display_x}"
-    title_length = 2 * width
-    if len(title_name) > 50:
-        title_length = 1.5 * width
-    elif len(title_name) > 80:
-        title_length = width
-    sdf, direction_colors, direction_column = _direction_ani_style(sdf)
-    direction_coloring = direction_colors is not None
-    # Select the color palette
-    if hasattr(diverging, palette):
-        function_name = getattr(diverging, palette)
-    elif hasattr(qualitative, palette):
-        function_name = getattr(qualitative, palette)
-    elif hasattr(sequential, palette):
-        function_name = getattr(sequential, palette)
-    else:
-        function_name = diverging.Spectral_11  # Default palette
-        palette_orientation = "-"
+    """Build a full dotplot with the native Matplotlib renderer."""
 
-    hexcodes = function_name.hex_colors
-
-    # Adjust palette orientation
-    if palette in diverging.__dict__:
-        palette_orientation = "-" if palette_orientation == "+" else "+"
-
-    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
-    if colors:
-        new_hexcodes = colors  # Override colors if provided
-    fill_column = direction_column if direction_coloring else "discrete"
-    fill_colors = direction_colors if direction_coloring else new_hexcodes
-    # Determine the exact genomic interval. A two-value limit is supplied by
-    # FASTA mode so blank edge windows do not shrink or extend the plot.
-    min_val, max_val = _data_axis_limits(sdf, xlim)
-
-    # If user provides breaks, convert to ints
-    if not breaks:
-        breaks = generate_breaks(int(min_val), int(max_val))
-    else:
-        breaks = [int(x) for x in breaks]
-    # Compute window size (handling exceptions)
-    try:
-        window = max(sdf["q_en"] - sdf["q_st"])
-    except ValueError:  # Empty dataframe case
-        return ggplot(aes(x=[], y=[])) + theme_minimal()
-
-    # Region-qualified names remain in BEDPE data and filenames, but plot
-    # headings should show only the underlying FASTA identifier.
-    sdf = sdf.copy()
-    sdf["q"] = sdf["q"].map(display_sequence_name)
-    sdf["r"] = sdf["r"].map(display_sequence_name)
-
-    # Determine axis label scale based on genomic position size
-    if max_val < 200_000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 200_000_000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-
-    # Create the plot
-    common_theme = theme(
-        legend_position="none",
-        panel_grid_major=element_blank(),
-        panel_grid_minor=element_blank(),
-        plot_background=element_blank(),
-        panel_background=element_blank(),
-        axis_line=element_line(color="black"),
-        axis_text=element_text(
-            family=[DEFAULT_FONT_FAMILY],
-            size=clamped_font_size(width, 2.0),
-        ),
-        axis_ticks_major=element_line(
-            size=(width), color="black"
-        ),  # Increased tick length
-        title=element_text(
-            family=[DEFAULT_FONT_FAMILY],
-            size=max(MIN_TITLE_SIZE, title_length),
-            hjust=0.5,
-        ),  # Center title
-        axis_title_x=element_text(
-            size=clamped_font_size(width, 2.8),
-            family=[DEFAULT_FONT_FAMILY],
-        ),
-        strip_background=element_blank(),  # Remove facet strip background
-        strip_text=element_text(
-            size=clamped_font_size(width, 1.2), family=[DEFAULT_FONT_FAMILY]
-        ),  # Customize facet label text size (optional)
+    del num_ticks
+    return _build_full_figure(
+        sdf=sdf,
+        name_x=name_x,
+        name_y=name_y,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        custom_colors=colors,
+        axes_labels=breaks,
+        xlim=xlim,
+        deraster=deraster,
+        width=width,
+        is_pairwise=is_pairwise,
     )
-
-    # Construct the plot arguments
-    ggplot_args = (
-        ggplot(sdf)
-        + scale_color_discrete(guide=None)
-        + scale_fill_manual(values=fill_colors, guide=None)
-        + common_theme
-        + scale_x_continuous(
-            labels=make_scale, limits=[min_val, max_val], breaks=breaks
-        )
-        + scale_y_continuous(
-            labels=make_scale, limits=[min_val, max_val], breaks=breaks
-        )
-        + coord_fixed(ratio=1)
-        + facet_grid("r ~ q")
-        + labs(x=x_label, y="", title=title_name)
-    )
-
-    p = ggplot_args + _dotplot_tiles(
-        aes(x="q_st", y="r_st", fill=fill_column, height=window, width=window),
-        deraster,
-    )
-
-    return p
 
 
 def make_dot_grid(
@@ -762,100 +551,21 @@ def make_dot_grid(
     deraster,
     width,
 ):
-    title_name = display_sequence_name(title_name)
-    # Select the color palette
-    if hasattr(diverging, palette):
-        function_name = getattr(diverging, palette)
-    elif hasattr(qualitative, palette):
-        function_name = getattr(qualitative, palette)
-    elif hasattr(sequential, palette):
-        function_name = getattr(sequential, palette)
-    else:
-        function_name = diverging.Spectral_11  # Default palette
-        palette_orientation = "-"
+    """Build a standalone grid cell with the native Matplotlib renderer."""
 
-    hexcodes = function_name.hex_colors
-
-    # Adjust palette orientation
-    if palette in diverging.__dict__:
-        palette_orientation = "-" if palette_orientation == "+" else "+"
-
-    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
-    if colors:
-        new_hexcodes = colors  # Override colors if provided
-    if not xlim:
-        xlim = 0
-    # Determine maximum genomic position for scaling
-    min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-
-    # If user provides breaks, convert to ints
-    if not breaks:
-        breaks = generate_breaks(int(min_val), int(max_val))
-    else:
-        breaks = [int(x) for x in breaks]
-    xlim = xlim or 0
-    # Compute window size (handling exceptions)
-    try:
-        window = max(sdf["q_en"] - sdf["q_st"])
-    except ValueError:  # Empty dataframe case
-        return ggplot(aes(x=[], y=[])) + theme_minimal()
-
-    # Determine axis label scale based on genomic position size
-    if max_val < 200_000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 200_000_000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-
-    # Create the plot
-    common_theme = theme(
-        legend_position="none",
-        panel_grid_major=element_blank(),
-        panel_grid_minor=element_blank(),
-        plot_background=element_blank(),
-        panel_background=element_blank(),
-        axis_line=element_line(color="black"),
-        axis_text=element_text(
-            family=[DEFAULT_FONT_FAMILY], size=clamped_font_size(width, 1.0)
-        ),
-        axis_ticks_major=element_line(
-            size=(width), color="black"
-        ),  # Increased tick length
-        title=element_text(
-            size=clamped_font_size(width, 1.2, MIN_TITLE_SIZE),
-            family=[DEFAULT_FONT_FAMILY],
-            alpha=0,
-        ),
-        axis_title_x=element_text(
-            size=clamped_font_size(width, 1.2),
-            family=[DEFAULT_FONT_FAMILY],
-        ),
-        strip_background=element_blank(),  # Remove facet strip background
-        strip_text=element_text(
-            size=clamped_font_size(width, 1.2), family=[DEFAULT_FONT_FAMILY]
-        ),  # Customize facet label text size (optional)
+    return _build_full_figure(
+        sdf=sdf,
+        name_x=title_name,
+        name_y=title_name,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        custom_colors=colors,
+        axes_labels=breaks,
+        xlim=xlim,
+        deraster=deraster,
+        width=width,
+        is_pairwise=not on_diagonal,
     )
-
-    # Construct the plot arguments
-    ggplot_args = (
-        ggplot(sdf)
-        + scale_color_discrete(guide=None)
-        + scale_fill_manual(values=new_hexcodes, guide=None)
-        + common_theme
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + coord_fixed(ratio=1)
-        + labs(x="", y="", title="")
-    )
-
-    p = ggplot_args + _dotplot_tiles(
-        aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-        deraster,
-    )
-
-    return p
 
 
 def direction_dataframe(
@@ -868,12 +578,8 @@ def direction_dataframe(
     x_offset=0,
     y_offset=0,
 ):
-    """Build plotting records that distinguish forward and reverse matches.
+    """Build plotting records that distinguish forward and reverse matches."""
 
-    Canonical k-mers match in either orientation, while forward-only k-mers
-    match only same-strand sequence.  A canonical hit missing from the
-    forward-only matrix therefore represents a reverse-orientation match.
-    """
     canonical_matrix = np.asarray(canonical_matrix, dtype=float)
     forward_matrix = np.asarray(forward_matrix, dtype=float)
     if canonical_matrix.shape != forward_matrix.shape:
@@ -927,6 +633,7 @@ def create_direction_plot(
     y_offset=0,
 ):
     """Save a blue/pink plot showing match orientation."""
+
     dataframe = direction_dataframe(
         canonical_matrix,
         forward_matrix,
@@ -941,10 +648,6 @@ def create_direction_plot(
         print(f"No directional matches found for {name_x} and {name_y}. Skipping.\n")
         return None
 
-    dataframe = dataframe.assign(
-        q_position=dataframe["q_st"] + window_size / 2,
-        r_position=dataframe["r_st"] + window_size / 2,
-    )
     requested_bounds = _requested_axis_bounds(xlim)
     if requested_bounds is not None:
         min_val, max_val = requested_bounds
@@ -966,81 +669,59 @@ def create_direction_plot(
         else f"Direction Plot: {display_sequence_name(name_x)} vs "
         f"{display_sequence_name(name_y)}"
     )
-    plot = (
-        ggplot(dataframe)
-        + _dotplot_tiles(
-            aes(
-                x="q_position",
-                y="r_position",
-                fill="direction",
-                height=window_size,
-                width=window_size,
-            ),
-            deraster,
-        )
-        + scale_fill_manual(
-            values={"Forward": "#2166AC", "Reverse": "#D01C8B"},
-            name="Direction",
-        )
-        + scale_x_continuous(
-            labels=make_scale, limits=[min_val, max_val], breaks=breaks
-        )
-        + scale_y_continuous(
-            labels=make_scale, limits=[min_val, max_val], breaks=breaks
-        )
-        + coord_fixed(ratio=1)
-        + labs(
-            x="Genomic Position",
-            y="",
-            title=title,
-            caption="Blue: forward   Pink: reverse",
-        )
-        + theme_light()
-        + theme(
-            legend_position="none",
-            panel_grid_major=element_blank(),
-            panel_grid_minor=element_blank(),
-            axis_text=element_text(
-                family=[DEFAULT_FONT_FAMILY],
-                size=clamped_font_size(width, 1.0),
-            ),
-            title=element_text(
-                family=[DEFAULT_FONT_FAMILY],
-                size=clamped_font_size(width, 1.4, MIN_TITLE_SIZE),
-                hjust=0.5,
-            ),
-            axis_title_x=element_text(
-                size=clamped_font_size(width, 1.2),
-                family=[DEFAULT_FONT_FAMILY],
-            ),
-        )
-    )
 
-    os.makedirs(directory, exist_ok=True)
-    filename = (
-        f"{name_x}_DIRECTION" if self_identity else f"{name_x}_{name_y}_DIRECTION"
-    )
-    prefix = os.path.join(directory, filename)
-    _save_plot(
-        plot,
-        width=width,
-        height=width,
-        dpi=dpi,
-        format=vector_format,
-        filename=f"{prefix}.{vector_format}",
-        verbose=False,
-    )
-    _save_plot(
-        plot,
-        width=width,
-        height=width,
-        dpi=dpi,
-        format="png",
-        filename=f"{prefix}.png",
-        verbose=False,
-    )
+    render_data = dataframe.copy()
+    render_data["q_en"] = render_data["q_st"] + window_size
+    render_data["r_en"] = render_data["r_st"] + window_size
+    figure, axis = plt.subplots(figsize=(float(width), float(width)))
+    try:
+        draw_rectangular_tiles(
+            axis,
+            render_data,
+            DIRECTION_COLORS,
+            color_column="direction",
+            rasterized=not deraster,
+        )
+        configure_dotplot_axis(axis, min_val, max_val, breaks=breaks)
+        axis.set_xlabel(
+            "Genomic Position",
+            fontsize=clamped_font_size(width, 1.2),
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
+        axis.set_title(
+            title,
+            fontsize=clamped_font_size(width, 1.4, MIN_TITLE_SIZE),
+            fontfamily=DEFAULT_FONT_FAMILY,
+        )
+        axis.grid(False)
+        figure.text(
+            0.5,
+            0.02,
+            "Blue: forward   Pink: reverse",
+            ha="center",
+            fontfamily=DEFAULT_FONT_FAMILY,
+            fontsize=clamped_font_size(width, 0.9),
+        )
+        figure.subplots_adjust(left=0.16, right=0.96, bottom=0.18, top=0.88)
+        set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
+
+        os.makedirs(directory, exist_ok=True)
+        filename = (
+            f"{name_x}_DIRECTION" if self_identity else f"{name_x}_{name_y}_DIRECTION"
+        )
+        prefix = os.path.join(directory, filename)
+        save_figure_pair(
+            figure,
+            prefix,
+            vector_format,
+            dpi,
+            bbox_inches=figure.bbox_inches,
+        )
+    finally:
+        plt.close(figure)
+
     print(f"Direction plots saved to {prefix}.png and {prefix}.{vector_format}.\n")
-    return plot
+    return figure
 
 
 def make_dot_final(
@@ -1054,143 +735,49 @@ def make_dot_final(
     transpose=False,
     deraster=False,
 ):
-    if sdf.empty:
-        max_val = xlim or 1
-        if not breaks:
-            breaks = generate_breaks(0, int(max_val))
-        else:
-            breaks = [int(x) for x in breaks]
-        return (
-            ggplot(sdf)
-            + geom_blank()
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + coord_fixed(ratio=1)
-            + labs(x=None, y=None, title=None)
-            + theme(
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(
-                    family=[DEFAULT_FONT_FAMILY],
-                    size=clamped_font_size(width, 1.0),
-                ),
-                axis_ticks_major=element_line(),
-                axis_title_x=element_blank(),
-                axis_title_y=element_blank(),
-            )
+    """Build a single grid-style dotplot panel."""
+
+    dataframe = sdf.copy()
+    if transpose:
+        dataframe = dataframe.rename(
+            columns={
+                "q": "_r",
+                "q_st": "_r_st",
+                "q_en": "_r_en",
+                "r": "q",
+                "r_st": "q_st",
+                "r_en": "q_en",
+            }
+        ).rename(
+            columns={
+                "_r": "r",
+                "_r_st": "r_st",
+                "_r_en": "r_en",
+            }
         )
-
-    if hasattr(diverging, palette):
-        function_name = getattr(diverging, palette)
-    elif hasattr(qualitative, palette):
-        function_name = getattr(qualitative, palette)
-    elif hasattr(sequential, palette):
-        function_name = getattr(sequential, palette)
-    else:
-        function_name = diverging.Spectral_11  # Default palette
-        palette_orientation = "-"
-
-    hexcodes = function_name.hex_colors
-
-    # Adjust palette orientation
-    if palette in diverging.__dict__:
-        palette_orientation = "-" if palette_orientation == "+" else "+"
-
-    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
-    if colors:
-        new_hexcodes = colors  # Override colors if provided
-    if not xlim:
-        xlim = 0
-    # Determine maximum genomic position for scaling
-    min_val = min(sdf["q_st"].min(), sdf["r_st"].min())
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-
-    # If user provides breaks, convert to ints
-    if not breaks:
-        breaks = generate_breaks(int(min_val), int(max_val))
-    else:
-        breaks = [int(x) for x in breaks]
-    xlim = xlim or 0
-
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-    try:
-        window = max(sdf["q_en"] - sdf["q_st"])
-    except:
-        p = (
-            ggplot(aes(x=[], y=[]))
-            + theme_minimal()
-            + theme(
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-            )
-        )
-        return p
-
-    x_col, y_col = ("r_st", "q_st") if transpose else ("q_st", "r_st")
-
-    if deraster:
-        p = (
-            ggplot(sdf)
-            + _dotplot_tiles(
-                aes(x=x_col, y=y_col, fill="discrete", height=window, width=window),
-                deraster,
-            )
-            + scale_color_discrete(guide=None)
-            + scale_fill_manual(values=new_hexcodes, guide=None)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(
-                    family=[DEFAULT_FONT_FAMILY],
-                    size=clamped_font_size(width, 1.0),
-                ),
-                axis_ticks_major=element_line(),
-                title=element_text(family=[DEFAULT_FONT_FAMILY]),
-            )
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + coord_fixed(ratio=1)
-            + labs(x=None, y=None, title=None)
-        )
-    else:
-        p = (
-            ggplot(sdf)
-            + _dotplot_tiles(
-                aes(x=x_col, y=y_col, fill="discrete", height=window, width=window),
-                deraster,
-            )
-            + scale_color_discrete(guide=None)
-            + scale_fill_manual(values=new_hexcodes, guide=None)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(
-                    family=[DEFAULT_FONT_FAMILY],
-                    size=clamped_font_size(width, 1.0),
-                ),
-                axis_ticks_major=element_line(),
-                title=element_text(family=[DEFAULT_FONT_FAMILY]),
-            )
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + coord_fixed(ratio=1)
-            + labs(x=None, y=None, title=None)
-        )
-
-    p += theme(axis_title_x=element_blank(), axis_title_y=element_blank())
-
-    return p
+    name_x = (
+        display_sequence_name(dataframe["q"].iloc[0])
+        if not dataframe.empty and "q" in dataframe
+        else ""
+    )
+    name_y = (
+        display_sequence_name(dataframe["r"].iloc[0])
+        if not dataframe.empty and "r" in dataframe
+        else name_x
+    )
+    return _build_full_figure(
+        sdf=dataframe,
+        name_x=name_x,
+        name_y=name_y,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        custom_colors=colors,
+        axes_labels=breaks,
+        xlim=xlim,
+        deraster=deraster,
+        width=width,
+        is_pairwise=True,
+    )
 
 
 def make_tri(
@@ -1205,356 +792,79 @@ def make_tri(
     deraster,
     width,
 ):
-    title_name = display_sequence_name(title_name)
-    # Select the color palette
-    if hasattr(diverging, palette):
-        function_name = getattr(diverging, palette)
-    elif hasattr(qualitative, palette):
-        function_name = getattr(qualitative, palette)
-    elif hasattr(sequential, palette):
-        function_name = getattr(sequential, palette)
-    else:
-        function_name = diverging.Spectral_11  # Default palette
-        palette_orientation = "-"
+    """Build a native Matplotlib triangle plot and return its main axis."""
 
-    hexcodes = function_name.hex_colors
-
-    # Adjust palette orientation
-    if palette in diverging.__dict__:
-        palette_orientation = "-" if palette_orientation == "+" else "+"
-
-    new_hexcodes = hexcodes[::-1] if palette_orientation == "-" else hexcodes
-    if colors:
-        new_hexcodes = colors  # Override colors if provided
-    if not xlim:
-        xlim = 0
-    # Determine maximum genomic position for scaling
-    min_val = max(sdf["q_st"].min(), sdf["r_st"].min())
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-
-    # If user provides breaks, convert to ints
-    if not breaks:
-        breaks = generate_breaks(int(min_val), int(max_val))
-    else:
-        breaks = [int(x) for x in breaks]
-    xlim = xlim or 0
-    # Compute window size (handling exceptions)
-    try:
-        window = max(sdf["q_en"] - sdf["q_st"])
-    except ValueError:  # Empty dataframe case
-        return ggplot(aes(x=[], y=[])) + theme_minimal()
-
-    # Determine axis label scale based on genomic position size
-    if max_val < 200_000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 200_000_000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-
-    if not deraster:
-        tri = (
-            ggplot(sdf)
-            + _dotplot_tiles(
-                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-                deraster,
-                alpha=1.0,
-            )  # Ensure full opacity
-            + scale_fill_manual(values=new_hexcodes, guide=None)
-            + scale_color_discrete(guide=None)
-            + scale_x_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + scale_y_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + coord_fixed(ratio=1)
-            + labs(x=x_label, y="", title=title_name)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_text=element_text(
-                    family=[DEFAULT_FONT_FAMILY],
-                    size=clamped_font_size(width, 1.0),
-                ),
-                axis_line_x=element_line(),
-                axis_line_y=element_blank(),
-                axis_ticks_major_x=element_line(),
-                axis_ticks_major_y=element_blank(),
-                axis_ticks_major=element_line(size=(width)),
-                title=element_text(
-                    family=[DEFAULT_FONT_FAMILY],
-                    size=clamped_font_size(width, 1.4, MIN_TITLE_SIZE),
-                    hjust=0.5,
-                ),
-                axis_title_x=element_text(
-                    size=clamped_font_size(width, 1.4),
-                    family=[DEFAULT_FONT_FAMILY],
-                ),
-                axis_text_y=element_blank(),
-            )
-        )
-        axis = (
-            ggplot(sdf)
-            + geom_tile(
-                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-                alpha=0,
-            )
-            + scale_color_discrete(guide=None)
-            + scale_fill_manual(values=new_hexcodes, guide=None)
-            + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-            + coord_fixed(ratio=1)
-            + labs(x="", y="", title=title_name)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(
-                    family=[DEFAULT_FONT_FAMILY],
-                    size=clamped_font_size(width, 1.0),
-                ),
-                axis_ticks_major=element_line(),
-                axis_line_x=element_line(),
-                axis_line_y=element_blank(),
-                axis_ticks_major_x=element_line(),
-                axis_ticks_major_y=element_blank(),
-                axis_text_x=element_line(),
-                axis_text_y=element_blank(),
-                plot_title=element_blank(),
-                axis_title_x=element_text(
-                    size=clamped_font_size(width, 1.2),
-                    family=[DEFAULT_FONT_FAMILY],
-                ),
-            )
-        )
-    else:
-        tri = (
-            ggplot(sdf)
-            + _dotplot_tiles(
-                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-                deraster,
-                alpha=1.0,
-            )  # Ensure full opacity
-            + scale_fill_manual(values=new_hexcodes, guide=None)
-            + scale_color_discrete(guide=None)
-            + scale_x_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + scale_y_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + coord_fixed(ratio=1)
-            + labs(x=x_label, y="", title=title_name)
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_text=element_text(
-                    family=[DEFAULT_FONT_FAMILY],
-                    size=clamped_font_size(width, 1.0),
-                ),
-                axis_line_x=element_line(),
-                axis_line_y=element_blank(),
-                axis_ticks_major_x=element_line(),
-                axis_ticks_major_y=element_blank(),
-                axis_ticks_major=element_line(),
-                axis_text_y=element_blank(),
-                title=element_blank(),
-                axis_title_x=element_text(
-                    size=clamped_font_size(width, 1.2),
-                    family=[DEFAULT_FONT_FAMILY],
-                ),
-            )
-        )
-        axis = (
-            ggplot(sdf)
-            + geom_tile(
-                aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-                alpha=0,
-            )
-            + scale_color_discrete(guide=None)
-            + scale_fill_manual(values=new_hexcodes, guide=None)
-            + scale_x_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + scale_y_continuous(
-                labels=make_scale, limits=[min_val, max_val], breaks=breaks
-            )
-            + coord_fixed(ratio=1)
-            + labs(x="", y="", title="")
-            + theme(
-                legend_position="none",
-                panel_grid_major=element_blank(),
-                panel_grid_minor=element_blank(),
-                plot_background=element_blank(),
-                panel_background=element_blank(),
-                axis_line=element_line(color="black"),
-                axis_text=element_text(family=[DEFAULT_FONT_FAMILY]),
-                axis_ticks_major=element_line(),
-                axis_line_x=element_line(),
-                axis_line_y=element_blank(),
-                axis_ticks_major_x=element_line(),
-                axis_ticks_major_y=element_blank(),
-                axis_text_x=element_line(),
-                axis_text_y=element_blank(),
-                plot_title=element_blank(),
-                axis_title_x=element_text(
-                    size=clamped_font_size(width, 1.2),
-                    family=[DEFAULT_FONT_FAMILY],
-                ),
-            )
-        )
-
-    return tri, axis
-
-
-def make_tri_axis(sdf, title_name, palette, palette_orientation, colors, breaks, xlim):
-    title_name = display_sequence_name(title_name)
-    if not breaks:
-        breaks = True
-    else:
-        breaks = [float(number) for number in breaks]
-    if not xlim:
-        xlim = 0
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
-        function_name = getattr(sequential, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
-
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
-    else:
-        new_hexcodes = hexcodes
-    if colors:
-        new_hexcodes = colors
-    max_val = max(sdf["q_en"].max(), sdf["r_en"].max(), xlim)
-    window = max(sdf["q_en"] - sdf["q_st"])
-    if max_val < 100000:
-        x_label = "Genomic Position (Kbp)"
-    elif max_val < 100000000:
-        x_label = "Genomic Position (Mbp)"
-    else:
-        x_label = "Genomic Position (Gbp)"
-    p = (
-        ggplot(sdf)
-        + geom_tile(
-            aes(x="q_st", y="r_st", fill="discrete", height=window, width=window),
-            alpha=0,
-        )
-        + scale_color_discrete(guide=None)
-        + scale_fill_manual(
-            values=new_hexcodes,
-            guide=None,
-        )
-        + theme(
-            legend_position="none",
-            panel_grid_major=element_blank(),
-            panel_grid_minor=element_blank(),
-            plot_background=element_blank(),
-            panel_background=element_blank(),
-            axis_line=element_line(color="black"),  # Adjust axis line size
-            axis_text=element_text(
-                family=[DEFAULT_FONT_FAMILY]
-            ),  # Change axis text font and size
-            axis_ticks_major=element_line(),
-            axis_line_x=element_line(),  # Keep the x-axis line
-            axis_line_y=element_blank(),  # Remove the y-axis line
-            axis_ticks_major_x=element_line(),  # Keep x-axis ticks
-            axis_ticks_major_y=element_blank(),  # Remove y-axis ticks
-            axis_text_x=element_line(),  # Keep x-axis text
-            axis_text_y=element_blank(),
-            plot_title=element_blank(),
-        )
-        + scale_x_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + scale_y_continuous(labels=make_scale, limits=[0, max_val], breaks=breaks)
-        + coord_fixed(ratio=1)
-        + labs(x="", y="", title=title_name)
+    del num_ticks
+    figure = _build_triangle_figure(
+        sdf=sdf,
+        title=title_name,
+        palette=palette,
+        palette_orientation=palette_orientation,
+        custom_colors=colors,
+        axes_labels=breaks,
+        xlim=xlim,
+        deraster=deraster,
+        width=width,
     )
-
-    # Adjust x-axis label size
-    p += theme(axis_title_x=element_text())
-
-    return p
+    return figure, figure.axes[0]
 
 
 def make_hist(sdf, palette, palette_orientation, custom_colors, custom_breakpoints):
-    hexcodes = []
-    new_hexcodes = []
-    if palette in DIVERGING_PALETTES:
-        function_name = getattr(diverging, palette)
-        hexcodes = function_name.hex_colors
-        if palette_orientation == "+":
-            palette_orientation = "-"
-        else:
-            palette_orientation = "+"
-    elif palette in QUALITATIVE_PALETTES:
-        function_name = getattr(qualitative, palette)
-        hexcodes = function_name.hex_colors
-    elif palette in SEQUENTIAL_PALETTES:
-        function_name = getattr(sequential, palette)
-        hexcodes = function_name.hex_colors
-    else:
-        function_name = getattr(diverging, "Spectral_11")
-        palette_orientation = "-"
-        hexcodes = function_name.hex_colors
+    """Build the identity histogram with native Matplotlib."""
 
-    if palette_orientation == "-":
-        new_hexcodes = hexcodes[::-1]
-    else:
-        new_hexcodes = hexcodes
-
-    if custom_colors:
-        new_hexcodes = custom_colors
+    del custom_breakpoints
+    colors = _resolve_native_colors(palette, palette_orientation, custom_colors)
     try:
-        bot = np.quantile(sdf["perID_by_events"], q=0.001)
-    except IndexError:
-        bot = 0
-    count = sdf.shape[0]
-    extra = ""
+        lower_bound = float(np.quantile(sdf["perID_by_events"], q=0.001))
+    except (IndexError, ValueError):
+        lower_bound = 0.0
 
-    if count > 1e6:
-        extra = "\n(thousands)"
-
-    sdf, direction_colors, direction_column = _direction_ani_style(sdf)
+    dataframe, direction_colors, direction_column = _direction_ani_style(sdf)
     fill_column = direction_column or "discrete"
-    fill_colors = direction_colors or new_hexcodes
-    p = (
-        ggplot(data=sdf, mapping=aes(x="perID_by_events", fill=fill_column))
-        + geom_histogram(bins=300)
-        + scale_color_cmap(cmap_name="plasma")
-        + scale_fill_manual(fill_colors)
-        + theme_light()
-        + _plot_font_theme()
-        + theme(legend_position="none")
-        + coord_cartesian(xlim=(bot, 100))
-        + xlab("% Identity Estimate")
-        + ylab("# of Estimates{}".format(extra))
+    fill_colors = direction_colors or colors
+    categories = (
+        list(dataframe[fill_column].cat.categories)
+        if isinstance(dataframe[fill_column].dtype, pd.CategoricalDtype)
+        else list(pd.unique(dataframe[fill_column].dropna()))
     )
-    return p
+
+    samples = []
+    sample_colors = []
+    for index, category in enumerate(categories):
+        values = dataframe.loc[
+            dataframe[fill_column] == category, "perID_by_events"
+        ].dropna()
+        if values.empty:
+            continue
+        samples.append(values.to_numpy())
+        if isinstance(fill_colors, dict):
+            sample_colors.append(fill_colors[category])
+        else:
+            sample_colors.append(fill_colors[index % len(fill_colors)])
+
+    figure, axis = plt.subplots(figsize=(3.0, 3.0))
+    try:
+        if samples:
+            axis.hist(
+                samples,
+                bins=300,
+                range=(lower_bound, 100.0),
+                stacked=True,
+                color=sample_colors,
+            )
+        axis.set_xlim(lower_bound, 100.0)
+        axis.set_xlabel("% Identity Estimate")
+        suffix = "\n(thousands)" if dataframe.shape[0] > 1e6 else ""
+        axis.set_ylabel(f"# of Estimates{suffix}")
+        axis.grid(False)
+        for spine in axis.spines.values():
+            spine.set_color("#BDBDBD")
+        set_figure_font_family(figure, DEFAULT_FONT_FAMILY)
+        figure.tight_layout()
+    except Exception:
+        plt.close(figure)
+        raise
+    return figure
 
 
 def _missing_symmetric_rows(dataframe):
@@ -2247,9 +1557,11 @@ def create_plots(
     if is_pairwise:
         plot_filename = os.path.join(directory, f"{name_x}_{name_y}")
 
-    histy = make_hist(
-        sdf, palette, palette_orientation, custom_colors, custom_breakpoints
-    )
+    histy = None
+    if not no_hist:
+        histy = make_hist(
+            sdf, palette, palette_orientation, custom_colors, custom_breakpoints
+        )
 
     annotation_track_created = False
     annotation_bed_df = None

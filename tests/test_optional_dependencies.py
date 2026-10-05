@@ -9,7 +9,8 @@ import moddotplot.moddotplot as cli
 from moddotplot.estimate_identity import convertMatrixToCool, require_cooler_dependency
 from moddotplot.optional_dependencies import OptionalDependencyError
 
-INSTALL_HINT = 'python -m pip install "ModDotPlot[interactive]"'
+INTERACTIVE_INSTALL_HINT = 'python -m pip install "ModDotPlot[interactive]"'
+COOLER_INSTALL_HINT = 'python -m pip install "ModDotPlot[cooler]"'
 
 
 def _block_import(monkeypatch, missing_package):
@@ -27,14 +28,14 @@ def _block_import(monkeypatch, missing_package):
     monkeypatch.setattr(builtins, "__import__", import_without_optional_package)
 
 
-def test_missing_cooler_reports_the_interactive_extra_install_command(monkeypatch):
+def test_missing_cooler_reports_the_cooler_extra_install_command(monkeypatch):
     _block_import(monkeypatch, "cooler")
 
     with pytest.raises(OptionalDependencyError) as exc_info:
         require_cooler_dependency()
 
     assert "Cooler export requires" in str(exc_info.value)
-    assert INSTALL_HINT in str(exc_info.value)
+    assert COOLER_INSTALL_HINT in str(exc_info.value)
     assert isinstance(exc_info.value.__cause__, ModuleNotFoundError)
 
 
@@ -48,7 +49,7 @@ def test_missing_interactive_package_reports_the_extra_install_command(
         interactive.require_interactive_dependencies()
 
     assert "Interactive mode requires" in str(exc_info.value)
-    assert INSTALL_HINT in str(exc_info.value)
+    assert INTERACTIVE_INSTALL_HINT in str(exc_info.value)
     assert isinstance(exc_info.value.__cause__, ModuleNotFoundError)
 
 
@@ -74,7 +75,7 @@ def test_static_cooler_request_exits_with_actionable_error(monkeypatch, capsys):
         cli.main()
 
     assert exc_info.value.code == 2
-    assert INSTALL_HINT in capsys.readouterr().err
+    assert COOLER_INSTALL_HINT in capsys.readouterr().err
 
 
 def test_cooler_extra_writes_a_readable_comparative_matrix(tmp_path):
@@ -117,4 +118,4 @@ def test_interactive_request_exits_with_actionable_error(monkeypatch, capsys):
         cli.main()
 
     assert exc_info.value.code == 2
-    assert INSTALL_HINT in capsys.readouterr().err
+    assert INTERACTIVE_INSTALL_HINT in capsys.readouterr().err

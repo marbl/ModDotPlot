@@ -77,7 +77,7 @@ jobs:
       - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install --editable ".[test,interactive]"
+          python -m pip install --editable ".[test,interactive,cooler]"
 
       - name: Run unit and integration tests
         run: >-

@@ -42,7 +42,7 @@ jobs:
       - name: Install package and tests
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[test,interactive]"
+          python -m pip install ".[test,interactive,cooler]"
 
       - name: Run the release test suite
         run: python -m pytest

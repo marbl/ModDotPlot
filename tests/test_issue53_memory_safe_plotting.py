@@ -1,6 +1,5 @@
 import matplotlib.pyplot as plt
 import pandas as pd
-from plotnine.geoms.geom_tile import geom_tile
 
 from moddotplot.static_plots import make_dot, make_dot_final, make_dot_grid, make_tri
 
@@ -11,7 +10,7 @@ WINDOW_SIZE = 2_000
 def _large_sparse_dotplot_data():
     # The adjacent first two coordinates establish a 2 kb resolution while the
     # final coordinate establishes the ~496 Mb extent from issue #53.  A
-    # geom_raster layer would try to allocate about 248,000**2 RGBA pixels.
+    # A coordinate-sized raster would allocate about 248,000**2 RGBA pixels.
     starts = [0, WINDOW_SIZE, GENOME_SIZE - WINDOW_SIZE]
     return pd.DataFrame(
         {
@@ -43,34 +42,30 @@ def _make_full_plot(data, deraster=False):
     )
 
 
-def _assert_tile_layer(plot, rasterized):
-    layer = plot.layers[0]
-    assert isinstance(layer.geom, geom_tile)
-    assert layer.geom._kwargs["raster"] is rasterized
+def _assert_tile_collection(figure, rasterized):
+    axis = figure.axes[0]
+    assert not axis.images
+    assert axis.collections
+    assert axis.collections[0].get_rasterized() is rasterized
 
 
 def test_large_sparse_plot_does_not_build_coordinate_sized_raster():
-    plot = _make_full_plot(_large_sparse_dotplot_data())
+    figure = _make_full_plot(_large_sparse_dotplot_data())
 
-    _assert_tile_layer(plot, rasterized=True)
-    figure = plot.draw(show=False)
     try:
+        _assert_tile_collection(figure, rasterized=True)
         axis = figure.axes[0]
-        assert not axis.images
         assert len(axis.collections) == 1
-        assert axis.collections[0].get_rasterized() is True
         assert len(axis.collections[0].get_paths()) == 3
     finally:
         plt.close(figure)
 
 
 def test_deraster_keeps_memory_safe_tiles_as_vectors():
-    plot = _make_full_plot(_large_sparse_dotplot_data(), deraster=True)
+    figure = _make_full_plot(_large_sparse_dotplot_data(), deraster=True)
 
-    _assert_tile_layer(plot, rasterized=False)
-    figure = plot.draw(show=False)
     try:
-        assert figure.axes[0].collections[0].get_rasterized() is False
+        _assert_tile_collection(figure, rasterized=False)
     finally:
         plt.close(figure)
 
@@ -100,5 +95,8 @@ def test_grid_and_triangle_paths_use_the_same_memory_safe_geometry():
         num_ticks=3,
     )
 
-    for plot in (grid_cell, grid_plot, triangle):
-        _assert_tile_layer(plot, rasterized=True)
+    for figure in (grid_cell, grid_plot, triangle):
+        try:
+            _assert_tile_collection(figure, rasterized=True)
+        finally:
+            plt.close(figure)

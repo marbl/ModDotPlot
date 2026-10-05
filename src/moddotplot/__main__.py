@@ -5,11 +5,8 @@ import sys
 
 
 def _run(arguments):
-    import setproctitle
-
     from moddotplot.moddotplot import main as run_moddotplot
 
-    setproctitle.setproctitle("ModDotPlot")
     return run_moddotplot(arguments)
 
 

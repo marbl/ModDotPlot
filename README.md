@@ -37,12 +37,6 @@ If you use ModDotPlot for your research, please cite our software!
 
 _ModDotPlot_ is a dot plot visualization tool designed to be used at scale, both for smaller sequences and whole genomes. _ModDotPlot_ is the spiritual successor to [StainedGlass](https://mrvollger.github.io/StainedGlass/). The core algorithm breaks an input sequence down into intervals of sketched *k*-mers called **mod**imizers. This enables the rapid approximation of the Average Nucleotide Identity between combinations of intervals! 
 
-Version 1.0.0 uses a bundled [ntHash2](https://github.com/BirolLab/ntHash) implementation for k-mer hashing, replacing the previous `mmh3` runtime dependency. Hash values and exact sketches therefore differ from pre-1.0 releases; regenerate data instead of mixing sketches produced by the two algorithms. Previously saved interactive matrices remain loadable because they contain completed matrices rather than raw hashes.
-
-FASTA parsing and static BED annotation rendering are also built into ModDotPlot in version 1.0.0, replacing the previous `pysam` and `pyGenomeTracks` runtime dependencies. Plain FASTA, gzip-compressed FASTA, and BGZF-compressed FASTA inputs remain supported, and static annotations produce both PNG and the selected SVG, PDF, or PostScript vector format.
-
-Static triangle plots, annotation layouts, and multi-sequence grids are now composed directly with Matplotlib. This replaces the previous `CairoSVG`, `svgutils`, and `patchworklib` image-conversion and SVG-composition dependencies while retaining raster and vector output formats.
-
 ![](images/demo.gif)
 
 If you're interested in learning more about _ModDotPlot_ and how to visualize tandem repeats, we have an in-depth [YouTube video tutorial](https://www.youtube.com/watch?v=_7sQaljB_ys&t=2321s&pp=ygUXYWxleCBzd2VldGVuIG1vZGRvdHBsb3Q%3D) hosted by the [BioDiversity Genomics Academy](https://thebgacademy.org).
@@ -51,7 +45,7 @@ If you're interested in learning more about _ModDotPlot_ and how to visualize ta
 
 ## Installation
 
-_ModDotPlot_ can be installed for static plotting by running `pip install moddotplot`. Interactive plotting and Cooler export use optional dependencies; install them with `pip install "ModDotPlot[interactive]"`. ModDotPlot supports Python 3.10 through 3.14, using Matplotlib 3.10.9 or newer on Python 3.10, Matplotlib 3.11.2 or newer on later Python versions, and the Plotnine 0.15 release line. Alternatively, you can download the current release from GitHub by using:
+_ModDotPlot_ can be installed for static plotting by running `pip install moddotplot`. Alternatively, you can download the current release from GitHub by using:
 
 ```
 git clone https://github.com/marbl/ModDotPlot.git
@@ -121,7 +115,7 @@ moddotplot static -f sequence.fa <ARGS>
 moddotplot static <ARGS>
 ```
 
-Running _ModDotPlot_ in static mode quickly create plots under the specified output directory `-o`. By default, running _ModDotPlot_ in static mode this will produce the following files:
+Running _ModDotPlot_ quickly create plots under the specified output directory `-o`. By default, running _ModDotPlot_ will produce the following files:
 
 - A paired-end bed file `.bedpe`, containing intervals alongside their corresponding identity estimates.
 - A self-identity dotplot for each sequence, as both an upper triangle matrix `_TRI` and full matrix `_FULL` representation.
@@ -129,14 +123,18 @@ Running _ModDotPlot_ in static mode quickly create plots under the specified out
 
 ![](images/moddotplot_output.png)
 
-Plots and histograms are output as both rasterized `.png` images and vector graphics (default: `.svg`). [Plotnine](https://plotnine.org/) provides the primary plotting interface, while Matplotlib directly renders triangle plots, annotation layouts, multi-sequence grids, and each requested output format. Grid axes state their genomic unit (Kbp, Mbp, or Gbp). Plot text uses Helvetica by default with an automatic DejaVu Sans fallback if Helvetica cannot render a glyph.
+Plots and histograms are rendered with Matplotlib and output as both rasterized
+`.png` images and vector graphics (default: `.svg`). Grid axes state their
+genomic unit (Kbp, Mbp, or Gbp).
 
 Every directory containing generated static plots also receives a `plot_summary.txt` reproducibility record. It lists the creation time, absolute plot and input paths, window size, any selected region or annotation BED file, and the exact command used for the run.
 
-_ModDotPlot_ supports highly customizable plotting features in static mode. See [static mode commands](#static-mode-commands) for a complete list of features.
+_ModDotPlot_ supports highly customizable plotting features in static mode. See [plot customization](#static-mode-commands) for a complete list of features.
 
 
 ### Interactive Mode
+
+**As of ModDotPlot v1.0.0, interactive mode has been deprecated!**
 
 ```
 moddotplot interactive <ARGS>
@@ -246,7 +244,7 @@ genome.
 
 `--cooler <bool>`
 
-If set, will output a matrix as a Cooler file for each input sequence, in addition to a BEDPE file. Cooler support is part of the optional dependency set installed with `pip install "ModDotPlot[interactive]"` (or `pip install ".[interactive]"` from a source checkout).
+If set, will output a matrix as a Cooler file for each input sequence, in addition to a BEDPE file. Install Cooler support with `pip install "ModDotPlot[cooler]"` (or `pip install ".[cooler]"` from a source checkout).
 
 `--no-bedpe <bool>`
 
@@ -313,7 +311,10 @@ Plot only the requested 1-based, inclusive range for each named sequence. Syntax
 
 `--palette <str>`
 
-List of accepted palettes can be found [here](https://jiffyclub.github.io/palettable/colorbrewer/). Palettes are segregated into 3 types: _Diverging_, _Qualitative_, and _Sequential_. Syntax is the name of the palette, followed by an underscore and the number of colors, eg. `OrRd_8`. Default is  `Spectral_11`.
+The accepted palettes use [ColorBrewer](https://colorbrewer2.org/) color
+specifications and are segregated into 3 types: _Diverging_, _Qualitative_,
+and _Sequential_. Syntax is the name of the palette, followed by an underscore
+and the number of colors, for example `OrRd_8`. The default is `Spectral_11`.
 
 `--breakpoints <list of ints>`
 
@@ -588,6 +589,4 @@ For bug reports or general usage questions, please raise a GitHub issue, or emai
 
 ## Known Issues
 
-- Mac users might encounter the following unexpected command line output: `/bin/sh: lscpu: command not found`. This is a known issue with Plotnine, the Python plotting library used by ModDotPlot. This can be safely ignored.
-
-- When the optional `ModDotPlot[interactive]` dependencies are installed, Cooler may report `UserWarning: h5py is running against HDF5 1.xx.x when it was built against 1.xx.x, this may cause problems`. This can be safely ignored. To remove the warning, reinstall h5py against the local HDF5 library with `pip uninstall -y h5py` followed by `pip install --no-binary=h5py h5py`.
+- When the optional `ModDotPlot[cooler]` dependencies are installed, Cooler may report `UserWarning: h5py is running against HDF5 1.xx.x when it was built against 1.xx.x, this may cause problems`. This can be safely ignored. To remove the warning, reinstall h5py against the local HDF5 library with `pip uninstall -y h5py` followed by `pip install --no-binary=h5py h5py`.

@@ -10,9 +10,6 @@ dependencies = [
   "pandas",
   "matplotlib>=3.10.9; python_version < '3.11'",
   "matplotlib>=3.11.2; python_version >= '3.11'",
-  "plotnine>=0.15.8,<0.16",
-  "palettable",
-  "setproctitle",
   "numpy",
   "scipy",
 ]
@@ -41,9 +38,11 @@ moddotplot = "moddotplot.__main__:main"
 
 [project.optional-dependencies]
 interactive = [
-    "cooler",
     "dash>=2.9",
     "plotly",
+]
+cooler = [
+    "cooler",
 ]
 # development dependency groups
 test = [
