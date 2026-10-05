@@ -7,6 +7,7 @@
 - [Cite](#cite)
 - [About](#about)
 - [Installation](#installation)
+- [Dependencies](#dependencies)
 - [Usage](#usage)
   - [Command Line Arguments](#command-line-arguments)
     - [General Options](#general-options)
@@ -101,7 +102,37 @@ options:
 
 Note that running `moddotplot -h` might take a while at first! This is because the Python interpreter is compiling source code into the __pycache__ directory. Subsequent runs will use the pre-compiled code and load much faster!
 
---- 
+---
+
+## Dependencies
+
+_ModDotPlot_ requires Python 3.10 through 3.14 (`>=3.10,<3.15`). The base
+installation includes everything needed for static plotting. `pip` installs
+these required runtime dependencies automatically:
+
+| Dependency | Version requirement | Purpose |
+| --- | --- | --- |
+| [NumPy](https://numpy.org/) | No explicit minimum | Numerical arrays and matrix operations. |
+| [pandas](https://pandas.pydata.org/) | No explicit minimum | BEDPE and annotation table handling. |
+| [Matplotlib](https://matplotlib.org/) | `>=3.10.9` on Python 3.10; `>=3.11.2` on Python 3.11–3.14 | Static plot, grid, and histogram rendering. |
+| [SciPy](https://scipy.org/) | No explicit minimum | Numerical and statistical utilities. |
+
+Building from source also requires Setuptools 61 or newer. This build
+dependency is installed automatically by modern versions of `pip`.
+
+Optional dependencies are grouped by feature and are not needed for standard
+static plots:
+
+| Extra | Dependencies | Purpose | Installation |
+| --- | --- | --- | --- |
+| `interactive` | Dash `>=2.9`, Plotly | Deprecated interactive Dash application. | `python -m pip install "ModDotPlot[interactive]"` |
+| `cooler` | Cooler | Cooler matrix export with `--cooler`. | `python -m pip install "ModDotPlot[cooler]"` |
+| `test` | pytest, pytest-cov; tomli `>=1.1` on Python 3.10 | Development and test suite. | `python -m pip install ".[test]"` |
+
+From a source checkout, multiple extras can be installed together, for
+example: `python -m pip install ".[interactive,cooler,test]"`.
+
+---
 
 ## Usage
 
@@ -206,6 +237,7 @@ Flags such as `--grid` and `--no-plot` are switches and do not take a
 | `--breakpoints VALUE [VALUE ...]` | Supply custom identity thresholds between the identity cutoff and 100. The number of breakpoints must equal the number of colors plus one. |
 | `--bin-freq` | Derive identity color bins from the observed value distribution instead of evenly spacing them between the identity cutoff and 100. |
 | `--plot-direction` | Compute strand direction and color matches blue for the same orientation and pink for reverse orientation, with ANI represented by shade intensity. Available only with FASTA input. |
+
 ---
 
 ### Sample run - Static Plots
