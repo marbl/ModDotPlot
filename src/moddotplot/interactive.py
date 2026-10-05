@@ -230,7 +230,7 @@ def figure_to_bed(figure, default_identity=86.0):
     filename = f"{x_name}.bedpe" if self_identity else f"{x_name}-{y_name}.bedpe"
 
     rows = convertMatrixToBed(
-        matrix,
+        matrix.T,
         window_size,
         identity,
         x_name,
