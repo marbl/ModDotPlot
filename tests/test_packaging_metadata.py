@@ -194,7 +194,10 @@ def test_full_test_workflows_install_all_optional_test_dependencies():
     assert (
         'python -m pip install --editable ".[test,interactive,cooler]"' in ci_workflow
     )
-    assert 'python -m pip install ".[test,interactive,cooler]"' in release_workflow
+    assert (
+        'python -m pip install --editable ".[test,interactive,cooler]"'
+        in release_workflow
+    )
 
 
 def test_release_workflow_is_tag_gated_and_uses_trusted_publishing():
