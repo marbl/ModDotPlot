@@ -650,7 +650,7 @@ def _apply_static_config(args, config):
     else:
         args.fasta = config.get("fasta")
         args.load = config.get("load")
-    args.bed = config.get("bed")
+    args.bed = config.get("bed", args.bed)
 
     # Distance matrix commands
     args.kmer = config.get("kmer", args.kmer)

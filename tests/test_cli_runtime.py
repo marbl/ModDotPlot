@@ -490,6 +490,42 @@ def test_static_config_accepts_sequence_selection():
     assert args.sequence == ["chr1", "chr2"]
 
 
+def test_static_config_preserves_cli_bed_when_config_omits_bed():
+    args = cli.get_parser().parse_args(
+        [
+            "static",
+            "--config",
+            "plot.json",
+            "--fasta",
+            "sequence.fa",
+            "--bed",
+            "provided.bed",
+        ]
+    )
+
+    cli._apply_static_config(args, {"identity": 90})
+
+    assert args.bed == "provided.bed"
+
+
+def test_static_config_bed_overrides_cli_bed():
+    args = cli.get_parser().parse_args(
+        [
+            "static",
+            "--config",
+            "plot.json",
+            "--fasta",
+            "sequence.fa",
+            "--bed",
+            "provided.bed",
+        ]
+    )
+
+    cli._apply_static_config(args, {"bed": "configured.bed"})
+
+    assert args.bed == "configured.bed"
+
+
 def test_static_config_preserves_explicit_input_and_output_paths():
     args = cli.parse_args(
         [

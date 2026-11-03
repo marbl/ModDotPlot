@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use ModDotPlot in your research, please cite the article below."
 type: software
 title: "ModDotPlot"
-version: "1.0.0"
+version: "1.0.1"
 authors:
   - family-names: "Sweeten"
     given-names: "Alexander P."
