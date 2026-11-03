@@ -17,11 +17,30 @@ BED_COLUMNS = [
 ]
 
 
+def _ucsc_directive_rows(filepath):
+    """Return zero-based rows containing UCSC ``track`` or ``browser`` lines."""
+
+    rows = []
+    with open(filepath, "r", encoding="utf-8") as bed_file:
+        for line_number, line in enumerate(bed_file):
+            fields = line.lstrip().split(maxsplit=1)
+            if fields and fields[0] in {"track", "browser"}:
+                rows.append(line_number)
+    return rows
+
+
 def read_annotation_bed(filepath):
     """Read the BED3-BED9 subset used by ModDotPlot annotations."""
 
     try:
-        dataframe = pd.read_csv(filepath, sep="\t", comment="#", header=None, dtype=str)
+        dataframe = pd.read_csv(
+            filepath,
+            sep="\t",
+            comment="#",
+            header=None,
+            dtype=str,
+            skiprows=_ucsc_directive_rows(filepath),
+        )
     except pd.errors.EmptyDataError:
         return pd.DataFrame(columns=BED_COLUMNS[:3])
 

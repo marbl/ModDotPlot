@@ -51,6 +51,24 @@ def test_read_annotation_bed_accepts_bed3_through_bed9(
     assert dataframe.loc[0, "end"] == 20
 
 
+def test_read_annotation_bed_ignores_ucsc_directives(tmp_path):
+    bed_path = tmp_path / "annotations.bed"
+    bed_path.write_text(
+        'track name="annotations" visibility=2 itemRgb="On"\n'
+        "browser position chr1:1-100\n"
+        "# comment\n"
+        "chr1\t10\t20\tfeature\t0\t+\t10\t20\t12,34,56\n"
+    )
+
+    dataframe = read_annotation_bed(bed_path)
+
+    assert len(dataframe) == 1
+    assert dataframe.loc[0, "chrom"] == "chr1"
+    assert dataframe.loc[0, "start"] == 10
+    assert dataframe.loc[0, "end"] == 20
+    assert dataframe.loc[0, "itemRgb"] == "12,34,56"
+
+
 @pytest.mark.parametrize(
     "record",
     [

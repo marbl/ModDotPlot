@@ -84,7 +84,7 @@ Finally, confirm that the installation completed correctly and that your version
  | |  | | (_) | (_| | | |__| | (_) | |_  | |    | | (_) | |_ 
  |_|  |_|\___/ \__,_| |_____/ \___/ \__| |_|    |_|\___/ \__|
 
- v1.0.0
+ v1.0.1
 
 usage: moddotplot [-h] [--quiet] [{static,interactive}] ...
 
